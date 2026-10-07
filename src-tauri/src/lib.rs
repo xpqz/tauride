@@ -1,3 +1,4 @@
+mod dialog;
 mod net;
 mod proc;
 mod sync;
@@ -112,6 +113,8 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
     let mut parts = path.trim_start_matches('/').splitn(2, '/');
     match (parts.next(), parts.next()) {
         (Some("fs"), Some(op)) => sync::fs_op(op, args),
+        (Some("dialog"), Some("message")) => dialog::message(app, args),
+        (Some("dialog"), Some("file")) => dialog::file(app, args),
         (Some("win"), Some("alloc")) => Ok(Value::from(win::alloc())),
         (Some("win"), Some("get")) => win::get(app, args),
         (Some("winstate"), Some("get")) => Ok(app.state::<winstate::WinState>().get()),

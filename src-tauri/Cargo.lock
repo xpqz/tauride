@@ -2509,6 +2509,7 @@ name = "ride"
 version = "4.8.0"
 dependencies = [
  "base64 0.23.1",
+ "gtk",
  "if-addrs",
  "libc",
  "percent-encoding",

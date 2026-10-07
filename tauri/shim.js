@@ -641,10 +641,29 @@
   const workArea = () => ({ x: 0, y: 0, width: window.screen.availWidth, height: window.screen.availHeight });
   const display = () => ({ id: 0, bounds: workArea(), workArea: workArea(), scaleFactor: window.devicePixelRatio });
   const messageText = (o) => [o.title, o.message, o.detail].filter(Boolean).join('\n\n');
-  // Message boxes use the webview's synchronous alert/confirm/prompt.
-  const showMessageBoxSync = (w, o) => {
-    if (!o || w instanceof BrowserWindow) o = o || {};
-    if (!(w instanceof BrowserWindow) && w) o = w;
+  // Electron's dialog calls take an optional parent window first.
+  const dialogArgs = (w, o) => (w instanceof BrowserWindow ? [w, o || {}] : [null, w || {}]);
+  // Native dialogs (src-tauri/src/dialog.rs) run synchronously, as Electron's
+  // *Sync calls do; where they are unavailable, the webview's alert, confirm
+  // and prompt stand in.
+  const nativeMessageBox = (w, o) => {
+    const [win, opts] = dialogArgs(w, o);
+    try {
+      return sync('dialog/message', { ...opts, window: (win || BrowserWindow.fromId(currentId())).id });
+    } catch (e) {
+      return { response: fallbackMessageBox(opts), checkboxChecked: false };
+    }
+  };
+  const showMessageBoxSync = (w, o) => nativeMessageBox(w, o).response;
+  const nativeFileDialog = (w, o, save) => {
+    const [win, opts] = dialogArgs(w, o);
+    try {
+      return sync('dialog/file', { ...opts, save, window: (win || BrowserWindow.fromId(currentId())).id }) || undefined;
+    } catch (e) {
+      return pickPath(opts, save ? 'Save' : 'Open');
+    }
+  };
+  const fallbackMessageBox = (o) => {
     const buttons = o.buttons && o.buttons.length ? o.buttons : ['OK'];
     const text = messageText(o);
     if (buttons.length === 1) { window.alert(text); return 0; }
@@ -688,10 +707,18 @@
     screen: { getDisplayMatching: display, getDisplayNearestPoint: display, getPrimaryDisplay: display, getAllDisplays: () => [display()] },
     dialog: {
       showMessageBoxSync,
-      showMessageBox: (w, o) => Promise.resolve({ response: showMessageBoxSync(w, o), checkboxChecked: false }),
-      showErrorBox: (title, content) => window.alert(`${title}\n\n${content}`),
-      showOpenDialogSync: (w, o) => pickPath(w instanceof BrowserWindow ? o : w, 'Open'),
-      showSaveDialogSync: (w, o) => (pickPath(w instanceof BrowserWindow ? o : w, 'Save') || [])[0],
+      showMessageBox: (w, o) => Promise.resolve(nativeMessageBox(w, o)),
+      showErrorBox: (title, content) => nativeMessageBox({ type: 'error', title, message: title, detail: content }),
+      showOpenDialogSync: (w, o) => nativeFileDialog(w, o, false),
+      showOpenDialog: (w, o) => {
+        const filePaths = nativeFileDialog(w, o, false);
+        return Promise.resolve({ canceled: !filePaths, filePaths: filePaths || [] });
+      },
+      showSaveDialogSync: (w, o) => (nativeFileDialog(w, o, true) || [])[0],
+      showSaveDialog: (w, o) => {
+        const filePath = (nativeFileDialog(w, o, true) || [])[0];
+        return Promise.resolve({ canceled: !filePath, filePath });
+      },
     },
     app: {
       getPath: (n) => ({
