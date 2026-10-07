@@ -34,7 +34,8 @@ function copy(rel) {
   const st = fs.statSync(src);
   if (skip(rel, st.isDirectory())) return;
   if (st.isDirectory()) {
-    for (const name of fs.readdirSync(src)) copy(path.join(rel, name));
+    // rel stays /-separated on Windows too, for skip() and the vendor/ rewrite.
+    for (const name of fs.readdirSync(src)) copy(path.posix.join(rel, name));
   } else {
     const dst = path.join(out, rel.replace(/^node_modules\//, 'vendor/'));
     fs.mkdirSync(path.dirname(dst), { recursive: true });
