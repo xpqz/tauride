@@ -190,6 +190,7 @@ pub fn run() {
             win::win_create,
             win::win_call,
             net::net_connect,
+            net::net_connect_tls,
             net::net_write,
             net::net_end,
             net::net_listen,

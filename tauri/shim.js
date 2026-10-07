@@ -349,15 +349,19 @@
     }
     on(n, f) {
       super.on(n, f);
-      if (n === 'data' && this._held.length) {
-        const held = this._held;
-        this._held = [];
-        queueMicrotask(() => held.forEach((p) => this._event(p)));
-      }
+      if (n === 'data') this._flush();
       return this;
     }
+    // Held data goes out once the socket is connected and has a listener.
+    _flush() {
+      if (!this._held.length || this.connecting || !this.listenerCount('data')) return;
+      const held = this._held;
+      this._held = [];
+      queueMicrotask(() => held.forEach((p) => this._event(p)));
+    }
     _event(p) {
-      if ((p.event === 'data' || p.event === 'end') && (!this.listenerCount('data') || this._held.length)) {
+      if ((p.event === 'data' || p.event === 'end')
+        && (this.connecting || !this.listenerCount('data') || this._held.length)) {
         this._held.push(p);
         return;
       }
@@ -404,6 +408,7 @@
         s.connecting = false;
         s.emit('connect');
         s.emit('ready');
+        s._flush();
       }, (e) => {
         s.connecting = false;
         sockets.delete(s._id);
@@ -514,8 +519,50 @@
     execSync() { throw Object.assign(new Error('execSync is not available in Ride under Tauri'), { code: 'ENOSYS' }); },
     exec(cmd, o, cb) { (typeof o === 'function' ? o : cb)(Object.assign(new Error('exec is not available'), { code: 'ENOSYS' })); },
   };
+  // TLS: Rust verifies the chain against `ca` (system roots without it) and
+  // reports the server certificate's CN; the caller's checkServerIdentity,
+  // which RIDE uses in place of Node's host name check, then runs here.
+  const pemText = (b) => (b == null ? undefined : String(b));
   builtins.tls = {
-    connect() { throw Object.assign(new Error('TLS connections are not available yet in Ride under Tauri'), { code: 'ENOSYS' }); },
+    connect(...a) {
+      let o;
+      if (a[0] && typeof a[0] === 'object') o = a[0];
+      else o = { port: a[0], host: typeof a[1] === 'string' ? a[1] : undefined, ...(a.find((x) => x && typeof x === 'object') || {}) };
+      const cb = a.find((f) => typeof f === 'function');
+      const s = new Socket();
+      s.connecting = true;
+      s.authorized = false;
+      if (cb) s.once('secureConnect', cb);
+      const tls = { cert: pemText(o.cert), key: pemText(o.key), ca: o.ca ? [].concat(o.ca).map(pemText) : [] };
+      netReady()
+        .then(() => invoke('net_connect_tls', { id: s._id, host: o.host || 'localhost', port: +o.port, tls }))
+        .then((info) => {
+          Object.assign(s, info);
+          s.getPeerCertificate = () => info.peerCertificate;
+          if (typeof o.checkServerIdentity === 'function') {
+            try {
+              const r = o.checkServerIdentity(o.servername || o.host, info.peerCertificate);
+              if (r instanceof Error) throw r;
+            } catch (e) {
+              s.destroy();
+              s.connecting = false;
+              s.emit('error', e);
+              return;
+            }
+          }
+          s.authorized = true;
+          s.connecting = false;
+          s.emit('secureConnect');
+          s.emit('connect');
+          s._flush();
+        }, (e) => {
+          s.connecting = false;
+          sockets.delete(s._id);
+          s.emit('error', nodeErr(e));
+          s.emit('close', true);
+        });
+      return s;
+    },
   };
 
   // ---------------------------------------------------------- BrowserWindow

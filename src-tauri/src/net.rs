@@ -56,8 +56,11 @@ fn err_value(e: &std::io::Error, what: &str) -> Value {
 
 /// Registers a connected stream: a reader task emitting data/end/close and a
 /// writer task fed by the socket's channel.
-fn adopt<R: Runtime>(app: &AppHandle<R>, id: String, stream: TcpStream) {
-    let (mut rd, mut wr) = stream.into_split();
+fn adopt<R: Runtime, S>(app: &AppHandle<R>, id: String, stream: S)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
+{
+    let (mut rd, mut wr) = tokio::io::split(stream);
     let (tx, mut rx) = mpsc::unbounded_channel::<Out>();
     app.state::<Net>().sockets.lock().unwrap().insert(id.clone(), tx);
 
@@ -113,6 +116,150 @@ pub async fn net_connect<R: Runtime>(app: AppHandle<R>, id: String, host: String
         "localPort": local.map(|a| a.port()),
         "remoteAddress": remote.map(|a| a.ip().to_string()),
         "remotePort": remote.map(|a| a.port()),
+    }))
+}
+
+/// tls.connect options as RIDE builds them: PEM text of an optional client
+/// certificate and key, and of the CA certificates to trust (system roots
+/// when none are given).
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+pub struct TlsOpts {
+    cert: Option<String>,
+    key: Option<String>,
+    ca: Vec<String>,
+}
+
+/// Verifies the chain but not the host name: RIDE replaces Node's name check
+/// with its own checkServerIdentity (CN against host, only when asked to),
+/// which the shim runs on the CN this connection reports. A server
+/// certificate identical to one of the given CA certificates is accepted,
+/// as OpenSSL accepts a self-signed certificate listed as a CA.
+#[derive(Debug)]
+struct ChainOnly {
+    inner: std::sync::Arc<rustls::client::WebPkiServerVerifier>,
+    pinned: Vec<Vec<u8>>,
+}
+
+impl rustls::client::danger::ServerCertVerifier for ChainOnly {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        server_name: &rustls::pki_types::ServerName<'_>,
+        ocsp: &[u8],
+        now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        use rustls::{CertificateError as C, Error as E};
+        match self.inner.verify_server_cert(end_entity, intermediates, server_name, ocsp, now) {
+            Ok(v) => Ok(v),
+            Err(E::InvalidCertificate(C::NotValidForName | C::NotValidForNameContext { .. })) => {
+                Ok(rustls::client::danger::ServerCertVerified::assertion())
+            }
+            Err(e) if self.pinned.iter().any(|p| p.as_slice() == end_entity.as_ref()) => {
+                let _ = e;
+                Ok(rustls::client::danger::ServerCertVerified::assertion())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
+fn tls_err(message: impl std::fmt::Display) -> Value {
+    json!({ "code": "ERR_TLS", "message": message.to_string() })
+}
+
+fn tls_config(o: &TlsOpts) -> Result<rustls::ClientConfig, Value> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let mut roots = rustls::RootCertStore::empty();
+    let mut pinned = vec![];
+    if o.ca.is_empty() {
+        for c in rustls_native_certs::load_native_certs().certs {
+            let _ = roots.add(c);
+        }
+    } else {
+        for pem in &o.ca {
+            for c in CertificateDer::pem_slice_iter(pem.as_bytes()).flatten() {
+                pinned.push(c.as_ref().to_vec());
+                let _ = roots.add(c);
+            }
+        }
+    }
+    let inner = rustls::client::WebPkiServerVerifier::builder_with_provider(std::sync::Arc::new(roots), provider.clone())
+        .build()
+        .map_err(tls_err)?;
+    let builder = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(tls_err)?
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(ChainOnly { inner, pinned }));
+    match (&o.cert, &o.key) {
+        (Some(cert), Some(key)) => {
+            let chain: Vec<CertificateDer<'static>> =
+                CertificateDer::pem_slice_iter(cert.as_bytes()).collect::<Result<_, _>>().map_err(tls_err)?;
+            let key = PrivateKeyDer::from_pem_slice(key.as_bytes()).map_err(tls_err)?;
+            builder.with_client_auth_cert(chain, key).map_err(tls_err)
+        }
+        _ => Ok(builder.with_no_client_auth()),
+    }
+}
+
+fn common_name(der: &[u8]) -> Option<String> {
+    let (_, cert) = x509_parser::parse_x509_certificate(der).ok()?;
+    let cn = cert.subject().iter_common_name().next()?.as_str().ok()?.to_string();
+    Some(cn)
+}
+
+#[tauri::command]
+pub async fn net_connect_tls<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+    host: String,
+    port: u16,
+    tls: TlsOpts,
+) -> Result<Value, Value> {
+    let host = if host.is_empty() { "localhost".to_string() } else { host };
+    let config = tls_config(&tls)?;
+    let tcp = TcpStream::connect((host.as_str(), port))
+        .await
+        .map_err(|e| err_value(&e, &format!("connect {host}:{port}")))?;
+    let _ = tcp.set_nodelay(true);
+    let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(tls_err)?;
+    let stream = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config))
+        .connect(name, tcp)
+        .await
+        .map_err(|e| tls_err(format!("TLS handshake with {host}:{port}: {e}")))?;
+    let cn = stream.get_ref().1.peer_certificates().and_then(|c| c.first()).and_then(|c| common_name(c.as_ref()));
+    let remote = stream.get_ref().0.peer_addr().ok();
+    adopt(&app, id, stream);
+    Ok(json!({
+        "remoteAddress": remote.map(|a| a.ip().to_string()),
+        "remotePort": remote.map(|a| a.port()),
+        "peerCertificate": { "subject": { "CN": cn } },
     }))
 }
 
