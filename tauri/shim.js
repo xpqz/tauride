@@ -724,7 +724,14 @@
     remote,
     shell,
     clipboard,
-    ipcRenderer: { send() {}, on() {}, once() {}, invoke: () => Promise.resolve() },
+    ipcRenderer: {
+      // main.js's only channel: the renderer reports whether the launch page
+      // or a session is showing, for window geometry.
+      send(channel, onLaunch) { if (channel === 'save-win') invoke('save_win', { onLaunch: !!onLaunch }); },
+      on() {},
+      once() {},
+      invoke: () => Promise.resolve(),
+    },
   };
 
   // Exceptions thrown inside this injected script reach the page as an

@@ -54,6 +54,19 @@ pub fn watch<R: Runtime>(w: &WebviewWindow<R>) {
             _ => return,
         };
         let _ = app.emit("ride-win", json!({ "id": id, "event": name }));
+        if id == 1 {
+            match e {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => crate::winstate::schedule_save(&app),
+                WindowEvent::CloseRequested { .. } => crate::winstate::save_now(&app),
+                _ => {}
+            }
+        }
+        // RIDE's helper windows (prefs, dialog, status, floating editors)
+        // were children of the main window under Electron and closed with
+        // it; here the app exits when the main window goes.
+        if id == 1 && matches!(e, WindowEvent::Destroyed) {
+            app.exit(0);
+        }
     });
 }
 

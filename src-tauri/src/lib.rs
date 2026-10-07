@@ -2,6 +2,7 @@ mod net;
 mod proc;
 mod sync;
 mod win;
+mod winstate;
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -33,7 +34,7 @@ fn open_url(url: String) -> Result<(), String> {
 
 /// Electron's app.getPath('userData') for this product, so the Tauri build
 /// shares prefs.json, connections.json and winstate.json with Electron RIDE.
-fn user_data_dir() -> PathBuf {
+pub fn user_data_dir() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
@@ -95,32 +96,6 @@ pub fn window_builder<'a, R: Runtime, M: Manager<R>>(
         .initialization_script(&script)
 }
 
-fn winstate_file() -> PathBuf {
-    let name = std::env::var("RIDE_CONF").unwrap_or_else(|_| "winstate".into());
-    user_data_dir().join(format!("{name}.json"))
-}
-
-/// Electron's main process kept winstate.json (theme, window geometry) and
-/// exposed it as global.winstate; the shim reads and writes it here.
-fn winstate_op(op: &str, a: &Value) -> sync::Result {
-    let file = winstate_file();
-    let mut state: Value = std::fs::read_to_string(&file)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| json!({}));
-    match op {
-        "get" => Ok(state),
-        "set" => {
-            let key = a.get("key").and_then(Value::as_str).ok_or_else(|| sync::err("EINVAL", "missing key"))?;
-            state[key] = a.get("value").cloned().unwrap_or(Value::Null);
-            std::fs::write(&file, serde_json::to_vec_pretty(&state).unwrap())
-                .map_err(|e| sync::err("EIO", e.to_string()))?;
-            Ok(Value::Null)
-        }
-        _ => Err(sync::err("ENOSYS", format!("unknown winstate op {op}"))),
-    }
-}
-
 fn sync_args(req: &Request<Vec<u8>>) -> Value {
     if !req.body().is_empty() {
         return serde_json::from_slice(req.body()).unwrap_or(Value::Null);
@@ -139,7 +114,12 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
         (Some("fs"), Some(op)) => sync::fs_op(op, args),
         (Some("win"), Some("alloc")) => Ok(Value::from(win::alloc())),
         (Some("win"), Some("get")) => win::get(app, args),
-        (Some("winstate"), Some(op)) => winstate_op(op, args),
+        (Some("winstate"), Some("get")) => Ok(app.state::<winstate::WinState>().get()),
+        (Some("winstate"), Some("set")) => {
+            let key = args.get("key").and_then(Value::as_str).ok_or_else(|| sync::err("EINVAL", "missing key"))?;
+            app.state::<winstate::WinState>().set(key, args.get("value").cloned().unwrap_or(Value::Null));
+            Ok(Value::Null)
+        }
         _ => Err(sync::err("ENOSYS", format!("unknown sync op {path}"))),
     }
 }
@@ -157,6 +137,7 @@ pub fn run() {
                 .body(serde_json::to_vec(&body).unwrap())
                 .unwrap()
         })
+        .manage(winstate::WinState::load())
         .manage(net::Net::default())
         .manage(proc::Procs::default())
         .invoke_handler(tauri::generate_handler![
@@ -171,11 +152,20 @@ pub fn run() {
             net::net_close_server,
             proc::proc_spawn,
             proc::proc_kill,
+            winstate::save_win,
         ])
         .setup(|app| {
-            let main = window_builder(app.handle(), "main", WebviewUrl::App("index.html".into()))
-                .inner_size(900.0, 650.0)
-                .build()?;
+            let (pos, width, height) = winstate::restore(app.handle(), "launchWin");
+            let mut b = window_builder(app.handle(), "main", WebviewUrl::App("index.html".into()))
+                .inner_size(width, height)
+                .background_color(tauri::window::Color(0x76, 0x88, 0xd9, 0xff));
+            if let Some((x, y)) = pos {
+                b = b.position(x, y);
+            }
+            let main = b.build()?;
+            if app.state::<winstate::WinState>().get()["devTools"].as_bool().unwrap_or(false) {
+                main.open_devtools();
+            }
             win::watch(&main);
             Ok(())
         })
