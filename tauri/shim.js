@@ -971,6 +971,27 @@
     },
   };
 
+  // ------------------------------------------------------------ closing
+  // Electron's window.close() runs beforeunload first and closes unless the
+  // handler cancels; WebKit ignores close() on a window no script opened,
+  // which left Ride's Quit doing nothing. Close requests from the window
+  // manager or BrowserWindow.close() arrive here too (src-tauri/src/win.rs
+  // holds them for the page), so Ride can confirm quitting a session and
+  // tell a spawned interpreter to exit.
+  const closeWindow = () => {
+    const h = window.onbeforeunload;
+    if (typeof h === 'function') {
+      const ev = { returnValue: undefined, preventDefault() { ev.returnValue = false; } };
+      const r = h(ev);
+      if (ev.returnValue === false || r === false || typeof r === 'string') return;
+    }
+    invoke('win_call', { id: currentId(), method: 'destroy', args: {} });
+  };
+  window.close = closeWindow;
+  window.addEventListener('DOMContentLoaded', () => {
+    tev().listen('ride-close-request', ({ payload: { id } }) => { if (id === currentId()) closeWindow(); });
+  });
+
   // ----------------------------------------------------------- drag & drop
   // Electron gives dropped files a .path, which webview File objects lack.
   // Tauri reports native drops with real paths; they reach RIDE's

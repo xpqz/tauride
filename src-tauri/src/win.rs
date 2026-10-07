@@ -38,12 +38,38 @@ pub struct WinOpts {
     parent: Option<u32>,
 }
 
+/// When each window last had a close request held back for its page.
+static CLOSE_REQUESTS: std::sync::Mutex<Vec<(u32, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
+
+/// A close request (window manager, BrowserWindow.close()) goes to the page
+/// first, as Electron runs beforeunload: the shim's window.close() runs
+/// RIDE's onbeforeunload, which may cancel (to confirm quitting a session)
+/// or let the window be destroyed. A second request within three seconds
+/// closes regardless, so a page that does not answer cannot hold the
+/// window open.
+fn hold_close_for_page(id: u32) -> bool {
+    let mut held = CLOSE_REQUESTS.lock().unwrap();
+    let now = std::time::Instant::now();
+    held.retain(|(_, t)| now.duration_since(*t) < std::time::Duration::from_secs(3));
+    if held.iter().any(|(i, _)| *i == id) {
+        return false;
+    }
+    held.push((id, now));
+    true
+}
+
 /// Forwards window events to every window's shim, which dispatches them to
 /// the matching BrowserWindow objects.
 pub fn watch<R: Runtime>(w: &WebviewWindow<R>) {
     let app = w.app_handle().clone();
     let id = id_of(w.label());
     w.on_window_event(move |e| {
+        if let WindowEvent::CloseRequested { api, .. } = e {
+            if hold_close_for_page(id) {
+                api.prevent_close();
+                let _ = app.emit("ride-close-request", json!({ "id": id }));
+            }
+        }
         let name = match e {
             WindowEvent::Destroyed => "closed",
             WindowEvent::CloseRequested { .. } => "close",
