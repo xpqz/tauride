@@ -101,5 +101,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          ls -l dist
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Tauride ${TAG#v}" --generate-notes
+          # Each artifact keeps its bundle subfolder.
+          find dist -type f -print
+          find dist -type f -print0 | xargs -0 gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Tauride ${TAG#v}" --generate-notes
