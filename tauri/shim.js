@@ -951,7 +951,7 @@
         exe: R.paths.exe,
       }[n] || R.paths.userData),
       getAppPath: () => path.dirname(R.paths.exe),
-      getName: () => 'Ride-4.8',
+      getName: () => 'Tauride',
       getVersion: () => ((window.D && window.D.versionInfo) || {}).version || '',
       getLocale: () => builtins['os-locale'].sync(),
       quit: () => invoke('win_call', { id: 1, method: 'close', args: {} }),

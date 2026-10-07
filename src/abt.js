@@ -17,6 +17,7 @@
     let el = '';
     if (D.el && window.__RIDE__) {
       el = ''
+        + `\n  Name: ${D.appName} (unofficial Tauri build of Ride)`
         + `\n  Tauri: ${D.el.process.versions.tauri}`
         + `\n  Webview: ${navigator.userAgent}`
         + `\n  Platform: ${D.el.process.platform}-${D.el.process.arch}`;

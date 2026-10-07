@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Ride-4.8",
-  "version": "4.8.0",
-  "identifier": "com.dyalog.ride48",
+  "productName": "Tauride",
+  "version": "../package.json",
+  "identifier": "io.github.xpqz.tauride",
   "build": {
     "frontendDist": "../_/tauri-dist",
     "beforeDevCommand": "npm run css && node tauri/stage.js",

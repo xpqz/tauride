@@ -54,7 +54,7 @@ pub fn message<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
         gtk::ButtonsType::None,
         s(a, "message").unwrap_or(""),
     );
-    d.set_title(s(a, "title").unwrap_or("Ride"));
+    d.set_title(s(a, "title").unwrap_or("Tauride"));
     // GTK makes a message dialog without a Cancel/Close-type button ignore
     // close requests; Electron answers them, and Escape, with cancelId.
     d.set_deletable(true);
@@ -176,7 +176,7 @@ pub fn message<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
         .enumerate()
         .map(|(i, l)| TASKDIALOG_BUTTON { nButtonID: FIRST + i as i32, pszButtonText: l.as_ptr() })
         .collect();
-    let title = wide(s(a, "title").unwrap_or("Ride"));
+    let title = wide(s(a, "title").unwrap_or("Tauride"));
     let main = s(a, "message").map(wide);
     let detail = s(a, "detail").map(wide);
     let check = s(a, "checkboxLabel").map(wide);

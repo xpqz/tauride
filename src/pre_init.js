@@ -4,6 +4,8 @@ var D = typeof D === "undefined" ? {} : D;
 D.commands = {};
 D.keyMap = { dyalog: {}, dyalogDefault: {} };
 D.versionInfo = D.versionInfo || {};
+// The Tauri build is a fork; don't let it pass for the official Ride.
+D.appName = window.__RIDE__ ? 'Tauride' : 'Ride';
 
 // all elements by id, eg I.lb_tip_text is document.getElementById('lb_tip_text')
 const I = {};

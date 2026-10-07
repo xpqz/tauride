@@ -117,7 +117,7 @@ pub async fn win_create<R: Runtime>(app: AppHandle<R>, id: u32, url: String, opt
     let mut b = crate::window_builder(&app, &label_of(id), WebviewUrl::CustomProtocol(url))
         .visible(opts.show.unwrap_or(true))
         .resizable(opts.resizable.unwrap_or(true))
-        .title(opts.title.unwrap_or_else(|| "Ride".into()));
+        .title(opts.title.unwrap_or_else(|| "Tauride".into()));
     if let (Some(w), Some(h)) = (opts.width, opts.height) {
         b = b.inner_size(w, h);
     }

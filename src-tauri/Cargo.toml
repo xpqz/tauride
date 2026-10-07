@@ -1,6 +1,6 @@
 [package]
-name = "ride"
-version = "4.8.0"
+name = "tauride"
+version = "4.7.0"
 description = "Ride: remote IDE for Dyalog APL (Tauri shell)"
 edition = "2021"
 license = "MIT"

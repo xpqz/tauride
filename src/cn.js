@@ -743,8 +743,8 @@
   global.go = go;
   const setUpMenu = () => {
     D.InitHelp();
-    const m = 'Ride'
-    + '\n  About Ride=ABT'
+    const m = `${D.appName}`
+    + `\n  About ${D.appName}=ABT`
     + '\n  -'
     + '\n  Preferences=PRF'
     + '\n  -'
@@ -1118,7 +1118,7 @@
       save();
     });
     updExes();
-    document.title = 'New Session - Ride';
+    document.title = `New Session - ${D.appName}`;
     const conf = D.el.process.env.RIDE_CONF;
     if (conf) {
       const i = [...q.favs.children].findIndex((x) => x.cnData.name === conf);

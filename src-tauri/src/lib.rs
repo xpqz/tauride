@@ -98,7 +98,7 @@ pub fn window_builder<'a, R: Runtime, M: Manager<R>>(
 ) -> WebviewWindowBuilder<'a, R, M> {
     let script = format!("window.__RIDE__ = {};\n{}", init_payload(), SHIM);
     WebviewWindowBuilder::new(manager, label, url)
-        .title("Ride")
+        .title("Tauride")
         .initialization_script(&script)
         // Electron's did-finish-load: the shim holds executeJavaScript until
         // the window's page has loaded.
@@ -244,5 +244,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Ride");
+        .expect("error while running Tauride");
 }

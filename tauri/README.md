@@ -1,4 +1,7 @@
-# Ride on Tauri
+# Tauride: Ride on Tauri
+
+Tauride is an unofficial fork of Dyalog's Ride. It is named Tauride, numbered
+4.7.x and has a green icon so it is not mistaken for the official Ride.
 
 This directory and `src-tauri/` run Ride's existing frontend in a
 [Tauri 2](https://tauri.app) shell instead of Electron. The frontend
@@ -12,7 +15,7 @@ Prerequisites: Rust (stable), Node.js, `npm ci`, the Tauri CLI
 (`cargo install tauri-cli --locked`) and, on Linux, WebKitGTK 4.1 and GTK 3
 development files.
 
-    cargo tauri build      # release binary: src-tauri/target/release/ride
+    cargo tauri build      # release binary: src-tauri/target/release/tauride
     cargo tauri dev        # debug build, run from the source tree
 
 Both first run `npm run css` and `node tauri/stage.js`, which copies the

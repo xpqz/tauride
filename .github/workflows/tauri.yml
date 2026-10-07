@@ -18,11 +18,11 @@ jobs:
         include:
           - os: ubuntu-24.04
             name: linux-x64
-            bin: ride
+            bin: tauride
             bundles: deb,rpm,appimage
           - os: windows-latest
             name: windows-x64
-            bin: ride.exe
+            bin: tauride.exe
             bundles: nsis,msi
     runs-on: ${{ matrix.os }}
     env:
@@ -60,13 +60,13 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: ride-tauri-${{ matrix.name }}
+          name: tauride-${{ matrix.name }}
           path: src-tauri/target/release/${{ matrix.bin }}
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v6
         with:
-          name: ride-tauri-${{ matrix.name }}-installers
+          name: tauride-${{ matrix.name }}-installers
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/rpm/*.rpm
