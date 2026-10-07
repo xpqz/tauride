@@ -178,7 +178,7 @@
     try { return requireFrom(id, '/'); } catch (e) { rlog('error', `require('${id}') failed:`, e); throw e; }
   };
 
-  builtins.buffer = lazy(() => requireFrom('/node_modules/buffer/index.js', '/'));
+  builtins.buffer = lazy(() => loadModule((window.__ridePackages || {}).buffer));
   Object.defineProperty(window, 'Buffer', {
     configurable: true,
     get() { const { Buffer } = window.require('buffer'); Object.defineProperty(window, 'Buffer', { value: Buffer, writable: true }); return Buffer; },
