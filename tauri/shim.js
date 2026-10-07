@@ -517,10 +517,18 @@
   // ---------------------------------------------------------- BrowserWindow
   // Window ids come from Rust (main = 1). A window is created when its URL is
   // loaded; calls made before then are queued behind the creation.
+  // RIDE's own pages load from the app; any other file:// URL (3500⌶ writes
+  // its HTML to a temp file) goes through the ridefile:// scheme.
+  const appPage = /^\/?(index|dialog|status|about|empty)\.html([?#].*)?$/;
   const appUrl = (u) => {
+    const str = String(u);
+    if (/^file:\/\//.test(str)) {
+      const p = str.replace(/^file:\/\//, '');
+      if (!appPage.test(p)) return `ridefile://localhost${encodeURI(p.startsWith('/') ? p : `/${p}`)}`;
+    }
     // The main window's location is "tauri://localhost" with no path, so the
     // host match stops at ? and # as well as /.
-    let s = String(u).replace(/^file:\/\//, '').replace(/^[a-z]+:\/\/[^/?#]*/i, '');
+    let s = str.replace(/^file:\/\//, '').replace(/^[a-z]+:\/\/[^/?#]*/i, '');
     s = s.replace(/^\/+/, '');
     return s === '' || s.startsWith('?') ? `index.html${s}` : s;
   };
@@ -546,7 +554,10 @@
       super();
       this.id = existingId || sync('win/alloc');
       this._opts = opts || {};
-      this._q = existingId ? Promise.resolve() : null;
+      // Calls made before loadURL (RIDE sets titles first) wait for the
+      // window to be created.
+      this._started = !!existingId;
+      this._q = existingId ? Promise.resolve() : new Promise((r) => { this._markCreated = r; });
       // Scripts run once the page has loaded, as Electron's
       // executeJavaScript waits for it; existing windows already have.
       this._loaded = existingId ? Promise.resolve() : new Promise((r) => { this._markLoaded = r; });
@@ -571,6 +582,12 @@
       };
     }
     loadURL(url) {
+      // A window that exists already navigates (3500⌶ reuses its window).
+      if (this._started) {
+        this._loaded = new Promise((r) => { this._markLoaded = r; });
+        return this._call('navigate', { url: appUrl(url) });
+      }
+      this._started = true;
       const o = this._opts;
       const opts = {
         width: o.width, height: o.height, x: o.x, y: o.y,
@@ -578,9 +595,9 @@
         show: o.show !== false, resizable: o.resizable !== false, title: o.title,
         parent: o.parent ? o.parent.id : undefined,
       };
-      this._q = invoke('win_create', { id: this.id, url: appUrl(url), opts });
-      this._q.catch((e) => rlog('error', `window ${this.id} create failed:`, e));
-      return this._q;
+      const created = invoke('win_create', { id: this.id, url: appUrl(url), opts });
+      created.then(() => this._markCreated(), (e) => { rlog('error', `window ${this.id} create failed:`, e); this._markCreated(); });
+      return created;
     }
     loadFile(f) { return this.loadURL(f); }
     _call(method, args) {
@@ -618,7 +635,7 @@
     removeMenu() {}
     setMenuBarVisibility() {}
     setAutoHideMenuBar() {}
-    isDestroyed() { return this._closed || (this._q !== null && this._get('exists') === false); }
+    isDestroyed() { return this._closed || (this._started && this._get('exists') === false); }
     isFocused() { return !!this._get('focused'); }
     isVisible() { return !!this._get('visible'); }
     isMaximized() { return !!this._get('maximized'); }

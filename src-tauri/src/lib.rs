@@ -108,6 +108,35 @@ pub fn window_builder<'a, R: Runtime, M: Manager<R>>(
         })
 }
 
+/// ridefile://localhost/<path>: local files for windows RIDE points at a
+/// file:// URL outside the app (3500⌶ writes its HTML to a temp file).
+fn local_file(req: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    let path = percent_encoding::percent_decode_str(req.uri().path()).decode_utf8_lossy().into_owned();
+    let mime = match std::path::Path::new(&path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        Some("html" | "htm") => "text/html; charset=utf-8",
+        Some("css") => "text/css",
+        Some("js" | "mjs") => "text/javascript",
+        Some("json") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("ttf") => "font/ttf",
+        Some("txt") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+    match std::fs::read(&path) {
+        Ok(bytes) => Response::builder().header("Content-Type", mime).body(bytes).unwrap(),
+        Err(e) => Response::builder()
+            .status(404)
+            .header("Content-Type", "text/plain")
+            .body(format!("{path}: {e}").into_bytes())
+            .unwrap(),
+    }
+}
+
 fn sync_args(req: &Request<Vec<u8>>) -> Value {
     if !req.body().is_empty() {
         return serde_json::from_slice(req.body()).unwrap_or(Value::Null);
@@ -140,6 +169,7 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
 
 pub fn run() {
     tauri::Builder::default()
+        .register_uri_scheme_protocol("ridefile", |_ctx, req| local_file(&req))
         .register_uri_scheme_protocol("ridesync", |ctx, req| {
             let body = match sync_dispatch(ctx.app_handle(), req.uri().path(), &sync_args(&req)) {
                 Ok(v) => json!({ "ok": v }),

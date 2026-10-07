@@ -158,6 +158,12 @@ pub fn win_call<R: Runtime>(app: AppHandle<R>, id: u32, method: String, args: Va
             r
         }
         "eval" => w.eval(args.get("js").and_then(Value::as_str).unwrap_or("")),
+        "navigate" => {
+            let rel = args.get("url").and_then(Value::as_str).unwrap_or("index.html");
+            let base = w.url().map_err(|e| e.to_string())?;
+            let url = base.join(rel).map_err(|e| e.to_string())?;
+            w.navigate(url)
+        }
         "print" => w.print(),
         "toggleDevTools" => {
             if w.is_devtools_open() { w.close_devtools() } else { w.open_devtools() }
