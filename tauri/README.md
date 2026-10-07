@@ -1,7 +1,8 @@
 # Tauride: Ride on Tauri
 
-Tauride is an unofficial fork of Dyalog's Ride. It is named Tauride, numbered
-4.7.x and has a green icon so it is not mistaken for the official Ride.
+Tauride is an unofficial fork of Dyalog's Ride. Its version follows the latest
+Ride release (4.8.x); the name Tauride and the green icon keep it from being
+mistaken for the official Ride.
 
 This directory and `src-tauri/` run Ride's existing frontend in a
 [Tauri 2](https://tauri.app) shell instead of Electron. The frontend
