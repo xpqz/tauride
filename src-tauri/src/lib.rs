@@ -1,4 +1,5 @@
 mod dialog;
+mod menu;
 mod net;
 mod proc;
 mod sync;
@@ -156,7 +157,9 @@ pub fn run() {
             proc::proc_spawn,
             proc::proc_kill,
             winstate::save_win,
+            menu::popup_menu,
         ])
+        .on_menu_event(|app, e| menu::on_event(app, e.id().as_ref()))
         .setup(|app| {
             let (pos, width, height) = winstate::restore(app.handle(), "launchWin");
             let mut b = window_builder(app.handle(), "main", WebviewUrl::App("index.html".into()))

@@ -677,12 +677,72 @@
     const p = window.prompt(`${(o && o.title) || what}\n\nPath:`, (o && o.defaultPath) || '');
     return p ? [p] : undefined;
   };
+  // Popup menus are native (src-tauri/src/menu.rs); a click comes back as a
+  // ride-menu event with the item's id. Electron's roles map to Monaco's
+  // actions when an editor has focus, else to document.execCommand.
+  const menuClicks = new Map();
+  let menuSeq = 0;
+  let menuEvents = null;
+  const menuReady = () => {
+    if (!menuEvents) {
+      menuEvents = tev().listen('ride-menu', ({ payload: id }) => {
+        const f = menuClicks.get(id);
+        if (R.env.RIDE_TAURI_DEBUG) rlog('debug', `menu event ${JSON.stringify(id)}: ${f ? 'handled' : `no handler (have ${[...menuClicks.keys()]})`}`);
+        if (f) f();
+      });
+    }
+    return menuEvents;
+  };
+  const monacoAction = {
+    cut: 'editor.action.clipboardCutAction',
+    copy: 'editor.action.clipboardCopyAction',
+    paste: 'editor.action.clipboardPasteAction',
+    undo: 'undo',
+    redo: 'redo',
+    selectAll: 'editor.action.selectAll',
+    selectall: 'editor.action.selectAll',
+  };
+  const runRole = (role) => {
+    const eds = window.monaco ? window.monaco.editor.getEditors() : [];
+    const ed = eds.find((e) => e.hasTextFocus()) || eds.find((e) => e.hasWidgetFocus());
+    if (ed && monacoAction[role]) {
+      ed.focus();
+      ed.trigger('ride-menu', monacoAction[role], null);
+    } else {
+      document.execCommand(role === 'selectall' ? 'selectAll' : role);
+    }
+  };
+  const menuItems = (items, prefix) => items
+    .filter((it) => it.visible !== false)
+    .map((it, i) => {
+      const id = `${prefix}:${i}`;
+      const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
+      if (!sub && it.type !== 'separator') {
+        menuClicks.set(id, () => {
+          if (typeof it.click === 'function') it.click(it, BrowserWindow.fromId(currentId()), {});
+          else if (it.role) runRole(it.role);
+        });
+      }
+      return {
+        id,
+        label: it.label || (it.role ? it.role[0].toUpperCase() + it.role.slice(1) : ''),
+        kind: it.type === 'separator' ? 'separator' : (it.type === 'checkbox' || it.type === 'radio' ? 'checkbox' : 'normal'),
+        checked: !!it.checked,
+        enabled: it.enabled !== false,
+        submenu: sub ? menuItems(sub, id) : undefined,
+      };
+    });
   class MenuItem { constructor(o) { Object.assign(this, o); } }
   class Menu {
     constructor() { this.items = []; }
     append(i) { this.items.push(i); }
     insert(n, i) { this.items.splice(n, 0, i); }
-    popup() {}
+    popup() {
+      menuClicks.clear();
+      menuSeq += 1;
+      const items = menuItems(this.items, `ctx:${menuSeq}`);
+      menuReady().then(() => invoke('popup_menu', { items })).catch((e) => rlog('error', 'popup menu failed:', e));
+    }
     closePopup() {}
     static buildFromTemplate(t) { const m = new Menu(); t.forEach((o) => m.append(new MenuItem(o))); return m; }
     static setApplicationMenu() {}
