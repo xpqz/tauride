@@ -1,18 +1,20 @@
 //! winstate.json: theme and window geometry, ported from Electron RIDE's
-//! main.js. The main window opens with the launch page's geometry, switches
-//! to the main page's on the renderer's `save-win`, and saves its content
-//! bounds (throttled to 2s) under whichever page is showing.
+//! main.js. A session window opens with the launch page's geometry,
+//! switches to the main page's on the renderer's `save-win`, and saves its
+//! content bounds (throttled to 2s) under whichever page it shows. With
+//! several session windows, the last one moved or resized is saved.
 
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 pub struct WinState {
     db: Mutex<Value>,
-    on_launch_page: AtomicBool,
-    save_pending: AtomicBool,
+    /// Per session window: whether it shows the launch page (the default).
+    on_launch_page: Mutex<HashMap<String, bool>>,
+    save_pending: Mutex<HashSet<String>>,
 }
 
 fn file() -> PathBuf {
@@ -36,7 +38,7 @@ impl WinState {
         if db.get("mainWin").is_none() {
             db["mainWin"] = json!({ "width": 800, "height": 600 });
         }
-        WinState { db: Mutex::new(db), on_launch_page: AtomicBool::new(true), save_pending: AtomicBool::new(false) }
+        WinState { db: Mutex::new(db), on_launch_page: Mutex::default(), save_pending: Mutex::default() }
     }
 
     pub fn get(&self) -> Value {
@@ -95,10 +97,10 @@ pub fn apply<R: Runtime>(w: &WebviewWindow<R>, geometry: (Option<(f64, f64)>, f6
     }
 }
 
-pub fn save_now<R: Runtime>(app: &AppHandle<R>) {
-    let Some(w) = app.get_webview_window("main") else { return };
+pub fn save_now<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let Some(w) = app.get_webview_window(label) else { return };
     let ws = app.state::<WinState>();
-    let on_launch = ws.on_launch_page.load(Ordering::Relaxed);
+    let on_launch = *ws.on_launch_page.lock().unwrap().get(label).unwrap_or(&true);
     let page = if on_launch { "launchWin" } else { "mainWin" };
     let (Ok(scale), Ok(pos), Ok(size)) = (w.scale_factor(), w.inner_position(), w.inner_size()) else { return };
     let pos = pos.to_logical::<f64>(scale);
@@ -125,16 +127,17 @@ pub fn save_now<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Moves and resizes save at most every two seconds.
-pub fn schedule_save<R: Runtime>(app: &AppHandle<R>) {
+pub fn schedule_save<R: Runtime>(app: &AppHandle<R>, label: &str) {
     let ws = app.state::<WinState>();
-    if ws.save_pending.swap(true, Ordering::Relaxed) {
+    if !ws.save_pending.lock().unwrap().insert(label.to_owned()) {
         return;
     }
     let app = app.clone();
+    let label = label.to_owned();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        app.state::<WinState>().save_pending.store(false, Ordering::Relaxed);
-        save_now(&app);
+        app.state::<WinState>().save_pending.lock().unwrap().remove(&label);
+        save_now(&app, &label);
     });
 }
 
@@ -142,15 +145,15 @@ pub fn schedule_save<R: Runtime>(app: &AppHandle<R>) {
 /// switch between the launch page and a session restore the main page's
 /// geometry, as main.js did.
 #[tauri::command]
-pub fn save_win<R: Runtime>(app: AppHandle<R>, on_launch: bool) {
-    schedule_save(&app);
+pub fn save_win<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>, on_launch: bool) {
+    let label = window.label().to_owned();
+    schedule_save(&app, &label);
     let ws = app.state::<WinState>();
-    if ws.on_launch_page.swap(on_launch, Ordering::Relaxed) != on_launch {
-        if let Some(w) = app.get_webview_window("main") {
-            apply(&w, restore(&app, "mainWin"));
-            if ws.get()["mainWin"].get("maximized").and_then(Value::as_bool).unwrap_or(false) {
-                let _ = w.maximize();
-            }
+    let was = ws.on_launch_page.lock().unwrap().insert(label, on_launch).unwrap_or(true);
+    if was != on_launch {
+        apply(&window, restore(&app, "mainWin"));
+        if ws.get()["mainWin"].get("maximized").and_then(Value::as_bool).unwrap_or(false) {
+            let _ = window.maximize();
         }
     }
 }

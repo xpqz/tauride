@@ -126,6 +126,21 @@
   path.posix = path;
 
   // ---------------------------------------------------------------- process
+  // Sessions: one process runs several, each in a window whose id is
+  // k * 1e6 + 1 for session k (src-tauri/src/win.rs); a session's helper
+  // windows have ids in its range. A session window opened for a new
+  // session takes the environment overrides it was opened with, as the
+  // RIDE process Electron spawned for a session took its environment.
+  const SESSION_SPAN = 1e6;
+  const labelId = (label) => (label === 'main' ? 1 : +label.slice(1));
+  const idLabel = (id) => (id === 1 ? 'main' : `w${id}`);
+  const sessionLabelOf = (label) => idLabel(Math.floor(labelId(label) / SESSION_SPAN) * SESSION_SPAN + 1);
+  try {
+    const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+    if (label !== 'main' && labelId(label) % SESSION_SPAN === 1) {
+      Object.assign(R.env, sync('session/env', { label }) || {});
+    }
+  } catch (e) { rlog('error', 'session environment:', e); }
   // R.platform is Rust's OS name; Ride tests Node's (win32, darwin, linux).
   const nodePlatform = { windows: 'win32', macos: 'darwin' }[R.platform] || R.platform;
   const proc = new EventEmitter();
@@ -259,15 +274,15 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const tev = () => window.__TAURI__.event;
   const thisWindow = () => window.__TAURI__.window.getCurrentWindow();
-  const mainWindow = () => new window.__TAURI__.webviewWindow.WebviewWindow('main', { skip: true });
-  const currentId = () => {
-    const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
-    return label === 'main' ? 1 : +label.slice(1);
-  };
+  const currentLabel = () => window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+  const currentId = () => labelId(currentLabel());
+  // This window's session window: itself, or the one its helper serves.
+  const sessionLabel = () => sessionLabelOf(currentLabel());
+  const sessionWindow = () => new window.__TAURI__.webviewWindow.WebviewWindow(sessionLabel(), { skip: true });
 
   // --------------------------------------------------------------- node-ipc
-  // node-ipc's API over Tauri events addressed to window labels: the main
-  // window serves, every other window is a client of it. A socket is the
+  // node-ipc's API over Tauri events addressed to window labels: a session
+  // window serves, its helper windows are its clients. A socket is the
   // sending window's label. The server listens before it creates any client
   // window, so a client is connected as soon as its own listener is.
   const ipc = {
@@ -299,7 +314,7 @@
       this._un = ipcListen(({ event, data }) => EventEmitter.prototype.emit.call(this, event, data));
       this._un.then(() => EventEmitter.prototype.emit.call(this, 'connect'));
     }
-    emit(event, data) { ipcSend('main', { from: myLabel(), event, data }); }
+    emit(event, data) { ipcSend(sessionLabel(), { from: myLabel(), event, data }); }
     _stop() { if (this._un) this._un.then((f) => f()); }
   }
   ipc.serve = (cb) => { ipc.server = new IpcServer(); if (cb) cb(); };
@@ -817,8 +832,10 @@
       getName: () => 'Tauride',
       getVersion: () => ((window.D && window.D.versionInfo) || {}).version || '',
       getLocale: () => builtins['os-locale'].sync(),
-      quit: () => mainWindow().close(),
-      exit: () => mainWindow().destroy(),
+      // A session is what an Electron RIDE process was: quitting ends this
+      // window's session; the app exits with its last session.
+      quit: () => sessionWindow().close(),
+      exit: () => sessionWindow().destroy(),
       relaunch() {},
     },
     getGlobal(name) {
@@ -862,6 +879,19 @@
   window.close = closeWindow;
   window.addEventListener('DOMContentLoaded', () => {
     tev().listen('ride-close-request', ({ payload: { id } }) => { if (id === currentId()) closeWindow(); });
+  });
+
+  // ------------------------------------------------------------- titles
+  // A window's title follows its page's (Ride sets document.title to the
+  // session caption), so window lists, menus and taskbars name sessions.
+  window.addEventListener('DOMContentLoaded', () => {
+    let last = null;
+    const sync = () => {
+      const t = document.title;
+      if (t && t !== last) { last = t; thisWindow().setTitle(t).catch(() => {}); }
+    };
+    sync();
+    new MutationObserver(sync).observe(document.head || document.documentElement, { subtree: true, childList: true, characterData: true });
   });
 
   // ----------------------------------------------------------- drag & drop

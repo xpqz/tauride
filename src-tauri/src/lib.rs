@@ -10,7 +10,7 @@ mod winstate;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::http::{Request, Response};
-use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const SHIM: &str = include_str!("../../tauri/shim.js");
 
@@ -161,6 +161,7 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
         (Some("proc"), Some("execSync")) => proc::exec_sync(args),
         (Some("dialog"), Some("message")) => dialog::message(app, args),
         (Some("dialog"), Some("file")) => dialog::file(app, args),
+        (Some("session"), Some("env")) => Ok(win::session_env(args.get("label").and_then(Value::as_str).unwrap_or(""))),
         (Some("winstate"), Some("get")) => Ok(app.state::<winstate::WinState>().get()),
         (Some("winstate"), Some("set")) => {
             let key = args.get("key").and_then(Value::as_str).ok_or_else(|| sync::err("EINVAL", "missing key"))?;
@@ -173,6 +174,16 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
 
 pub fn run() {
     tauri::Builder::default()
+        // One process for every session: starting Tauride again opens a new
+        // session window in the running one, as with VS Code.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = win::open_session(&app, serde_json::Map::new()) {
+                    eprintln!("tauride: cannot open a session window: {e}");
+                }
+            });
+        }))
         .plugin(ride_plugin())
         .register_uri_scheme_protocol("ridefile", |_ctx, req| local_file(&req))
         .register_uri_scheme_protocol("ridesync", |ctx, req| {
@@ -204,6 +215,7 @@ pub fn run() {
             log,
             open_url,
             win::win_op,
+            win::session_new,
             net::net_connect,
             net::net_connect_tls,
             net::net_write,
@@ -223,19 +235,7 @@ pub fn run() {
         ])
         .on_menu_event(|app, e| menu::on_event(app, e.id().as_ref()))
         .setup(|app| {
-            let (pos, width, height) = winstate::restore(app.handle(), "launchWin");
-            let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Tauride")
-                .inner_size(width, height);
-            // macOS paints this behind the title bar too.
-            #[cfg(not(target_os = "macos"))]
-            {
-                b = b.background_color(tauri::window::Color(0x76, 0x88, 0xd9, 0xff));
-            }
-            if let Some((x, y)) = pos {
-                b = b.position(x, y);
-            }
-            let main = b.build()?;
+            let main = win::session_window(app, "main")?;
             if app.state::<winstate::WinState>().get()["devTools"].as_bool().unwrap_or(false) {
                 main.open_devtools();
             }

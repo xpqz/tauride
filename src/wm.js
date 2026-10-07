@@ -7,6 +7,10 @@
 // setMinSize, navigate, print, toggleDevTools, onClosed(f), and the promises
 // contentBounds(), isFocused(), exists() and eval(js). handle.native is what
 // Electron's dialog calls take as their parent window.
+// D.wm.main() is this session's window. D.wm.newSession(env) starts a new
+// session: under Electron another RIDE process with that environment, as
+// before; under Tauri another window in this process, taking env as its
+// environment overrides.
 {
   const opt = (o, ks) => {
     const r = {};
@@ -180,13 +184,17 @@
       toggleDevTools() { this.do('devtools', () => invoke('win_op', { label: this.label, op: 'toggleDevTools' })); }
     }
 
-    // Ids follow one another, as Electron's do (floating editor windows are
-    // cascaded by id); the start differs per run so that ids stay unique if
-    // the main page reloads.
-    let nextId = (Date.now() % 1e6) * 100 + 2;
+    // A session's windows have ids in its range (src-tauri/src/win.rs):
+    // session k's window is k * 1e6 + 1. Ids follow one another, as
+    // Electron's do (floating editor windows are cascaded by id); the start
+    // differs per page load so that ids stay unique if a page reloads.
+    const SESSION_SPAN = 1e6;
+    const sessionBase = Math.floor(idOf(currentLabel()) / SESSION_SPAN) * SESSION_SPAN;
+    let nextId = sessionBase + 2 + (Date.now() % 9000) * 100;
     let main;
     D.wm = {
-      main: () => { main = main || new Win(1); return main; },
+      main: () => { main = main || new Win(sessionBase + 1); return main; },
+      newSession: (env) => invoke('session_new', { env: env || {} }).catch(report('new session')),
       current: () => new Win(idOf(currentLabel())),
       get: (id) => new Win(id),
       create(o, url) {
@@ -280,6 +288,12 @@
         return new Win(bw);
       },
       displayBounds: (r) => Promise.resolve(D.el.screen.getDisplayMatching(r).bounds),
+      newSession(env) {
+        const p = D.el.process.argv;
+        nodeRequire('child_process').spawn(p[0], p.slice(1), {
+          detached: true, stdio: ['ignore', 'ignore', 'ignore'], env: { ...process.env, ...env },
+        });
+      },
     };
   }
 }

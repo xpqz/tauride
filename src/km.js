@@ -81,17 +81,11 @@
     },
     CAW() { D.send('CloseAllWindows', {}); },
     CNC() {
-      const p = D.el.process.argv; // if(D.mac)p=p.replace(/(\/Contents\/).*$/,'$1MacOS/nwjs')
-      nodeRequire('child_process').spawn(p[0], p.slice(1), {
-        detached: true,
-        stdio: ['ignore', 'ignore', 'ignore'],
-        env: {
-          ...process.env,
-          RIDE_CONNECT: '',
-          RIDE_SPAWN: '',
-          DYALOG_SPAWN: '',
-          RIDE_AUTO_START: 0,
-        },
+      D.wm.newSession({
+        RIDE_CONNECT: '',
+        RIDE_SPAWN: '',
+        DYALOG_SPAWN: '',
+        RIDE_AUTO_START: 0,
       });
       if (D.ide.dead) window.close();
     },
@@ -155,12 +149,7 @@
         return;
       }
       if (D.lastSpawnedExe) {
-        const e = {};
-        Object.keys(process.env).forEach((k) => { e[k] = process.env[k]; });
-        e.RIDE_SPAWN = D.lastSpawnedExe; const p = D.el.process.argv;
-        nodeRequire('child_process').spawn(p[0], p.slice(1), {
-          detached: true, stdio: ['ignore', 'ignore', 'ignore'], env: e,
-        });
+        D.wm.newSession({ RIDE_SPAWN: D.lastSpawnedExe });
       } else {
         $.err('The current session is remote.\nTo connect elsewhere or\nlaunch a local interpreter,\n'
             + 'please use "New Session..." instead.', 'Cannot Start New Session');

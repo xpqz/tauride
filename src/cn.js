@@ -553,17 +553,7 @@
             log(`interpreter connected from ${cHost}`);
             srv && srv.close();
             srv = 0;
-            if (x.respawn) {
-              const p = D.el.process.argv;
-              cp.spawn(p[0], p.slice(1), {
-                detached: true,
-                stdio: ['ignore', 'ignore', 'ignore'],
-                env: {
-                  ...process.env,
-                  RIDE_LISTEN: `${host}:${port}+`,
-                },
-              });
-            }
+            if (x.respawn) D.wm.newSession({ RIDE_LISTEN: `${host}:${port}+` });
             clt = c;
             initInterpreterConn();
             new D.IDE().setConnInfo(cHost, port, sel ? sel.name : '');

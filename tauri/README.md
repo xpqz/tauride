@@ -48,6 +48,22 @@ scripts. It provides the subset of Node and Electron Ride uses:
 | `dialog.*Sync` | `dialog.rs`: GTK dialogs on Linux; task dialogs and the common item dialogs (rfd) on Windows |
 | `Menu.popup()` | `menu.rs`: native popup menus |
 
+Sessions: unlike Electron Ride, which starts another process for each
+session, Tauride runs every session in one process, each in its own window,
+as VS Code does; the OS lists them as one app's windows (macOS Window menu
+and Dock, Windows taskbar, GNOME and KDE task switchers). New Session, New
+Session... and a listening session's respawn call `D.wm.newSession(env)`,
+which opens a session window (`session_new` in `win.rs`) whose page takes
+`env` as its environment overrides (`RIDE_SPAWN`, `RIDE_CONNECT`,
+`RIDE_LISTEN`, ...), as the spawned process took its environment. Starting
+Tauride again opens a session window in the running one (single-instance
+plugin). Session k's window has id k * 1e6 + 1 (label `main` for the
+first), and its helper windows (preferences, dialog, status, floating
+editors, About, ...) ids in its range, so helpers route their messages to
+their own session window and close with it. Quitting ends a session; the
+app exits when its last session window closes. Window titles follow the
+page's `document.title` (the session caption).
+
 Windows: `src/wm.js` gives Ride's code one small window API (create, find,
 show/hide/focus/close, size, title, run a script, print, devtools) with two
 implementations: Electron's `BrowserWindow`, and Tauri's JS window API
