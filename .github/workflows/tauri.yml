@@ -29,9 +29,6 @@ jobs:
           - os: macos-latest
             name: macos-arm64
             bundles: dmg
-          - os: macos-15-intel
-            name: macos-x64
-            bundles: dmg
     runs-on: ${{ matrix.os }}
     env:
       # Only the Electron build needs Electron itself.
@@ -99,8 +96,6 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # Two macOS builds produce dmgs of the same name pattern; the
-      # architecture is in Tauri's file name (aarch64 / x64), so they differ.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
