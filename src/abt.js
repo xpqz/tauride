@@ -15,7 +15,12 @@
       s += `${i ? ',\n' : ''}    ${repr(x)}:${repr(db.getItem(x))}`;
     }
     let el = '';
-    if (D.el) {
+    if (D.el && window.__RIDE__) {
+      el = ''
+        + `\n  Tauri: ${D.el.process.versions.tauri}`
+        + `\n  Webview: ${navigator.userAgent}`
+        + `\n  Platform: ${D.el.process.platform}-${D.el.process.arch}`;
+    } else if (D.el) {
       el = ''
         + `\n  Electron: ${D.el.process.versions.electron}`
         + `\n  Chrome: ${D.el.process.versions.chrome}`

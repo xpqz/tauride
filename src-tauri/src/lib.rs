@@ -9,7 +9,7 @@ mod winstate;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::http::{Request, Response};
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 const SHIM: &str = include_str!("../../tauri/shim.js");
 
@@ -96,6 +96,16 @@ pub fn window_builder<'a, R: Runtime, M: Manager<R>>(
     WebviewWindowBuilder::new(manager, label, url)
         .title("Ride")
         .initialization_script(&script)
+        // Electron's did-finish-load: the shim holds executeJavaScript until
+        // the window's page has loaded.
+        .on_page_load(|w, p| {
+            if matches!(p.event(), tauri::webview::PageLoadEvent::Finished) {
+                let _ = w.app_handle().emit(
+                    "ride-win",
+                    json!({ "id": win::id_of(w.label()), "event": "did-finish-load" }),
+                );
+            }
+        })
 }
 
 fn sync_args(req: &Request<Vec<u8>>) -> Value {

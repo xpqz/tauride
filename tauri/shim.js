@@ -532,6 +532,12 @@
       const w = windows.get(id);
       if (!w) return;
       if (event === 'closed') w._closed = true;
+      if (event === 'did-finish-load') {
+        w._markLoaded();
+        EventEmitter.prototype.emit.call(w, 'ready-to-show', { sender: w });
+        (w.webContents._ev['did-finish-load'] || []).slice().forEach((f) => f());
+        return;
+      }
       EventEmitter.prototype.emit.call(w, event, { sender: w, preventDefault() {} });
     });
   };
@@ -541,18 +547,23 @@
       this.id = existingId || sync('win/alloc');
       this._opts = opts || {};
       this._q = existingId ? Promise.resolve() : null;
+      // Scripts run once the page has loaded, as Electron's
+      // executeJavaScript waits for it; existing windows already have.
+      this._loaded = existingId ? Promise.resolve() : new Promise((r) => { this._markLoaded = r; });
+      if (existingId) this._markLoaded = () => {};
       windows.set(this.id, this);
       ensureWinEvents();
       const call = (m, a) => this._call(m, a);
       this.webContents = {
         id: this.id,
-        executeJavaScript: (js) => call('eval', { js }).then(() => undefined),
+        _ev: {},
+        executeJavaScript: (js) => this._loaded.then(() => call('eval', { js })).then(() => undefined),
         print: () => call('print'),
         toggleDevTools: () => call('toggleDevTools'),
         openDevTools: () => { if (!this.webContents.isDevToolsOpened()) call('toggleDevTools'); },
         isDevToolsOpened: () => false,
-        on() {},
-        once() {},
+        on(n, f) { (this._ev[n] = this._ev[n] || []).push(f); return this; },
+        once(n, f) { return this.on(n, f); },
         send() {},
         focus: () => call('focus'),
         setZoomFactor() {},
