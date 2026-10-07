@@ -127,7 +127,14 @@ pub fn win_create<R: Runtime>(app: AppHandle<R>, id: u32, url: String, opts: Win
         b = b.position(x, y);
     }
     if let Some(p) = opts.parent.and_then(|p| window(&app, p).ok()) {
-        b = b.transient_for(&p).map_err(|e| e.to_string())?;
+        #[cfg(target_os = "linux")]
+        {
+            b = b.transient_for(&p).map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            b = b.parent(&p).map_err(|e| e.to_string())?;
+        }
     }
     let w = b.build().map_err(|e| e.to_string())?;
     watch(&w);
