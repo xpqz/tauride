@@ -40,16 +40,19 @@ scripts. It provides the subset of Node and Electron Ride uses:
 | `ssh2` | `ssh.rs`: russh (ring) |
 | `node-ipc` | Tauri events between windows, same API |
 | `@electron/remote`: `BrowserWindow`, `getGlobal`, `app`, `screen`, `shell`, `clipboard` | `win.rs` (windows with Electron's numeric ids), `winstate.rs` (main.js's window geometry), `open_url` |
-| `dialog.*Sync` | `dialog.rs`: GTK dialogs on Linux |
+| `dialog.*Sync` | `dialog.rs`: GTK dialogs on Linux; task dialogs and the common item dialogs (rfd) on Windows |
 | `Menu.popup()` | `menu.rs`: native popup menus |
 
 Two channels connect the webview to Rust:
 
 - **Synchronous**: Ride calls `fs.readFileSync`, `dialog.showMessageBoxSync`,
   `BrowserWindow.isFocused()` and the like synchronously. The shim answers
-  them with synchronous XHR to a custom `ridesync://` scheme, which Rust
-  serves on the GTK main thread; window getters called there run inline
-  (Tauri does not queue them on the main thread), so they cannot deadlock.
+  them with synchronous XHR to a custom `ridesync://` scheme
+  (`http://ridesync.localhost` on Windows, where WebView2 preflights the
+  POST), which Rust serves on the main thread; window getters called there
+  run inline (Tauri does not queue them on the main thread), so they cannot
+  deadlock. Windows are created from an async command, as building one from
+  a synchronous command deadlocks on Windows.
 - **Asynchronous**: sockets, processes and windows use Tauri commands and
   events (`ride-net`, `ride-proc`, `ride-ssh`, `ride-win`, `ride-menu`).
 
@@ -77,10 +80,13 @@ native message boxes and popup menus, window geometry.
 
 Not done or not yet checked interactively:
 
-- Native dialogs are GTK only; macOS and Windows fall back to the webview's
-  `alert`/`confirm`/`prompt`. Process `kill` is Unix only.
+- Windows: checked that the app starts, the sync bridge, prefs (in
+  `%APPDATA%\Ride-4.8`), helper windows, `ridefile://`, native message and
+  file dialogs, process `kill`, finding interpreters in the registry
+  (`execSync`), and starting Dyalog 21.0 and executing APL work.
+- Native dialogs on macOS fall back to the webview's `alert`/`confirm`/
+  `prompt`, and process `kill` is not implemented there.
 - The application menu is Ride's HTML menu, not a native one.
 - Drag and drop, printing, and clicking popup-menu items need checking by
   hand.
-- `execSync` (Windows registry lookup of interpreters) is not available.
 - The Electron test suite (spectron) does not run against this build.

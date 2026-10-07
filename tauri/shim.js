@@ -34,6 +34,9 @@
   window.__rideLog = rlog;
 
   // ------------------------------------------------------------ sync bridge
+  // WebView2 serves custom schemes as http://<scheme>.localhost, not
+  // <scheme>://localhost.
+  const schemeUrl = (scheme) => (R.platform === 'windows' ? `http://${scheme}.localhost` : `${scheme}://localhost`);
   // POST bodies reach custom schemes on current WebKitGTK; the query form is
   // the fallback for engines that drop them.
   let useQuery = false;
@@ -41,10 +44,10 @@
     const x = new XMLHttpRequest();
     const json = JSON.stringify(args || {});
     if (useQuery) {
-      x.open('GET', `ridesync://localhost/${op}?a=${encodeURIComponent(json)}`, false);
+      x.open('GET', `${schemeUrl('ridesync')}/${op}?a=${encodeURIComponent(json)}`, false);
       x.send();
     } else {
-      x.open('POST', `ridesync://localhost/${op}`, false);
+      x.open('POST', `${schemeUrl('ridesync')}/${op}`, false);
       x.setRequestHeader('Content-Type', 'application/json');
       x.send(json);
     }
@@ -587,7 +590,14 @@
   builtins.child_process = {
     spawn,
     ChildProcess,
-    execSync() { throw Object.assign(new Error('execSync is not available in Ride under Tauri'), { code: 'ENOSYS' }); },
+    execSync(cmd, o) {
+      const r = syncRaw('proc/execSync', { cmd: String(cmd), cwd: o && o.cwd, timeout: o && o.timeout });
+      // Node's error carries the exit status and output.
+      if (r.err) throw Object.assign(new Error(r.err.message), r.err);
+      const out = r.ok;
+      const enc = o && o.encoding;
+      return enc && enc !== 'buffer' ? out : window.require('buffer').Buffer.from(out);
+    },
     exec(cmd, o, cb) { (typeof o === 'function' ? o : cb)(Object.assign(new Error('exec is not available'), { code: 'ENOSYS' })); },
   };
   // TLS: Rust verifies the chain against `ca` (system roots without it) and
@@ -646,7 +656,7 @@
     const str = String(u);
     if (/^file:\/\//.test(str)) {
       const p = str.replace(/^file:\/\//, '');
-      if (!appPage.test(p)) return `ridefile://localhost${encodeURI(p.startsWith('/') ? p : `/${p}`)}`;
+      if (!appPage.test(p)) return `${schemeUrl('ridefile')}${encodeURI(p.startsWith('/') ? p : `/${p}`)}`;
     }
     // The main window's location is "tauri://localhost" with no path, so the
     // host match stops at ? and # as well as /.

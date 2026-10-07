@@ -24,6 +24,7 @@ pub struct SpawnOpts {
     env: Option<HashMap<String, String>>,
     /// stdin, stdout, stderr: "pipe", "ignore" or "inherit".
     stdio: Option<Vec<String>>,
+    #[cfg_attr(not(unix), allow(dead_code))]
     detached: Option<bool>,
 }
 
@@ -125,11 +126,96 @@ pub fn proc_kill<R: Runtime>(app: AppHandle<R>, id: String, signal: Option<Strin
         if unsafe { libc::kill(pid as i32, sig) } != 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
+        Ok(())
     }
-    #[cfg(not(unix))]
+    // As in Node, any signal terminates the process outright.
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+        let _ = signal;
+        let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if h.is_null() {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        let ok = TerminateProcess(h, 1);
+        let err = std::io::Error::last_os_error();
+        CloseHandle(h);
+        if ok == 0 {
+            return Err(err.to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (pid, signal);
-        return Err("kill is not supported on this platform".into());
+        Err("kill is not supported on this platform".into())
     }
-    Ok(())
+}
+
+/// child_process.execSync, for the ridesync:// scheme: run `cmd` through the
+/// shell as Node does, and answer its stdout. Ride uses it on Windows to find
+/// installed interpreters (`reg query`).
+pub fn exec_sync(a: &serde_json::Value) -> crate::sync::Result {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    let cmd = a.get("cmd").and_then(serde_json::Value::as_str).ok_or_else(|| crate::sync::err("EINVAL", "missing cmd"))?;
+    #[cfg(windows)]
+    let mut c = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut c = std::process::Command::new("cmd.exe");
+        c.raw_arg(format!("/d /s /c \"{cmd}\"")).creation_flags(CREATE_NO_WINDOW);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut c = {
+        let mut c = std::process::Command::new("/bin/sh");
+        c.arg("-c").arg(cmd);
+        c
+    };
+    if let Some(cwd) = a.get("cwd").and_then(serde_json::Value::as_str).filter(|c| !c.is_empty()) {
+        c.current_dir(cwd);
+    }
+    let mut child = c
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| spawn_err(&e, cmd))?;
+    // Drain the pipes on their own threads, so a chatty command cannot block.
+    let drain = |r: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_end(&mut buf);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+    };
+    let out = drain(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let err = drain(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let timeout = a.get("timeout").and_then(serde_json::Value::as_u64).filter(|&t| t > 0).map(Duration::from_millis);
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if timeout.is_some_and(|t| start.elapsed() >= t) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(crate::sync::err("ETIMEDOUT", format!("spawnSync {cmd} ETIMEDOUT")));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(e) => return Err(crate::sync::err("EIO", e.to_string())),
+        }
+    };
+    let (stdout, stderr) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
+    if !status.success() {
+        let mut e = crate::sync::err("ECMDFAIL", format!("Command failed: {cmd}\n{stderr}"));
+        e["status"] = json!(status.code());
+        e["stdout"] = json!(stdout);
+        e["stderr"] = json!(stderr);
+        return Err(e);
+    }
+    Ok(json!(stdout))
 }

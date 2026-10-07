@@ -38,6 +38,9 @@ fn open_url(url: String) -> Result<(), String> {
 /// Electron's app.getPath('userData') for this product, so the Tauri build
 /// shares prefs.json, connections.json and winstate.json with Electron RIDE.
 pub fn user_data_dir() -> PathBuf {
+    #[cfg(windows)]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    #[cfg(not(windows))]
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
@@ -75,7 +78,7 @@ fn init_payload() -> Value {
         "arch": if cfg!(target_arch = "x86_64") { "x64" } else { std::env::consts::ARCH },
         "cwd": std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
         "paths": {
-            "home": std::env::var("HOME").unwrap_or_default(),
+            "home": std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default(),
             "temp": std::env::temp_dir().to_string_lossy(),
             "userData": user_data.to_string_lossy(),
             "exe": std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -113,6 +116,12 @@ pub fn window_builder<'a, R: Runtime, M: Manager<R>>(
 /// file:// URL outside the app (3500⌶ writes its HTML to a temp file).
 fn local_file(req: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let path = percent_encoding::percent_decode_str(req.uri().path()).decode_utf8_lossy().into_owned();
+    // /C:/dir/file.html on Windows.
+    #[cfg(windows)]
+    let path = match path.as_bytes() {
+        [b'/', _, b':', ..] => path[1..].to_string(),
+        _ => path,
+    };
     let mime = match std::path::Path::new(&path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("html" | "htm") => "text/html; charset=utf-8",
         Some("css") => "text/css",
@@ -154,6 +163,7 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
     let mut parts = path.trim_start_matches('/').splitn(2, '/');
     match (parts.next(), parts.next()) {
         (Some("fs"), Some(op)) => sync::fs_op(op, args),
+        (Some("proc"), Some("execSync")) => proc::exec_sync(args),
         (Some("dialog"), Some("message")) => dialog::message(app, args),
         (Some("dialog"), Some("file")) => dialog::file(app, args),
         (Some("win"), Some("alloc")) => Ok(Value::from(win::alloc())),
@@ -172,6 +182,16 @@ pub fn run() {
     tauri::Builder::default()
         .register_uri_scheme_protocol("ridefile", |_ctx, req| local_file(&req))
         .register_uri_scheme_protocol("ridesync", |ctx, req| {
+            // On Windows the scheme is http://ridesync.localhost, cross-origin
+            // to the page, so a JSON POST is preflighted.
+            if req.method() == tauri::http::Method::OPTIONS {
+                return Response::builder()
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Methods", "GET, POST")
+                    .header("Access-Control-Allow-Headers", "Content-Type")
+                    .body(Vec::new())
+                    .unwrap();
+            }
             let body = match sync_dispatch(ctx.app_handle(), req.uri().path(), &sync_args(&req)) {
                 Ok(v) => json!({ "ok": v }),
                 Err(e) => json!({ "err": e }),

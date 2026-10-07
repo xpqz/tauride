@@ -101,9 +101,10 @@ fn window<R: Runtime>(app: &AppHandle<R>, id: u32) -> Result<WebviewWindow<R>, S
 }
 
 /// `url` is relative to the app root ("index.html?type=prf&appid=..."); the
-/// shim strips the file:// and tauri:// forms RIDE builds.
+/// shim strips the file:// and tauri:// forms RIDE builds. Async, as building
+/// a window from a synchronous command deadlocks on Windows.
 #[tauri::command]
-pub fn win_create<R: Runtime>(app: AppHandle<R>, id: u32, url: String, opts: WinOpts) -> Result<(), String> {
+pub async fn win_create<R: Runtime>(app: AppHandle<R>, id: u32, url: String, opts: WinOpts) -> Result<(), String> {
     let base = app
         .get_webview_window("main")
         .and_then(|m| m.url().ok())
