@@ -5,10 +5,10 @@
 use crate::sync;
 use serde_json::Value;
 use tauri::{AppHandle, Runtime};
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 use {serde_json::json, tauri::Manager};
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 fn parent_window<R: Runtime>(app: &AppHandle<R>, a: &Value) -> Option<tauri::WebviewWindow<R>> {
     let id = a.get("window").and_then(Value::as_u64).unwrap_or(1) as u32;
     app.get_webview_window(&crate::win::label_of(id)).or_else(|| app.get_webview_window("main"))
@@ -19,12 +19,12 @@ fn parent<R: Runtime>(app: &AppHandle<R>, a: &Value) -> Option<gtk::ApplicationW
     parent_window(app, a).and_then(|w| w.gtk_window().ok())
 }
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 fn s<'a>(a: &'a Value, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str).filter(|v| !v.is_empty())
 }
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 fn buttons(a: &Value) -> Vec<String> {
     a.get("buttons")
         .and_then(Value::as_array)
@@ -217,9 +217,10 @@ pub fn message<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
     Ok(json!({ "response": response, "checkboxChecked": checked != 0 }))
 }
 
-/// showOpenDialog/showSaveDialog through the common item dialogs. Windows
-/// has no counterpart to buttonLabel or showHiddenFiles.
-#[cfg(windows)]
+/// showOpenDialog/showSaveDialog through the common item dialogs (Windows)
+/// or NSOpenPanel/NSSavePanel (macOS), via rfd. Neither has a counterpart to
+/// buttonLabel or showHiddenFiles.
+#[cfg(any(windows, target_os = "macos"))]
 pub fn file<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
     let save = a.get("save").and_then(Value::as_bool).unwrap_or(false);
     let props: Vec<&str> = a
@@ -268,12 +269,59 @@ pub fn file<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
     })
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
-pub fn message<R: Runtime>(_app: &AppHandle<R>, _a: &Value) -> sync::Result {
-    Err(sync::err("ENOSYS", "native message boxes are only implemented on Linux and Windows"))
+/// showMessageBox as an NSAlert: message as the bold text, detail below it,
+/// checkboxLabel as the suppression checkbox. Return and Escape answer
+/// defaultId and cancelId.
+#[cfg(target_os = "macos")]
+pub fn message<R: Runtime>(_app: &AppHandle<R>, a: &Value) -> sync::Result {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle};
+    use objc2_foundation::NSString;
+    let mtm = MainThreadMarker::new().ok_or_else(|| sync::err("EIO", "message boxes must run on the main thread"))?;
+    let labels = buttons(a);
+    let default = a.get("defaultId").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let cancel = a.get("cancelId").and_then(Value::as_u64);
+    let alert = NSAlert::new(mtm);
+    alert.setAlertStyle(match s(a, "type") {
+        Some("error" | "warning") => NSAlertStyle::Critical,
+        _ => NSAlertStyle::Informational,
+    });
+    // macOS has no title bar on alerts: the title heads the message when
+    // there is no separate message.
+    let main = s(a, "message").or_else(|| s(a, "title")).unwrap_or("");
+    alert.setMessageText(&NSString::from_str(main));
+    if let Some(d) = s(a, "detail") {
+        alert.setInformativeText(&NSString::from_str(d));
+    }
+    for (i, l) in labels.iter().enumerate() {
+        let b = alert.addButtonWithTitle(&NSString::from_str(l));
+        b.setKeyEquivalent(&NSString::from_str(if i == default {
+            "\r"
+        } else if Some(i as u64) == cancel {
+            "\u{1b}"
+        } else {
+            ""
+        }));
+    }
+    if let Some(c) = s(a, "checkboxLabel") {
+        alert.setShowsSuppressionButton(true);
+        if let Some(b) = alert.suppressionButton() {
+            b.setTitle(&NSString::from_str(c));
+            b.setState(if a.get("checkboxChecked").and_then(Value::as_bool).unwrap_or(false) { 1 } else { 0 });
+        }
+    }
+    let r = alert.runModal();
+    let response = (r - NSAlertFirstButtonReturn).max(0) as u64;
+    let checked = alert.suppressionButton().map_or(false, |b| b.state() == 1);
+    Ok(json!({ "response": response, "checkboxChecked": checked }))
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+pub fn message<R: Runtime>(_app: &AppHandle<R>, _a: &Value) -> sync::Result {
+    Err(sync::err("ENOSYS", "native message boxes are only implemented on Linux, macOS and Windows"))
+}
+
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn file<R: Runtime>(_app: &AppHandle<R>, _a: &Value) -> sync::Result {
-    Err(sync::err("ENOSYS", "native file dialogs are only implemented on Linux and Windows"))
+    Err(sync::err("ENOSYS", "native file dialogs are only implemented on Linux, macOS and Windows"))
 }
