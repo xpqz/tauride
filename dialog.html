@@ -24,20 +24,20 @@
     const ESC = { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' };
     const esc = s => s.replace(/[<>&'"]/g, x => ESC[x]);
 
-    const ipc = require('node-ipc').default;
+    const nodeIpc = require('node-ipc').default;
     const el = require('@electron/remote');
     const bw = el.getCurrentWindow();
     const [width] = bw.getContentSize();
     const qp = require('querystring').parse(window.location.search.slice(1));
     const iswin = /^win/i.test(process.platform);
 
-    ipc.config.id = 'dialog';
-    ipc.config.appspace = qp.appid;
-    ipc.config.retry = 1500;
-    ipc.config.silent = true;
+    nodeIpc.config.id = 'dialog';
+    nodeIpc.config.appspace = qp.appid;
+    nodeIpc.config.retry = 1500;
+    nodeIpc.config.silent = true;
     let rm;
-    ipc.connectTo('ride_master', () => {
-      rm = ipc.of.ride_master;
+    nodeIpc.connectTo('ride_master', () => {
+      rm = nodeIpc.of.ride_master;
       rm.on('connect', () => {
         window.onbeforeunload = (e) => {
           e.returnValue = false;
@@ -46,7 +46,7 @@
         rm.emit('dialogCreated');
       });
       rm.on('disconnect', () => {
-        ipc.log('disconnected from ride_master'.notice);
+        nodeIpc.log('disconnected from ride_master'.notice);
         window.onbeforeunload = null;
         window.close();
       });

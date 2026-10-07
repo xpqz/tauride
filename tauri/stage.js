@@ -15,6 +15,10 @@ const entries = [
   'node_modules/jquery/dist',
   'node_modules/toastr/build',
   'node_modules/monaco-editor/min',
+  // Buffer for the webview (tauri/shim.js loads it as a CommonJS module).
+  'node_modules/buffer',
+  'node_modules/base64-js',
+  'node_modules/ieee754',
 ];
 
 // Style sources are compiled by `npm run css`; only the compiled CSS and
@@ -41,4 +45,30 @@ require('child_process').execFileSync(process.execPath, ['mk', 'b'], { cwd: root
 
 fs.rmSync(out, { recursive: true, force: true });
 entries.forEach(copy);
+
+// CommonJS modules the pages require(). The pages' CSP forbids eval, so
+// instead of evaluating fetched source, tauri/shim.js resolves require()
+// against this registry of wrapped module functions, loaded from a script
+// tag ahead of each page's own scripts.
+const cjs = [
+  'src/cn.js',
+  'node_modules/buffer/index.js',
+  'node_modules/base64-js/index.js',
+  'node_modules/ieee754/index.js',
+];
+const packages = { buffer: '/node_modules/buffer/index.js', 'base64-js': '/node_modules/base64-js/index.js', ieee754: '/node_modules/ieee754/index.js' };
+let reg = 'window.__rideModules = window.__rideModules || {};\n'
+  + `window.__ridePackages = ${JSON.stringify(packages)};\n`;
+cjs.forEach((rel) => {
+  reg += `window.__rideModules[${JSON.stringify(`/${rel}`)}] = function (module, exports, require, __dirname, __filename) {\n`
+    + `${fs.readFileSync(path.join(root, rel), 'utf8')}\n};\n`;
+});
+fs.writeFileSync(path.join(out, 'tauri-modules.js'), reg);
+['index.html', 'dialog.html', 'status.html', 'about.html', 'empty.html'].forEach((page) => {
+  const f = path.join(out, page);
+  const html = fs.readFileSync(f, 'utf8');
+  const i = html.indexOf('<script');
+  if (i < 0) return;
+  fs.writeFileSync(f, `${html.slice(0, i)}<script src="tauri-modules.js"></script>\n${html.slice(i)}`);
+});
 console.log(`stage: ${out}`);
