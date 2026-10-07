@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ride-4.8",
+  "version": "4.8.0",
+  "identifier": "com.dyalog.ride48",
+  "build": {
+    "frontendDist": "../_/tauri-dist",
+    "beforeDevCommand": "npm run css && node tauri/stage.js",
+    "beforeBuildCommand": "npm run css && node tauri/stage.js"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
