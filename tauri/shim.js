@@ -264,53 +264,45 @@
   };
 
   // --------------------------------------------------------------- node-ipc
-  // node-ipc over Tauri's cross-window events. Channels are scoped by
-  // config.appspace: ipc_<appspace>_srv carries client-to-server messages,
-  // ipc_<appspace>_cli_<id> server-to-client ones, ipc_<appspace>_all
-  // broadcasts. Clients repeat a handshake every config.retry ms until the
-  // server acknowledges it, as node-ipc retries a socket that is not up yet.
+  // node-ipc's API over Tauri events addressed to window labels: the main
+  // window serves, every other window is a client of it. A socket is the
+  // sending window's label. The server listens before it creates any client
+  // window, so a client is connected as soon as its own listener is.
   const ipc = {
     config: { appspace: '', id: '', retry: 1500, silent: true, logInColor: false },
     of: {},
     server: null,
     log() {},
   };
-  const chan = (...parts) => ['ipc', ipc.config.appspace, ...parts].join('_').replace(/[^\w:/-]/g, '-');
+  const IPC_EVENT = 'ride-ipc';
+  const myLabel = () => window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+  const ipcListen = (cb) => tev().listen(IPC_EVENT, ({ payload }) => cb(payload), {
+    target: { kind: 'WebviewWindow', label: myLabel() },
+  });
+  const ipcSend = (label, msg) => tev().emitTo({ kind: 'WebviewWindow', label }, IPC_EVENT, msg);
   class IpcServer extends EventEmitter {
     start() {
-      this._un = tev().listen(chan('srv'), ({ payload: { from, event, data } }) => {
-        const socket = { id: from };
-        if (event === '__connect') this.emit(socket, '__connected');
-        else this._dispatch(event, data, socket);
+      this.clients = new Set();
+      this._un = ipcListen(({ from, event, data }) => {
+        this.clients.add(from);
+        EventEmitter.prototype.emit.call(this, event, data, { label: from });
       });
     }
-    _dispatch(event, ...a) { EventEmitter.prototype.emit.call(this, event, ...a); }
-    emit(socket, event, data) { tev().emit(chan('cli', socket.id), { event, data }); }
-    broadcast(event, data) { tev().emit(chan('all'), { event, data }); }
+    emit(socket, event, data) { ipcSend(socket.label, { event, data }); }
+    broadcast(event, data) { this.clients.forEach((label) => ipcSend(label, { event, data })); }
     stop() { if (this._un) this._un.then((f) => f()); }
   }
   class IpcClient extends EventEmitter {
-    constructor(serverId) { super(); this.serverId = serverId; this.me = ipc.config.id; }
     _start() {
-      const recv = ({ payload: { event, data } }) => {
-        if (event === '__connected') {
-          if (!this.connected) { this.connected = true; clearInterval(this._retry); this._dispatch('connect'); }
-        } else this._dispatch(event, data);
-      };
-      this._uns = [tev().listen(chan('cli', this.me), recv), tev().listen(chan('all'), recv)];
-      Promise.all(this._uns).then(() => {
-        const hello = () => tev().emit(chan('srv'), { from: this.me, event: '__connect' });
-        hello();
-        this._retry = setInterval(hello, ipc.config.retry || 1500);
-      });
+      this._un = ipcListen(({ event, data }) => EventEmitter.prototype.emit.call(this, event, data));
+      this._un.then(() => EventEmitter.prototype.emit.call(this, 'connect'));
     }
-    _dispatch(event, ...a) { EventEmitter.prototype.emit.call(this, event, ...a); }
-    emit(event, data) { tev().emit(chan('srv'), { from: this.me, event, data }); }
-    _stop() { clearInterval(this._retry); (this._uns || []).forEach((u) => u.then((f) => f())); }
+    emit(event, data) { ipcSend('main', { from: myLabel(), event, data }); }
+    _stop() { if (this._un) this._un.then((f) => f()); }
   }
   ipc.serve = (cb) => { ipc.server = new IpcServer(); if (cb) cb(); };
   ipc.connectTo = (id, cb) => {
-    const c = new IpcClient(id);
+    const c = new IpcClient();
     ipc.of[id] = c;
     if (cb) cb();
     c._start();

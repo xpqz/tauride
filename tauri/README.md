@@ -42,7 +42,7 @@ scripts. It provides the subset of Node and Electron Ride uses:
 | `net`, `tls` | `net.rs`: tokio sockets and servers; rustls (ring) for TLS |
 | `child_process.spawn` | `proc.rs`: tokio processes |
 | `ssh2` | `ssh.rs`: russh (ring) |
-| `node-ipc` | Tauri events between windows, same API |
+| `node-ipc` | Tauri events addressed to window labels (`emitTo`); the main window serves, the others are its clients; no handshake polling |
 | `@electron/remote`: `BrowserWindow`, `getGlobal`, `app`, `screen`, `shell`, `clipboard` | `win.rs` (windows with Electron's numeric ids), `winstate.rs` (main.js's window geometry), `open_url` |
 | `dialog.*Sync` | `dialog.rs`: GTK dialogs on Linux; task dialogs and the common item dialogs (rfd) on Windows |
 | `Menu.popup()` | `menu.rs`: native popup menus |
