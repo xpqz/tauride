@@ -50,13 +50,15 @@ pub fn fs_op(op: &str, a: &Value) -> Result {
         "readFile" => fs::read_to_string(p).map(Value::from).map_err(|e| io_err(e, path)),
         "writeFile" | "appendFile" => {
             let data = a.get("data").and_then(Value::as_str).unwrap_or("");
-            let mut f = fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .append(op == "appendFile")
-                .truncate(op == "writeFile")
-                .open(p)
-                .map_err(|e| io_err(e, path))?;
+            let mut o = fs::OpenOptions::new();
+            o.create(true).write(true).append(op == "appendFile").truncate(op == "writeFile");
+            // Node's `mode` applies to newly created files (RIDE_EDITOR's
+            // temp copies are rw-------).
+            #[cfg(unix)]
+            if let Some(mode) = a.get("mode").and_then(Value::as_u64) {
+                std::os::unix::fs::OpenOptionsExt::mode(&mut o, mode as u32);
+            }
+            let mut f = o.open(p).map_err(|e| io_err(e, path))?;
             f.write_all(data.as_bytes()).map_err(|e| io_err(e, path))?;
             Ok(Value::Null)
         }
@@ -80,9 +82,13 @@ pub fn fs_op(op: &str, a: &Value) -> Result {
             Ok(Value::from(names))
         }
         "mkdir" => {
-            let recursive = a.get("recursive").and_then(Value::as_bool).unwrap_or(false);
-            let r = if recursive { fs::create_dir_all(p) } else { fs::create_dir(p) };
-            r.map(|_| Value::Null).map_err(|e| io_err(e, path))
+            let mut b = fs::DirBuilder::new();
+            b.recursive(a.get("recursive").and_then(Value::as_bool).unwrap_or(false));
+            #[cfg(unix)]
+            if let Some(mode) = a.get("mode").and_then(Value::as_u64) {
+                std::os::unix::fs::DirBuilderExt::mode(&mut b, mode as u32);
+            }
+            b.create(p).map(|_| Value::Null).map_err(|e| io_err(e, path))
         }
         "unlink" => fs::remove_file(p).map(|_| Value::Null).map_err(|e| io_err(e, path)),
         "rmdir" => fs::remove_dir(p).map(|_| Value::Null).map_err(|e| io_err(e, path)),

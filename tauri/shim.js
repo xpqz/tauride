@@ -200,13 +200,17 @@
   };
   const fs = {
     readFileSync(p, o) { const s = sync('fs/readFile', { path: p }); return encOf(o) ? s : Buffer.from(s); },
-    writeFileSync(p, d) { sync('fs/writeFile', { path: p, data: toText(d) }); },
-    appendFileSync(p, d) { sync('fs/appendFile', { path: p, data: toText(d) }); },
+    writeFileSync(p, d, o) { sync('fs/writeFile', { path: p, data: toText(d), mode: o && typeof o === 'object' ? o.mode : undefined }); },
+    appendFileSync(p, d, o) { sync('fs/appendFile', { path: p, data: toText(d), mode: o && typeof o === 'object' ? o.mode : undefined }); },
     existsSync: (p) => sync('fs/exists', { path: p }),
     statSync: stat,
     lstatSync: stat,
     readdirSync: (p) => sync('fs/readdir', { path: p }),
-    mkdirSync(p, o) { sync('fs/mkdir', { path: p, recursive: !!(o && o.recursive) }); },
+    // o: a mode number, or {recursive, mode}.
+    mkdirSync(p, o) {
+      const mode = typeof o === 'number' ? o : o && o.mode;
+      sync('fs/mkdir', { path: p, recursive: !!(o && o.recursive), mode });
+    },
     unlinkSync(p) { sync('fs/unlink', { path: p }); },
     rmdirSync(p) { sync('fs/rmdir', { path: p }); },
     rmSync(p, o) { try { sync('fs/unlink', { path: p }); } catch (e) { if (!(o && o.force && e.code === 'ENOENT')) throw e; } },
@@ -848,6 +852,20 @@
       invoke: () => Promise.resolve(),
     },
   };
+
+  // ----------------------------------------------------------- drag & drop
+  // Electron gives dropped files a .path, which webview File objects lack.
+  // Tauri reports native drops with real paths; they reach RIDE's
+  // window.ondrop as an Electron-style drop event.
+  window.addEventListener('DOMContentLoaded', () => {
+    const wv = window.__TAURI__ && window.__TAURI__.webview;
+    if (!wv) return;
+    wv.getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type !== 'drop' || typeof window.ondrop !== 'function') return;
+      const files = payload.paths.map((p) => ({ path: p, name: path.basename(p) }));
+      window.ondrop({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files } });
+    });
+  });
 
   // Exceptions thrown inside this injected script reach the page as an
   // opaque "Script error.", so every exported function logs what it throws.
