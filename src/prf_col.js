@@ -154,9 +154,13 @@
       return cls;
     }).join('')
       .concat(D.mac ? 'u{text-decoration:none;}' : '')
+      // WebKitGTK (Tauri) resolves local() through fontconfig, which answers
+      // a missing family with a near match, so the default local APL385
+      // would shadow the bundled file with a proportional font there.
       .concat(`@font-face {font-family:'apl'; src: ${
-        [...D.prf.customAplFont().split(','), 'APL385 Unicode'].map((x) => x && `local('${x.trim()}'),`).join('')}
-        url('./style/fonts/Apl385.woff') format('woff'), url('./style/fonts/Apl385.ttf') format('truetype');'
+        [...D.prf.customAplFont().split(','), ...(window.__RIDE__ ? [] : ['APL385 Unicode'])]
+          .map((x) => x && `local('${x.trim()}'),`).join('')}
+        url('./style/fonts/Apl385.woff') format('woff'), url('./style/fonts/Apl385.ttf') format('truetype');
       }`)
   );
   const setMonacoTheme = (schema) => {
