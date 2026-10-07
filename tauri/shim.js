@@ -258,6 +258,8 @@
   // ------------------------------------------------------- Tauri plumbing
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const tev = () => window.__TAURI__.event;
+  const thisWindow = () => window.__TAURI__.window.getCurrentWindow();
+  const mainWindow = () => new window.__TAURI__.webviewWindow.WebviewWindow('main', { skip: true });
   const currentId = () => {
     const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
     return label === 'main' ? 1 : +label.slice(1);
@@ -640,147 +642,6 @@
     },
   };
 
-  // ---------------------------------------------------------- BrowserWindow
-  // Window ids come from Rust (main = 1). A window is created when its URL is
-  // loaded; calls made before then are queued behind the creation.
-  // RIDE's own pages load from the app; any other file:// URL (3500⌶ writes
-  // its HTML to a temp file) goes through the ridefile:// scheme.
-  const appPage = /^\/?(index|dialog|status|about|empty)\.html([?#].*)?$/;
-  const appUrl = (u) => {
-    const str = String(u);
-    if (/^file:\/\//.test(str)) {
-      const p = str.replace(/^file:\/\//, '');
-      if (!appPage.test(p)) return `${schemeUrl('ridefile')}${encodeURI(p.startsWith('/') ? p : `/${p}`)}`;
-    }
-    // The main window's location is "tauri://localhost" with no path, so the
-    // host match stops at ? and # as well as /.
-    let s = str.replace(/^file:\/\//, '').replace(/^[a-z]+:\/\/[^/?#]*/i, '');
-    s = s.replace(/^\/+/, '');
-    return s === '' || s.startsWith('?') ? `index.html${s}` : s;
-  };
-  const windows = new Map();
-  let winEvents = null;
-  const ensureWinEvents = () => {
-    if (winEvents) return;
-    winEvents = tev().listen('ride-win', ({ payload: { id, event } }) => {
-      const w = windows.get(id);
-      if (!w) return;
-      if (event === 'closed') w._closed = true;
-      if (event === 'did-finish-load') {
-        w._markLoaded();
-        EventEmitter.prototype.emit.call(w, 'ready-to-show', { sender: w });
-        (w.webContents._ev['did-finish-load'] || []).slice().forEach((f) => f());
-        return;
-      }
-      EventEmitter.prototype.emit.call(w, event, { sender: w, preventDefault() {} });
-    });
-  };
-  class BrowserWindow extends EventEmitter {
-    constructor(opts, existingId) {
-      super();
-      this.id = existingId || sync('win/alloc');
-      this._opts = opts || {};
-      // Calls made before loadURL (RIDE sets titles first) wait for the
-      // window to be created.
-      this._started = !!existingId;
-      this._q = existingId ? Promise.resolve() : new Promise((r) => { this._markCreated = r; });
-      // Scripts run once the page has loaded, as Electron's
-      // executeJavaScript waits for it; existing windows already have.
-      this._loaded = existingId ? Promise.resolve() : new Promise((r) => { this._markLoaded = r; });
-      if (existingId) this._markLoaded = () => {};
-      windows.set(this.id, this);
-      ensureWinEvents();
-      const call = (m, a) => this._call(m, a);
-      this.webContents = {
-        id: this.id,
-        _ev: {},
-        executeJavaScript: (js) => this._loaded.then(() => call('eval', { js })).then(() => undefined),
-        print: () => call('print'),
-        toggleDevTools: () => call('toggleDevTools'),
-        openDevTools: () => { if (!this.webContents.isDevToolsOpened()) call('toggleDevTools'); },
-        isDevToolsOpened: () => false,
-        on(n, f) { (this._ev[n] = this._ev[n] || []).push(f); return this; },
-        once(n, f) { return this.on(n, f); },
-        send() {},
-        focus: () => call('focus'),
-        setZoomFactor() {},
-        getURL: () => location.href,
-      };
-    }
-    loadURL(url) {
-      // A window that exists already navigates (3500⌶ reuses its window).
-      if (this._started) {
-        this._loaded = new Promise((r) => { this._markLoaded = r; });
-        return this._call('navigate', { url: appUrl(url) });
-      }
-      this._started = true;
-      const o = this._opts;
-      const opts = {
-        width: o.width, height: o.height, x: o.x, y: o.y,
-        minWidth: o.minWidth, minHeight: o.minHeight,
-        show: o.show !== false, resizable: o.resizable !== false, title: o.title,
-        parent: o.parent ? o.parent.id : undefined,
-      };
-      const created = invoke('win_create', { id: this.id, url: appUrl(url), opts });
-      created.then(() => this._markCreated(), (e) => { rlog('error', `window ${this.id} create failed:`, e); this._markCreated(); });
-      return created;
-    }
-    loadFile(f) { return this.loadURL(f); }
-    _call(method, args) {
-      const p = (this._q || Promise.resolve()).then(() => invoke('win_call', { id: this.id, method, args: args || {} }));
-      this._q = p.catch(() => {});
-      return p.catch((e) => rlog('warn', `window ${this.id} ${method}:`, e));
-    }
-    _get(prop) {
-      if (this._closed) return undefined;
-      try { return sync('win/get', { id: this.id, prop }); } catch (e) { return undefined; }
-    }
-    show() { this._call('show'); }
-    showInactive() { this._call('showInactive'); }
-    hide() { this._call('hide'); }
-    focus() { this._call('focus'); }
-    blur() {}
-    close() { this._call('close'); }
-    destroy() { this._call('destroy'); }
-    minimize() { this._call('minimize'); }
-    maximize() { this._call('maximize'); }
-    unmaximize() { this._call('unmaximize'); }
-    restore() { this._call('unmaximize'); this._call('show'); }
-    center() { this._call('center'); }
-    setTitle(title) { this._call('setTitle', { title }); }
-    setAlwaysOnTop(flag) { this._call('setAlwaysOnTop', { flag }); }
-    setResizable(flag) { this._call('setResizable', { flag }); }
-    setFullScreen(flag) { this._call('setFullScreen', { flag }); }
-    setBounds(b) { this._call('setBounds', b); }
-    setContentBounds(b) { this._call('setContentBounds', b); }
-    setSize(width, height) { this._call('setSize', { width, height }); }
-    setContentSize(width, height) { this._call('setContentSize', { width, height }); }
-    setMinimumSize(width, height) { this._call('setMinimumSize', { width, height }); }
-    setPosition(x, y) { this._call('setPosition', { x, y }); }
-    setMenu() {}
-    removeMenu() {}
-    setMenuBarVisibility() {}
-    setAutoHideMenuBar() {}
-    isDestroyed() { return this._closed || (this._started && this._get('exists') === false); }
-    isFocused() { return !!this._get('focused'); }
-    isVisible() { return !!this._get('visible'); }
-    isMaximized() { return !!this._get('maximized'); }
-    isMinimized() { return !!this._get('minimized'); }
-    isFullScreen() { return !!this._get('fullScreen'); }
-    getTitle() { return this._get('title') || ''; }
-    getBounds() { return this._get('bounds') || { x: 0, y: 0, width: 0, height: 0 }; }
-    getContentBounds() { return this._get('contentBounds') || { x: 0, y: 0, width: 0, height: 0 }; }
-    getSize() { const b = this.getBounds(); return [b.width, b.height]; }
-    getContentSize() { const b = this.getContentBounds(); return [b.width, b.height]; }
-    getPosition() { const b = this.getBounds(); return [b.x, b.y]; }
-    static fromId(id) { return windows.get(id) || new BrowserWindow(null, id); }
-    static getFocusedWindow() {
-      const id = sync('win/get', { id: currentId(), prop: 'focusedId' });
-      return id ? BrowserWindow.fromId(id) : null;
-    }
-    static getAllWindows() { return sync('win/get', { id: currentId(), prop: 'allIds' }).map(BrowserWindow.fromId); }
-  }
-
   // ------------------------------------------------------ @electron/remote
   const winstate = new Proxy({}, {
     get: (t, k) => (typeof k === 'string' ? sync('winstate/get')[k] : undefined),
@@ -792,18 +653,17 @@
       return k in s ? { value: s[k], enumerable: true, configurable: true, writable: true } : undefined;
     },
   });
-  const workArea = () => ({ x: 0, y: 0, width: window.screen.availWidth, height: window.screen.availHeight });
-  const display = () => ({ id: 0, bounds: workArea(), workArea: workArea(), scaleFactor: window.devicePixelRatio });
   const messageText = (o) => [o.title, o.message, o.detail].filter(Boolean).join('\n\n');
-  // Electron's dialog calls take an optional parent window first.
-  const dialogArgs = (w, o) => (w instanceof BrowserWindow ? [w, o || {}] : [null, w || {}]);
+  // Electron's dialog calls take an optional parent window first: here a
+  // src/wm.js window's native object, { id, rideWindow }.
+  const dialogArgs = (w, o) => (w && w.rideWindow ? [w, o || {}] : [null, w || {}]);
   // Native dialogs (src-tauri/src/dialog.rs) run synchronously, as Electron's
   // *Sync calls do; where they are unavailable, the webview's alert, confirm
   // and prompt stand in.
   const nativeMessageBox = (w, o) => {
     const [win, opts] = dialogArgs(w, o);
     try {
-      return sync('dialog/message', { ...opts, window: (win || BrowserWindow.fromId(currentId())).id });
+      return sync('dialog/message', { ...opts, window: (win ? win.id : currentId()) });
     } catch (e) {
       return { response: fallbackMessageBox(opts), checkboxChecked: false };
     }
@@ -812,7 +672,7 @@
   const nativeFileDialog = (w, o, save) => {
     const [win, opts] = dialogArgs(w, o);
     try {
-      return sync('dialog/file', { ...opts, save, window: (win || BrowserWindow.fromId(currentId())).id }) || undefined;
+      return sync('dialog/file', { ...opts, save, window: (win ? win.id : currentId()) }) || undefined;
     } catch (e) {
       return pickPath(opts, save ? 'Save' : 'Open');
     }
@@ -876,7 +736,7 @@
         clicks.set(id, () => {
           // A native checkbox flips itself; keep Electron's item in step.
           if (app && (it.type === 'checkbox' || it.type === 'radio')) it.checked = !it.checked;
-          if (typeof it.click === 'function') it.click(it, BrowserWindow.fromId(currentId()), {});
+          if (typeof it.click === 'function') it.click(it, { id: currentId(), rideWindow: true }, {});
           else if (it.role) runRole(it.role);
         });
       }
@@ -925,13 +785,11 @@
     readText: () => '',
   };
   const remote = {
-    BrowserWindow,
     Menu,
     MenuItem,
     process: proc,
     shell,
     clipboard,
-    screen: { getDisplayMatching: display, getDisplayNearestPoint: display, getPrimaryDisplay: display, getAllDisplays: () => [display()] },
     dialog: {
       showMessageBoxSync,
       showMessageBox: (w, o) => Promise.resolve(nativeMessageBox(w, o)),
@@ -959,18 +817,15 @@
       getName: () => 'Tauride',
       getVersion: () => ((window.D && window.D.versionInfo) || {}).version || '',
       getLocale: () => builtins['os-locale'].sync(),
-      quit: () => invoke('win_call', { id: 1, method: 'close', args: {} }),
-      exit: () => invoke('win_call', { id: 1, method: 'destroy', args: {} }),
+      quit: () => mainWindow().close(),
+      exit: () => mainWindow().destroy(),
       relaunch() {},
     },
     getGlobal(name) {
       if (name === 'D') return { win: nodePlatform === 'win32', mac: nodePlatform === 'darwin' };
-      if (name === 'elw') return BrowserWindow.fromId(1);
       if (name === 'winstate') return winstate;
       return undefined;
     },
-    getCurrentWindow: () => BrowserWindow.fromId(currentId()),
-    getCurrentWebContents: () => BrowserWindow.fromId(currentId()).webContents,
     require: (id) => window.require(id),
   };
   builtins['@electron/remote'] = remote;
@@ -992,7 +847,7 @@
   // Electron's window.close() runs beforeunload first and closes unless the
   // handler cancels; WebKit ignores close() on a window no script opened,
   // which left Ride's Quit doing nothing. Close requests from the window
-  // manager or BrowserWindow.close() arrive here too (src-tauri/src/win.rs
+  // manager or another window's close() arrive here too (src-tauri/src/win.rs
   // holds them for the page), so Ride can confirm quitting a session and
   // tell a spawned interpreter to exit.
   const closeWindow = () => {
@@ -1002,7 +857,7 @@
       const r = h(ev);
       if (ev.returnValue === false || r === false || typeof r === 'string') return;
     }
-    invoke('win_call', { id: currentId(), method: 'destroy', args: {} });
+    thisWindow().destroy();
   };
   window.close = closeWindow;
   window.addEventListener('DOMContentLoaded', () => {
@@ -1040,7 +895,7 @@
     });
   };
   Object.keys(builtins).forEach((k) => { if (typeof builtins[k] !== 'function') traced(builtins[k], k); });
-  [BrowserWindow.prototype, IpcClient.prototype, IpcServer.prototype, EventEmitter.prototype].forEach((p) => traced(p, p.constructor.name));
+  [IpcClient.prototype, IpcServer.prototype, EventEmitter.prototype].forEach((p) => traced(p, p.constructor.name));
 
   window.__rideBuiltins = builtins;
   if (R.env.RIDE_TAURI_DEBUG) rlog('debug', 'shim ready');

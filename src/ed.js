@@ -464,7 +464,7 @@ D.Ed.prototype = {
     } // reveal in golden layout
     if (D.ide.floating) {
       ed.updateTitle();
-      D.el.getCurrentWindow().focus();
+      D.wm.current().focus();
     }
     window.focused || window.focus();
     ed.me.focus();
@@ -488,7 +488,7 @@ D.Ed.prototype = {
       this.me.getModel().dispose();
       delete D.ide.wins[this.id];
       this.container && this.container.close();
-      !D.ide.gl.root.contentItems.length && D.el.getCurrentWindow().hide();
+      !D.ide.gl.root.contentItems.length && D.wm.current().hide();
     }
   },
   prompt(x) {

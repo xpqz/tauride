@@ -89,27 +89,22 @@ fn init_payload() -> Value {
     })
 }
 
-/// Every RIDE window gets the startup payload and the shim ahead of its own
-/// scripts.
-pub fn window_builder<'a, R: Runtime, M: Manager<R>>(
-    manager: &'a M,
-    label: &str,
-    url: WebviewUrl,
-) -> WebviewWindowBuilder<'a, R, M> {
+/// Every webview, whether Rust or a page created its window, gets the
+/// startup payload and the shim ahead of its own scripts, and every window
+/// the Rust-side handling in win.rs.
+fn ride_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let script = format!("window.__RIDE__ = {};\n{}", init_payload(), SHIM);
-    WebviewWindowBuilder::new(manager, label, url)
-        .title("Tauride")
-        .initialization_script(&script)
-        // Electron's did-finish-load: the shim holds executeJavaScript until
-        // the window's page has loaded.
+    tauri::plugin::Builder::new("ride")
+        .js_init_script(script)
+        // Electron's did-finish-load: src/wm.js holds scripts meant for a new
+        // window until its page has loaded.
         .on_page_load(|w, p| {
             if matches!(p.event(), tauri::webview::PageLoadEvent::Finished) {
-                let _ = w.app_handle().emit(
-                    "ride-win",
-                    json!({ "id": win::id_of(w.label()), "event": "did-finish-load" }),
-                );
+                let _ = w.app_handle().emit("ride-page-load", json!({ "label": w.label() }));
             }
         })
+        .on_window_ready(|w| win::watch(&w))
+        .build()
 }
 
 /// ridefile://localhost/<path>: local files for windows RIDE points at a
@@ -166,8 +161,6 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
         (Some("proc"), Some("execSync")) => proc::exec_sync(args),
         (Some("dialog"), Some("message")) => dialog::message(app, args),
         (Some("dialog"), Some("file")) => dialog::file(app, args),
-        (Some("win"), Some("alloc")) => Ok(Value::from(win::alloc())),
-        (Some("win"), Some("get")) => win::get(app, args),
         (Some("winstate"), Some("get")) => Ok(app.state::<winstate::WinState>().get()),
         (Some("winstate"), Some("set")) => {
             let key = args.get("key").and_then(Value::as_str).ok_or_else(|| sync::err("EINVAL", "missing key"))?;
@@ -180,6 +173,7 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(ride_plugin())
         .register_uri_scheme_protocol("ridefile", |_ctx, req| local_file(&req))
         .register_uri_scheme_protocol("ridesync", |ctx, req| {
             // On Windows the scheme is http://ridesync.localhost, cross-origin
@@ -209,8 +203,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             log,
             open_url,
-            win::win_create,
-            win::win_call,
+            win::win_op,
             net::net_connect,
             net::net_connect_tls,
             net::net_write,
@@ -231,7 +224,8 @@ pub fn run() {
         .on_menu_event(|app, e| menu::on_event(app, e.id().as_ref()))
         .setup(|app| {
             let (pos, width, height) = winstate::restore(app.handle(), "launchWin");
-            let mut b = window_builder(app.handle(), "main", WebviewUrl::App("index.html".into()))
+            let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("Tauride")
                 .inner_size(width, height);
             // macOS paints this behind the title bar too.
             #[cfg(not(target_os = "macos"))]
@@ -245,7 +239,6 @@ pub fn run() {
             if app.state::<winstate::WinState>().get()["devTools"].as_bool().unwrap_or(false) {
                 main.open_devtools();
             }
-            win::watch(&main);
             Ok(())
         })
         .run(tauri::generate_context!())

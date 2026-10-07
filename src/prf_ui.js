@@ -45,8 +45,7 @@
   D.prf_ui = function PrfUI(tab) {
     if (D.prf_bw) {
       D.ipc.server.emit(D.prf_bw.socket, 'show', tab);
-      const bw = D.el.BrowserWindow.fromId(D.prf_bw.id);
-      bw.show();
+      D.prf_bw.win.show();
       return !1;
     }
     if (D.ide && D.ide.floating) {

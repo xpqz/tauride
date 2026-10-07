@@ -45,26 +45,24 @@
     const details = D.aboutDetails();
 
     if (D.el) {
-      const w = new D.el.BrowserWindow({
+      const w = D.wm.create({
         width: 600,
         height: 500,
         minWidth: 600,
         minHeight: 500,
-        parent: D.elw,
+        parent: D.wm.main(),
         modal: true,
         webPreferences: {
           contextIsolation: true,
           nodeIntegration: false,
         },
-      });
-      D.elm.enable(w.webContents);
+      }, `file://${__dirname}/about.html`);
       D.abtw = w;
-      w.loadURL(`file://${__dirname}/about.html`);
-      w.webContents.executeJavaScript(`document.getElementById('abt_ta').value=${JSON.stringify(details)};`);
-      w.webContents.executeJavaScript(`document.getElementById('theme_dark').disabled = ${D.theme !== 'dark'}`);
-      w.webContents.executeJavaScript(`document.getElementById('theme_light').disabled = ${D.theme !== 'light'};`);
+      w.eval(`document.getElementById('abt_ta').value=${JSON.stringify(details)};`);
+      w.eval(`document.getElementById('theme_dark').disabled = ${D.theme !== 'dark'}`);
+      w.eval(`document.getElementById('theme_light').disabled = ${D.theme !== 'light'};`);
 
-      w.on('closed', () => { delete D.abtw; });
+      w.onClosed(() => { delete D.abtw; });
     } else {
       if (!d) {
         d = I.abt;

@@ -146,7 +146,7 @@
     init(t) {
       q = J.shc;
       q.prnt.onclick = () => {
-        D.el.getCurrentWindow().webContents.print({ printBackground: true });
+        D.wm.current().print();
       };
       t.onmouseover = (e) => {
         const u = e.target.closest('.shc_del');

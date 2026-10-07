@@ -104,7 +104,7 @@
       let text = typeof x.text === 'string' ? x.text : x.text.join('\n');
       if (D.el) {
         const { bwId } = D.ide.focusedWin;
-        const bw = bwId ? D.el.BrowserWindow.fromId(bwId) : D.elw;
+        const bw = (bwId ? D.wm.get(bwId) : D.wm.main()).native;
         const r = D.el.dialog.showMessageBoxSync(bw, {
           message: text,
           title: x.title || '',
@@ -147,8 +147,7 @@
       if (D.dlg_bw) {
         dlgCb[x.token] = f;
         D.ipc.server.emit(D.dlg_bw.socket, 'show', x);
-        const bw = D.el.BrowserWindow.fromId(D.dlg_bw.id);
-        bw.show();
+        D.dlg_bw.win.show();
         return;
       }
       const value = x.defaultValue || null;
@@ -217,7 +216,7 @@
       }
       if (D.el && D.win) {
         const { bwId } = D.ide.focusedWin;
-        const bw = bwId ? D.el.BrowserWindow.fromId(bwId) : D.elw;
+        const bw = (bwId ? D.wm.get(bwId) : D.wm.main()).native;
         D.el.dialog.showMessageBox(bw, {
           message: `${x.text}\n${x.subtext}`,
           title: x.title || '',
@@ -238,8 +237,7 @@
       } else if (D.dlg_bw) {
         dlgCb[x.token] = f;
         D.ipc.server.emit(D.dlg_bw.socket, 'show', x);
-        const bw = D.el.BrowserWindow.fromId(D.dlg_bw.id);
-        bw.show();
+        D.dlg_bw.win.show();
         return;
       }
       const { esc } = D.util;
@@ -300,20 +298,20 @@
     },
   };
   $.alert = (m, t, f) => { // m:message,t:title,f:callback
-    D.el ? D.el.dialog.showMessageBoxSync(D.elw, { message: m, title: t, buttons: ['OK'] }) : alert(m);
+    D.el ? D.el.dialog.showMessageBoxSync(D.wm.main().native, { message: m, title: t, buttons: ['OK'] }) : alert(m);
     f && f();
   };
   $.err = (m, t, f) => {
     if (typeof t === 'function') { f = t; t = ''; }
     t = t || 'Error';
     D.el ? D.el.dialog.showMessageBoxSync(
-      D.el.getCurrentWindow(),
+      D.wm.current().native,
       { type: 'error', message: m, title: t, buttons: ['OK'] },
     ) : alert(m);
     f && f();
   };
   $.confirm = (m, t, f) => {
-    f(D.el ? 1 - D.el.dialog.showMessageBoxSync(D.elw, {
+    f(D.el ? 1 - D.el.dialog.showMessageBoxSync(D.wm.main().native, {
       message: m, title: t, type: 'question', buttons: ['Yes', 'No'], cancelId: 1,
     }) : +confirm(m));
   };

@@ -129,7 +129,7 @@
         return;
       }
       if (D.el && D.isLocalInterpreter) {
-        const x = D.el.dialog.showOpenDialogSync(D.elw, {
+        const x = D.el.dialog.showOpenDialogSync(D.wm.main().native, {
           title: 'Open file',
           filters: [],
           properties: ['openFile'],
@@ -243,7 +243,7 @@
       me.revealRange(monaco.Range.fromPositions(me.getPosition()));
     },
     JSC() {
-      let w; D.el && (w = D.el.BrowserWindow.getFocusedWindow()) && w.webContents.toggleDevTools();
+      D.wm && D.wm.current().toggleDevTools();
     },
     LOG() {
       if (!D.el) return;
@@ -251,30 +251,28 @@
         D.ipc.of.ride_master.emit('LOG');
         return;
       }
-      const w = new D.el.BrowserWindow({
+      const w = D.wm.create({
         width: 400,
         height: 500,
-        parent: D.elw,
+        parent: D.wm.main(),
+        title: `Protocol Log - ${D.ide.caption}`,
         webPreferences: {
           contextIsolation: true,
           nodeIntegration: false,
         },
-      });
-      D.elm.enable(w.webContents);
+      }, `file://${__dirname}/empty.html`);
       const cn = nodeRequire(`${__dirname}/src/cn`);
       D.logw = w;
-      w.setTitle(`Protocol Log - ${D.ide.caption}`);
-      w.loadURL(`file://${__dirname}/empty.html`);
-      w.webContents.executeJavaScript('var d = document, h=d.documentElement, b=d.body, e=d.createElement("div");'
+      w.eval('var d = document, h=d.documentElement, b=d.body, e=d.createElement("div");'
                                     + 'b.style.fontFamily="monospace";b.style.overflow="scroll";'
                                     + 'e.style.whiteSpace="pre";!!b.appendChild(e);');
       const f = (x) => {
         const t = JSON.stringify(`${x}\n`);
-        w.webContents.executeJavaScript(`e.textContent += ${t}; h.scrollTop = h.scrollHeight`);
+        w.eval(`e.textContent += ${t}; h.scrollTop = h.scrollHeight`);
       };
       f(cn.getLog().filter((x) => x).join('\n'));
       cn.addLogListener(f);
-      w.on('closed', () => { delete D.logw; cn.rmLogListener(f); });
+      w.onClosed(() => { delete D.logw; cn.rmLogListener(f); });
     },
     TIP() {
       const w = D.ide.focusedWin;

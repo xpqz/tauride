@@ -96,27 +96,28 @@
     } = prf;
     x += prf.ox * (id - 1);
     y += prf.oy * (id - 1);
-    const b = D.el.screen.getDisplayMatching({
+    return D.wm.displayBounds({
       x, y, width, height,
-    }).bounds;
-    const vw = Math.max(0, Math.min(x + width, b.x + b.width) - Math.max(x, b.x));
-    const vh = Math.max(0, Math.min(y + height, b.y + b.height) - Math.max(y, b.y));
-    if (width * height > 2 * vw * vh) {
-      // saved window position is now mostly off screen
-      x = null; y = null;
-      width = Math.min(width, b.width);
-      height = Math.min(height, b.height);
-    }
-    return {
-      x, y, width, height,
-    };
+    }).then((b) => {
+      const vw = Math.max(0, Math.min(x + width, b.x + b.width) - Math.max(x, b.x));
+      const vh = Math.max(0, Math.min(y + height, b.y + b.height) - Math.max(y, b.y));
+      if (width * height > 2 * vw * vh) {
+        // saved window position is now mostly off screen
+        x = null; y = null;
+        width = Math.min(width, b.width);
+        height = Math.min(height, b.height);
+      }
+      return {
+        x, y, width, height,
+      };
+    });
   }
   D.IPC_CreateWindow = function IPCCreateWindow(seq) {
-    let opts = {
+    const opts = {
       show: false,
       fullscreen: false,
       fullscreenable: false,
-      parent: D.elw,
+      parent: D.wm.main(),
       alwaysOnTop: false,
       webPreferences: {
         contextIsolation: false,
@@ -125,10 +126,9 @@
         enableDeprecatedPaste: true,
       },
     };
-    opts = Object.assign(opts, WindowRect(seq, D.prf.editWins()));
-    const bw = new D.el.BrowserWindow(opts);
-    D.elm.enable(bw.webContents);
-    bw.loadURL(`${window.location}?type=editor&winId=${bw.id}&appid=${D.ipc.config.appspace}`);
+    WindowRect(seq, D.prf.editWins()).then((r) => {
+      D.wm.create({ ...opts, ...r }, (id) => `${window.location}?type=editor&winId=${id}&appid=${D.ipc.config.appspace}`);
+    });
   };
 
   D.IPC_Server = function IPCServer() {
@@ -155,7 +155,7 @@
       });
       srv.on('prfShow', x => D.prf_ui(x));
       srv.on('prfClose', () => {
-        D.el.BrowserWindow.fromId(D.prf_bw.id).hide();
+        D.prf_bw.win.hide();
         D.ide && D.ide.focusMRUWin();
       });
       srv.on('statCreated', (data, socket) => {
@@ -173,7 +173,7 @@
       });
       srv.on('dialogClose', ([t, r]) => {
         D.util.replyDialog(t, r);
-        D.el.BrowserWindow.fromId(D.dlg_bw.id).hide();
+        D.dlg_bw.win.hide();
         D.ide && D.ide.focusMRUWin();
       });
       srv.on('browserCreated', (bwId, socket) => {
@@ -236,12 +236,15 @@
       return;
     }
     if (wp.id > 0) wp = Object.assign(new D.IPC_WindowProxy(), wp);
-    const bw = D.el.BrowserWindow.fromId(wp.bwId);
-    bw.show();
-    if (!D.prf.editWinsRememberPos()) {
-      const o = WindowRect(1 + (wp.bwId - D.pwins[0].bwId), D.prf.editWins());
-      if (o.x == null) bw.setContentSize(o.width, o.height);
-      else bw.setContentBounds(o);
+    const w = D.wm.get(wp.bwId);
+    // Size and place the window before showing it, so the editor is laid out once.
+    if (D.prf.editWinsRememberPos()) w.show();
+    else {
+      WindowRect(1 + (wp.bwId - D.pwins[0].bwId), D.prf.editWins()).then((o) => {
+        if (o.x == null) w.setContentSize(o.width, o.height);
+        else w.setContentBounds(o);
+        w.show();
+      });
     }
     const ped = D.pendingEditors.shift();
     wp.id = ped.editorOpts.id;
@@ -266,8 +269,8 @@
     hasFocus() { return this === D.ide.focusedWin; },
     close() {
       if (this === D.pwins[0] && D.prf.editWinsRememberPos()) {
-        const b = D.el.BrowserWindow.fromId(this.bwId).getContentBounds();
-        D.prf.editWins(Object.assign(D.prf.editWins(), b));
+        D.wm.get(this.bwId).contentBounds()
+          .then((b) => D.prf.editWins(Object.assign(D.prf.editWins(), b)));
       }
       this.emit('close');
     },

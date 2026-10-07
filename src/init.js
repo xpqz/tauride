@@ -122,9 +122,9 @@ const Console = console;
       } else {
         const winsLoaded = D.IPC_Server();
         const appid = D.ipc.config.appspace;
-        let bw = new D.el.BrowserWindow({
+        let w = D.wm.create({
           show: false,
-          parent: D.elw,
+          parent: D.wm.main(),
           alwaysOnTop: false,
           fullscreen: false,
           fullscreenable: false,
@@ -136,13 +136,11 @@ const Console = console;
             nodeIntegration: true,
             enableDeprecatedPaste: true,
           },
-        });
-        D.elm.enable(bw.webContents);
-        bw.loadURL(`${loc}?type=prf&appid=${appid}`);
-        D.prf_bw = { id: bw.id };
-        bw = new D.el.BrowserWindow({
+        }, `${loc}?type=prf&appid=${appid}`);
+        D.prf_bw = { id: w.id, win: w };
+        w = D.wm.create({
           show: false,
-          parent: D.elw,
+          parent: D.wm.main(),
           alwaysOnTop: false,
           fullscreen: false,
           fullscreenable: false,
@@ -158,13 +156,11 @@ const Console = console;
             nodeIntegration: true,
             enableDeprecatedPaste: true,
           },
-        });
-        D.elm.enable(bw.webContents);
-        bw.loadURL(`file://${__dirname}/dialog.html?appid=${appid}`);
-        D.dlg_bw = { id: bw.id };
-        bw = new D.el.BrowserWindow({
+        }, `file://${__dirname}/dialog.html?appid=${appid}`);
+        D.dlg_bw = { id: w.id, win: w };
+        w = D.wm.create({
           show: false,
-          parent: D.elw,
+          parent: D.wm.main(),
           alwaysOnTop: false,
           fullscreen: false,
           fullscreenable: false,
@@ -179,11 +175,9 @@ const Console = console;
             enableRemoteModule: true,
             nodeIntegration: true,
           },
-        });
-        D.elm.enable(bw.webContents);
-        bw.loadURL(`file://${__dirname}/status.html?appid=${appid}`);
-        D.stw_bw = { id: bw.id };
-        D.elw.focus();
+        }, `file://${__dirname}/status.html?appid=${appid}`);
+        D.stw_bw = { id: w.id, win: w };
+        D.wm.main().focus();
         Promise.all(winsLoaded).then(() => {
           I.splash.hidden = 1;
           nodeRequire(`${__dirname}/src/cn`)();
@@ -323,8 +317,7 @@ const Console = console;
             // Tauri pages cannot load file:// scripts; run the file's text in
             // this window instead.
             if (window.__RIDE__) {
-              D.el.getCurrentWindow().webContents
-                .executeJavaScript(nodeRequire('fs').readFileSync(f, 'utf8'));
+              D.wm.current().eval(nodeRequire('fs').readFileSync(f, 'utf8'));
             } else $.getScript(`file://${f}`);
           });
       }

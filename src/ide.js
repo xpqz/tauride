@@ -72,7 +72,7 @@ D.IDE = function IDE(opts = {}) {
       });
       const j = i < 0 ? 0 : (i + a.length + x) % a.length;
       const w = a[j];
-      if (!w.bwId) D.elw.focus();
+      if (!w.bwId) D.wm.main().focus();
       w.focus(); return !1;
     };
     D.el && D.prf.floating() && D.IPC_CreateWindow(1);
@@ -419,8 +419,8 @@ D.IDE = function IDE(opts = {}) {
   });
   D.prf.statusWindow(0);
   D.prf.statusWindow((x) => {
-    const sw = D.el.BrowserWindow.fromId(D.stw_bw.id);
-    x ? sw.show() : sw.hide();
+    // Only the main window owns the status window.
+    D.stw_bw && (x ? D.stw_bw.win.show() : D.stw_bw.win.hide());
     D.ide && D.ide.focusMRUWin();
     updMenu();
   });
@@ -713,7 +713,7 @@ D.IDE = function IDE(opts = {}) {
       if (D.el && D.prf.floating() && !ide.dead) {
         D.IPC_LinkEditor({ editorOpts, ee });
         done = 1;
-      } else if (D.elw && !D.elw.isFocused()) D.elw.focus();
+      } else if (D.wm) D.wm.main().focus();
       if (done) return;
       const ed = new D.Ed(ide, editorOpts);
       ed.focusTS = +new Date();
@@ -752,26 +752,27 @@ D.IDE = function IDE(opts = {}) {
     },
     ShowHTML(x) {
       if (D.el) {
-        let w = ide.w3500;
-        if (!w || w.isDestroyed()) {
-          ide.w3500 = new D.el.BrowserWindow({
-            width: 800,
-            height: 500,
-            webPreferences: {
-              contextIsolation: true,
-              nodeIntegration: false,
-            },
-          });
-          w = ide.w3500;
-        }
-        D.elm.enable(w.webContents);
         const fs = nodeRequire('fs');
         const path = nodeRequire('path');
         const file = path.join(D.el.app.getPath('temp'), 'ib3500.html');
         fs.existsSync(file) && fs.rmSync(file, { force: true });
         const html = `<?xml version="1.0" encoding="UTF-8"?>${x.html}`;
         fs.writeFileSync(file, html, { encoding: 'utf8' });
-        w.loadURL(`file://${file}`);
+        let w = ide.w3500;
+        if (w) {
+          w.navigate(`file://${file}`);
+        } else {
+          w = D.wm.create({
+            width: 800,
+            height: 500,
+            webPreferences: {
+              contextIsolation: true,
+              nodeIntegration: false,
+            },
+          }, `file://${file}`);
+          ide.w3500 = w;
+          w.onClosed(() => { if (ide.w3500 === w) delete ide.w3500; });
+        }
         w.setTitle(x.title || '3500 I-beam');
       } else {
         const init = () => {
@@ -960,7 +961,7 @@ D.IDE.prototype = {
   },
   focusWin(w) {
     if (this.hadErr === 0) {
-      D.elw && D.elw.focus();
+      D.wm && D.wm.main().focus();
       this.wins[0].focus();
       delete this.wins[0].hadErrTmr;
       this.hadErr = -1;
@@ -968,7 +969,7 @@ D.IDE.prototype = {
   },
   focusMRUWin() { // most recently used
     const w = this.getMRUWin();
-    D.elw && !w.bwId && D.elw.focus();
+    D.wm && !w.bwId && D.wm.main().focus();
     w.focus();
   },
   getMRUWin(tracer) { // most recently focused window (filtered by tracer if set)
@@ -1062,7 +1063,7 @@ D.IDE.prototype = {
         } else {
           setTimeout(() => {
             window.focus();
-            const r = D.el.dialog.showMessageBoxSync(D.el.getCurrentWindow(), {
+            const r = D.el.dialog.showMessageBoxSync(D.wm.current().native, {
               title: 'Save?',
               buttons: ['Yes', 'No', 'Cancel'],
               cancelId: -1,

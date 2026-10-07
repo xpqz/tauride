@@ -43,33 +43,48 @@ scripts. It provides the subset of Node and Electron Ride uses:
 | `child_process.spawn` | `proc.rs`: tokio processes |
 | `ssh2` | `ssh.rs`: russh (ring) |
 | `node-ipc` | Tauri events addressed to window labels (`emitTo`); the main window serves, the others are its clients; no handshake polling |
-| `@electron/remote`: `BrowserWindow`, `getGlobal`, `app`, `screen`, `shell`, `clipboard` | `win.rs` (windows with Electron's numeric ids), `winstate.rs` (main.js's window geometry), `open_url` |
+| `BrowserWindow`, `getCurrentWindow`, `screen` | not emulated: Ride's code calls `src/wm.js` (below) |
+| `@electron/remote`: `getGlobal`, `app`, `shell`, `clipboard` | `winstate.rs` (main.js's window geometry), `open_url` |
 | `dialog.*Sync` | `dialog.rs`: GTK dialogs on Linux; task dialogs and the common item dialogs (rfd) on Windows |
 | `Menu.popup()` | `menu.rs`: native popup menus |
 
+Windows: `src/wm.js` gives Ride's code one small window API (create, find,
+show/hide/focus/close, size, title, run a script, print, devtools) with two
+implementations: Electron's `BrowserWindow`, and Tauri's JS window API
+(`WebviewWindow`, monitors), where windows are addressed by label (`main`,
+`w<id>`) and queries are promises. Calls on a window wait until Tauri has
+created it. A small plugin (`ride_plugin` in `lib.rs`) injects the shim into
+every webview, however its window was created, reports page loads, and
+attaches `win.rs`'s handling to every window: close requests go to the page
+first (Ride's `onbeforeunload`), the main window's geometry is saved, and the
+app exits with the main window. `win_op` does what the JS API cannot do to
+another window: run a script in it, print it, toggle its devtools, navigate it.
+
 Two channels connect the webview to Rust:
 
-- **Synchronous**: Ride calls `fs.readFileSync`, `dialog.showMessageBoxSync`,
-  `BrowserWindow.isFocused()` and the like synchronously. The shim answers
-  them with synchronous XHR to a custom `ridesync://` scheme
-  (`http://ridesync.localhost` on Windows, where WebView2 preflights the
-  POST), which Rust serves on the main thread; window getters called there
-  run inline (Tauri does not queue them on the main thread), so they cannot
-  deadlock. Windows are created from an async command, as building one from
-  a synchronous command deadlocks on Windows.
+- **Synchronous**: Ride calls `fs.readFileSync`, `dialog.showMessageBoxSync`
+  and the like synchronously. The shim answers them with synchronous XHR to
+  a custom `ridesync://` scheme (`http://ridesync.localhost` on Windows,
+  where WebView2 preflights the POST), which Rust serves on the main thread.
 - **Asynchronous**: sockets, processes and windows use Tauri commands and
-  events (`ride-net`, `ride-proc`, `ride-ssh`, `ride-win`, `ride-menu`).
+  events (`ride-net`, `ride-proc`, `ride-ssh`, `ride-ipc`, `ride-menu`,
+  `ride-page-load`).
 
 A second scheme, `ridefile://`, serves local files to windows Ride points at
 a `file://` URL outside the app (3500⌶ writes its HTML to a temp file).
 
-Ride's frontend changes, all marked:
+Ride's frontend changes:
+
+- Window management goes through `src/wm.js` (`init.js`, `ipc.js`, `util.js`,
+  `ide.js`, `abt.js`, `km.js`, `ed.js`, `cn.js`, `se.js`, `prf_*.js`,
+  `dialog.html`, `status.html`); queries such as a window's bounds are now
+  promises.
 
 - `dialog.html`, `status.html`: a top-level `ipc` renamed `nodeIpc`; on
   Linux wry defines `window.ipc`, and the duplicate declaration rejected the
   whole script.
 - `src/menu.js`: the HTML menu under Tauri.
-- `src/init.js`: `RIDE_JS` files run through `executeJavaScript`, as Tauri
+- `src/init.js`: `RIDE_JS` files run through `D.wm.current().eval`, as Tauri
   pages cannot load `file://` scripts.
 - `src/abt.js`: About reports Tauri and the webview instead of Electron,
   Chrome and Node.

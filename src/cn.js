@@ -800,7 +800,7 @@
     I.cn.onkeyup = (x) => {
       const k = D.util.fmtKey(x);
       if (D.el && k === 'F12') {
-        D.elw.webContents.toggleDevTools();
+        D.wm.main().toggleDevTools();
         return !1;
       }
       return !0;
@@ -982,12 +982,12 @@
     // };
     const toggleConfig = (show) => {
       const expanded = (show === undefined) ? !$(q.rhs).is(':visible') : !!show;
-      const { height } = D.elw.getContentBounds();
       const newWidth = expanded ? winstate.launchWin.expandedWidth : winstate.launchWin.width;
       winstate.launchWin.expanded = expanded;
       const minwidth = winstate.dx + (expanded ? 885 : 400);
-      D.elw.setMinimumSize(minwidth, 400);
-      D.elw.setContentSize(newWidth, height);
+      const w = D.wm.main();
+      w.setMinSize(minwidth, 400);
+      w.contentBounds().then(({ height }) => w.setContentSize(newWidth, height));
       setTimeout(() => { I.cn.toggleMaximize(expanded ? winstate.launchWin.width : 0); }, 10);
       nodeRequire('electron').ipcRenderer.send('save-win', true);
     };

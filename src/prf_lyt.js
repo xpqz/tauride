@@ -40,7 +40,7 @@
       q = J.lyt;
       q.prnt.onclick = () => {
         q.pfx.blur();
-        D.el.getCurrentWindow().webContents.print({ printBackground: true });
+        D.wm.current().print();
       };
       q.lc.innerHTML = `<option>${Object.keys(layouts).sort().join('<option>')}`;
       const inputs = q.kbd.querySelectorAll('input');

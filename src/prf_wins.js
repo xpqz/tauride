@@ -124,7 +124,7 @@
       return 0;
     },
     print() {
-      D.el.getCurrentWindow().webContents.print({ printBackground: true });
+      D.wm.current().print();
     },
   };
 }
