@@ -128,6 +128,7 @@
     env: R.env,
     argv: R.argv,
     pid: R.pid,
+    execPath: R.paths.exe,
     platform: R.platform,
     arch: R.arch,
     // No `electron` key and no process.type: Monaco's loader treats a page
@@ -308,6 +309,210 @@
   ipc.disconnect = (id) => { if (ipc.of[id]) { ipc.of[id]._stop(); delete ipc.of[id]; } };
   ipc.default = ipc;
   builtins['node-ipc'] = ipc;
+
+  // -------------------------------------------------------------------- net
+  // Sockets and servers live in Rust (src-tauri/src/net.rs) under ids this
+  // side chooses, so listeners attach before the async work completes. Data
+  // received before a 'data' listener exists is held back, as Node's paused
+  // streams do; RIDE attaches its listener only once connected.
+  let seq = 0;
+  const newId = (kind) => `${window.__TAURI_INTERNALS__.metadata.currentWindow.label}:${kind}${seq += 1}`;
+  const nodeErr = (e) => {
+    const x = new Error((e && e.message) || String(e));
+    if (e && e.code) x.code = e.code;
+    return x;
+  };
+  const sockets = new Map();
+  const servers = new Map();
+  let netEvents = null;
+  const netReady = () => {
+    if (!netEvents) {
+      netEvents = tev().listen('ride-net', ({ payload: p }) => {
+        const t = sockets.get(p.id) || servers.get(p.id);
+        if (t) t._event(p);
+      });
+    }
+    return netEvents;
+  };
+  class Socket extends EventEmitter {
+    constructor(id) {
+      super();
+      this._id = id || newId('s');
+      this._held = [];
+      this.destroyed = false;
+      this.connecting = false;
+      sockets.set(this._id, this);
+    }
+    on(n, f) {
+      super.on(n, f);
+      if (n === 'data' && this._held.length) {
+        const held = this._held;
+        this._held = [];
+        queueMicrotask(() => held.forEach((p) => this._event(p)));
+      }
+      return this;
+    }
+    _event(p) {
+      if ((p.event === 'data' || p.event === 'end') && (!this.listenerCount('data') || this._held.length)) {
+        this._held.push(p);
+        return;
+      }
+      if (p.event === 'data') this.emit('data', Buffer.from(p.data, 'base64'));
+      else if (p.event === 'end') this.emit('end');
+      else if (p.event === 'error') this.emit('error', nodeErr(p.error));
+      else if (p.event === 'close') {
+        this.destroyed = true;
+        sockets.delete(this._id);
+        this.emit('close', false);
+      }
+    }
+    write(d, enc, cb) {
+      const done = typeof enc === 'function' ? enc : cb;
+      const buf = typeof d === 'string' ? Buffer.from(d, typeof enc === 'string' ? enc : 'utf8') : Buffer.from(d);
+      invoke('net_write', { id: this._id, data: buf.toString('base64') }).then(
+        () => done && done(),
+        (e) => this.emit('error', nodeErr({ code: 'EPIPE', message: String(e) })),
+      );
+      return true;
+    }
+    end(d) { if (d) this.write(d); invoke('net_end', { id: this._id, destroy: false }); return this; }
+    destroy() { this.destroyed = true; invoke('net_end', { id: this._id, destroy: true }); return this; }
+    address() { return { address: this.localAddress, port: this.localPort }; }
+    setNoDelay() { return this; }
+    setKeepAlive() { return this; }
+    setTimeout() { return this; }
+    setEncoding() { return this; }
+    ref() { return this; }
+    unref() { return this; }
+  }
+  const connect = (...a) => {
+    let o;
+    if (a[0] && typeof a[0] === 'object') o = a[0];
+    else o = { port: a[0], host: typeof a[1] === 'string' ? a[1] : undefined };
+    const cb = a.find((f) => typeof f === 'function');
+    const s = new Socket();
+    s.connecting = true;
+    if (cb) s.once('connect', cb);
+    netReady()
+      .then(() => invoke('net_connect', { id: s._id, host: o.host || 'localhost', port: +o.port }))
+      .then((info) => {
+        Object.assign(s, info);
+        s.connecting = false;
+        s.emit('connect');
+        s.emit('ready');
+      }, (e) => {
+        s.connecting = false;
+        sockets.delete(s._id);
+        s.emit('error', nodeErr(e));
+        s.emit('close', true);
+      });
+    return s;
+  };
+  class Server extends EventEmitter {
+    constructor(cb) {
+      super();
+      this._id = newId('l');
+      this.listening = false;
+      if (cb) this.on('connection', cb);
+      servers.set(this._id, this);
+    }
+    _event(p) {
+      if (p.event === 'connection') {
+        const c = new Socket(p.conn);
+        c.remoteAddress = p.remoteAddress;
+        c.remotePort = p.remotePort;
+        this.emit('connection', c);
+      } else if (p.event === 'error') this.emit('error', nodeErr(p.error));
+      else if (p.event === 'close') { servers.delete(this._id); this.emit('close'); }
+    }
+    listen(...a) {
+      let port = a[0];
+      let host = typeof a[1] === 'string' ? a[1] : '';
+      if (port && typeof port === 'object') { host = port.host || ''; port = port.port; }
+      const cb = a.find((f) => typeof f === 'function');
+      if (cb) this.once('listening', cb);
+      netReady()
+        .then(() => invoke('net_listen', { id: this._id, host, port: +port || 0 }))
+        .then((addr) => { this._addr = addr; this.listening = true; this.emit('listening'); }, (e) => this.emit('error', nodeErr(e)));
+      return this;
+    }
+    address() { return this._addr || null; }
+    close(cb) {
+      if (cb) this.once('close', cb);
+      this.listening = false;
+      invoke('net_close_server', { id: this._id });
+      return this;
+    }
+    ref() { return this; }
+    unref() { return this; }
+  }
+  builtins.net = {
+    Socket,
+    Server,
+    connect,
+    createConnection: connect,
+    createServer: (o, cb) => new Server(typeof o === 'function' ? o : cb),
+    isIP: (s) => (/^\d+\.\d+\.\d+\.\d+$/.test(s) ? 4 : (/:/.test(s) ? 6 : 0)),
+  };
+
+  // ---------------------------------------------------------- child_process
+  const procs = new Map();
+  let procEvents = null;
+  const procReady = () => {
+    if (!procEvents) {
+      procEvents = tev().listen('ride-proc', ({ payload: p }) => {
+        const c = procs.get(p.id);
+        if (c && p.event === 'exit') {
+          procs.delete(p.id);
+          c.exitCode = p.code;
+          c.signalCode = p.signal;
+          c.emit('exit', p.code, p.signal);
+          c.emit('close', p.code, p.signal);
+        }
+      });
+    }
+    return procEvents;
+  };
+  class ChildProcess extends EventEmitter {
+    constructor() {
+      super();
+      this._id = newId('p');
+      this.pid = undefined;
+      this.exitCode = null;
+      this.stdin = { write() { return true; }, end() {} };
+      this.stdout = null;
+      this.stderr = null;
+      procs.set(this._id, this);
+    }
+    kill(signal) { invoke('proc_kill', { id: this._id, signal: signal || null }).catch(() => {}); return true; }
+    unref() {}
+    ref() {}
+  }
+  const spawn = (exe, args, opts) => {
+    const o = opts || {};
+    let stdio = o.stdio || 'pipe';
+    if (typeof stdio === 'string') stdio = [stdio, stdio, stdio];
+    const env = o.env ? Object.fromEntries(Object.entries(o.env).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])) : null;
+    const c = new ChildProcess();
+    procReady()
+      .then(() => invoke('proc_spawn', {
+        id: c._id,
+        exe,
+        args: (args || []).map(String),
+        opts: { cwd: o.cwd || null, env, stdio, detached: !!o.detached },
+      }))
+      .then((pid) => { c.pid = pid; c.emit('spawn'); }, (e) => { procs.delete(c._id); c.emit('error', nodeErr(e)); });
+    return c;
+  };
+  builtins.child_process = {
+    spawn,
+    ChildProcess,
+    execSync() { throw Object.assign(new Error('execSync is not available in Ride under Tauri'), { code: 'ENOSYS' }); },
+    exec(cmd, o, cb) { (typeof o === 'function' ? o : cb)(Object.assign(new Error('exec is not available'), { code: 'ENOSYS' })); },
+  };
+  builtins.tls = {
+    connect() { throw Object.assign(new Error('TLS connections are not available yet in Ride under Tauri'), { code: 'ENOSYS' }); },
+  };
 
   // ---------------------------------------------------------- BrowserWindow
   // Window ids come from Rust (main = 1). A window is created when its URL is

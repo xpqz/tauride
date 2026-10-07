@@ -1,3 +1,5 @@
+mod net;
+mod proc;
 mod sync;
 mod win;
 
@@ -155,7 +157,21 @@ pub fn run() {
                 .body(serde_json::to_vec(&body).unwrap())
                 .unwrap()
         })
-        .invoke_handler(tauri::generate_handler![log, open_url, win::win_create, win::win_call])
+        .manage(net::Net::default())
+        .manage(proc::Procs::default())
+        .invoke_handler(tauri::generate_handler![
+            log,
+            open_url,
+            win::win_create,
+            win::win_call,
+            net::net_connect,
+            net::net_write,
+            net::net_end,
+            net::net_listen,
+            net::net_close_server,
+            proc::proc_spawn,
+            proc::proc_kill,
+        ])
         .setup(|app| {
             let main = window_builder(app.handle(), "main", WebviewUrl::App("index.html".into()))
                 .inner_size(900.0, 650.0)

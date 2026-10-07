@@ -317,7 +317,16 @@ const Console = console;
       if (env.RIDE_JS) {
         env.RIDE_JS
           .split(path.delimiter)
-          .forEach((x) => { if (x) $.getScript(`file://${path.resolve(process.cwd(), x)}`); });
+          .forEach((x) => {
+            if (!x) return;
+            const f = path.resolve(process.cwd(), x);
+            // Tauri pages cannot load file:// scripts; run the file's text in
+            // this window instead.
+            if (window.__RIDE__) {
+              D.el.getCurrentWindow().webContents
+                .executeJavaScript(nodeRequire('fs').readFileSync(f, 'utf8'));
+            } else $.getScript(`file://${f}`);
+          });
       }
       if (env.RIDE_CSS) {
         $('<style>')
