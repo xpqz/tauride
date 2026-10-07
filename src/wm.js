@@ -59,6 +59,21 @@
     // is constructed.
     const creating = new Map();
 
+    // A Wayland compositor sets the size of a window it shows and ignores
+    // the window's own resize requests, but keeps a window within its size
+    // limits. So a shown window is resized by pinning it (minimum = maximum
+    // = the new size) and then freeing it again. This works only while the
+    // window is shown, so a size set while it is hidden waits for the next
+    // show; hiding frees the window first, so that it is never shown pinned.
+    // Per label: { min, pending, queue }; the queue keeps one window's size
+    // changes and visibility in order.
+    const sizing = new Map();
+    const sizingOf = (label) => {
+      if (!sizing.has(label)) sizing.set(label, { min: null, pending: null, queue: Promise.resolve() });
+      return sizing.get(label);
+    };
+    const settle = () => new Promise((r) => { setTimeout(r, 300); });
+
     class Win {
       constructor(id, ww) {
         this.id = id;
@@ -71,10 +86,40 @@
 
       do(what, f) { return this.ready.then(f).catch(report(what)); }
 
-      // Electron's show() also focuses the window.
-      show() { this.do('show', () => this.ww.show().then(() => this.ww.setFocus())); }
+      queued(what, f) {
+        const sz = sizingOf(this.label);
+        sz.queue = sz.queue.then(() => this.do(what, () => f(sz)));
+      }
 
-      hide() { this.do('hide', () => this.ww.hide()); }
+      async resizeShown(sz, size) {
+        await this.ww.setMinSize(size);
+        await this.ww.setMaxSize(size);
+        await this.ww.setSize(size);
+        await settle();
+        await this.ww.setMaxSize(null);
+        await this.ww.setMinSize(sz.min);
+      }
+
+      // Electron's show() also focuses the window.
+      show() {
+        this.queued('show', async (sz) => {
+          await this.ww.show();
+          await this.ww.setFocus();
+          if (!sz.pending) return;
+          const size = sz.pending;
+          sz.pending = null;
+          await settle();
+          await this.resizeShown(sz, size);
+        });
+      }
+
+      hide() {
+        this.queued('hide', async (sz) => {
+          await this.ww.setMaxSize(null);
+          await this.ww.setMinSize(sz.min);
+          await this.ww.hide();
+        });
+      }
 
       focus() { this.do('focus', () => this.ww.setFocus()); }
 
@@ -89,9 +134,20 @@
         if (width && height) this.setContentSize(width, height);
       }
 
-      setContentSize(w, h) { this.do('setSize', () => this.ww.setSize(new LogicalSize(w, h))); }
+      setContentSize(w, h) {
+        const size = new LogicalSize(w, h);
+        this.queued('setSize', async (sz) => {
+          if (await this.ww.isVisible()) await this.resizeShown(sz, size);
+          else sz.pending = size;
+        });
+      }
 
-      setMinSize(w, h) { this.do('setMinSize', () => this.ww.setMinSize(new LogicalSize(w, h))); }
+      setMinSize(w, h) {
+        this.queued('setMinSize', (sz) => {
+          sz.min = new LogicalSize(w, h);
+          return this.ww.setMinSize(sz.min);
+        });
+      }
 
       contentBounds() {
         return this.ready
@@ -138,13 +194,17 @@
         nextId += 1;
         const label = labelOf(id);
         const show = o.show !== false;
+        sizingOf(label).min = o.minWidth && o.minHeight ? new LogicalSize(o.minWidth, o.minHeight) : null;
         pageLoad(label);
         const ww = new (WebviewWindow())(label, {
           url: appUrl(typeof url === 'function' ? url(id) : url),
           title: o.title || 'Tauride',
           visible: show,
           focus: show,
-          resizable: o.resizable !== false,
+          // Every window is resizable, so that it can be resized at all (see
+          // sizing above); Ride's one fixed-size window, the dialog, pins
+          // its own size.
+          resizable: true,
           parent: o.parent ? o.parent.label : undefined,
           ...opt(o, ['width', 'height', 'x', 'y', 'minWidth', 'minHeight']),
         });

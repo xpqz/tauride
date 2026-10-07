@@ -20,7 +20,8 @@
         D.ide.connected = 0;
         window.close();
       });
-      pm.forEach(k => rm.on(k, ([id, ...x]) => { D.ide.wins[id][k](...x); }));
+      // An editor may have closed by the time a message for it arrives.
+      pm.forEach(k => rm.on(k, ([id, ...x]) => { const w = D.ide.wins[id]; w && w[k](...x); }));
       rm.on('caption', (c) => { D.ide.caption = c; });
       rm.on('close', ([id]) => {
         D.ide.wins[id].close();

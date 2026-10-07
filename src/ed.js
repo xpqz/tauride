@@ -34,7 +34,7 @@ D.Ed = function Ed(ide, opts) { // constructor
     acceptSuggestionOnCommitCharacter: true,
     acceptSuggestionOnEnter: 'off',
     autoClosingBrackets: !!D.prf.autoCloseBrackets(),
-    automaticLayout: true,
+    automaticLayout: false, // laid out below, a frame after each resize
     autoIndent: D.prf.indent() >= 0,
     'bracketPairColorization.enabled': false,
     contextmenu: false,
@@ -75,6 +75,11 @@ D.Ed = function Ed(ide, opts) { // constructor
     wordSeparators: D.wordSeparators,
     unusualLineTerminators: 'off', // iss646: Prevent message prompt about unusual line endings
   });
+  // Laying out inside the resize callback can resize the container again in
+  // the same frame, which the browser reports as a ResizeObserver loop.
+  const meResize = new ResizeObserver(() => requestAnimationFrame(() => me.getModel() && me.layout()));
+  meResize.observe(ed.dom.querySelector('.ride_win_me'));
+  me.onDidDispose(() => meResize.disconnect());
   ed.me = me;
   ed.me_ready = new Promise((resolve) => {
     // ugly hack as monaco doesn't have a built in event for when the editor is ready?!

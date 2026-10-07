@@ -98,9 +98,10 @@ $.fn.splitter = function splitter(args) {
       // bail if splitter isn't visible or content isn't there yet
       if ($s._DF <= 0 || $s._DA <= 0) return;
       // re-divvy the adjustable dimension; maintain size of the preferred pane
+      // (pane size limits can depend on the window's size)
+      setMinMax();
       // eslint-disable-next-line no-restricted-properties
       if (!window.isNaN(size)) {
-        setMinMax();
         resplit(size);
       } else {
         resplit($a[0][ohw]);

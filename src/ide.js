@@ -965,10 +965,11 @@ D.IDE.prototype = {
       this.wins[0].focus();
       delete this.wins[0].hadErrTmr;
       this.hadErr = -1;
-    } else if (this.hadErr < 0) { w.focus(); }
+    } else if (this.hadErr < 0) { w && w.focus(); } // w may have closed
   },
   focusMRUWin() { // most recently used
     const w = this.getMRUWin();
+    if (!w) return; // a floating editor window with no editor left
     D.wm && !w.bwId && D.wm.main().focus();
     w.focus();
   },

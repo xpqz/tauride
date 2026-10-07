@@ -102,6 +102,13 @@
 #cn_rhs {
   min-width: 475px;
 }
+// A window too narrow for both panes at those widths (a tiling compositor,
+// not Ride, sets its size) shares its width between them instead of
+// pushing the details off the edge.
+@media (max-width: 884px) {
+  #cn_lhs { min-width: 35vw; }
+  #cn_rhs { min-width: 55vw; }
+}
 #cn_rhs_inner {
   overflow-y: auto;
   overflow-x: hidden;
