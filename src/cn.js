@@ -591,6 +591,11 @@
           }
           const env = {
             SINGLETRACE: '1',
+            // Dyalog 20.0's CEF (HTMLRenderer) unzip helper aborts on Linux every time
+            // Chromium's component updater retries, raising a crash notification every
+            // few minutes. Keep CEF off unless RIDE's env or the connect dialog sets it.
+            ...window.__RIDE__ && process.platform === 'linux'
+              && !('ENABLE_CEF' in process.env) && { ENABLE_CEF: '0' },
             ...envusr,
             ...(!D.win || x.subtype === 'ssh') && { APLK0: 'default' },
             AUTOCOMPLETE_PREFIXSIZE: '0',
