@@ -843,12 +843,13 @@
   // ride-menu event with the item's id. Electron's roles map to Monaco's
   // actions when an editor has focus, else to document.execCommand.
   const menuClicks = new Map();
+  const appClicks = new Map(); // the application menu's, which popups must not clear
   let menuSeq = 0;
   let menuEvents = null;
   const menuReady = () => {
     if (!menuEvents) {
       menuEvents = tev().listen('ride-menu', ({ payload: id }) => {
-        const f = menuClicks.get(id);
+        const f = menuClicks.get(id) || appClicks.get(id);
         if (R.env.RIDE_TAURI_DEBUG) rlog('debug', `menu event ${JSON.stringify(id)}: ${f ? 'handled' : `no handler (have ${[...menuClicks.keys()]})`}`);
         if (f) f();
       });
@@ -874,13 +875,15 @@
       document.execCommand(role === 'selectall' ? 'selectAll' : role);
     }
   };
-  const menuItems = (items, prefix) => items
+  const menuItems = (items, prefix, clicks = menuClicks, app = false) => items
     .filter((it) => it.visible !== false)
     .map((it, i) => {
       const id = `${prefix}:${i}`;
       const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
       if (!sub && it.type !== 'separator') {
-        menuClicks.set(id, () => {
+        clicks.set(id, () => {
+          // A native checkbox flips itself; keep Electron's item in step.
+          if (app && (it.type === 'checkbox' || it.type === 'radio')) it.checked = !it.checked;
           if (typeof it.click === 'function') it.click(it, BrowserWindow.fromId(currentId()), {});
           else if (it.role) runRole(it.role);
         });
@@ -891,7 +894,9 @@
         kind: it.type === 'separator' ? 'separator' : (it.type === 'checkbox' || it.type === 'radio' ? 'checkbox' : 'normal'),
         checked: !!it.checked,
         enabled: it.enabled !== false,
-        submenu: sub ? menuItems(sub, id) : undefined,
+        submenu: sub ? menuItems(sub, id, clicks, app) : undefined,
+        accelerator: app && typeof it.accelerator === 'string' ? it.accelerator : undefined,
+        role: app ? it.role : undefined,
       };
     });
   class MenuItem { constructor(o) { Object.assign(this, o); } }
@@ -907,7 +912,15 @@
     }
     closePopup() {}
     static buildFromTemplate(t) { const m = new Menu(); t.forEach((o) => m.append(new MenuItem(o))); return m; }
-    static setApplicationMenu() {}
+    // Only macOS has a menu bar; elsewhere RIDE draws its menu in HTML.
+    static setApplicationMenu(m) {
+      if (nodePlatform !== 'darwin' || !m) return;
+      appClicks.clear();
+      menuSeq += 1;
+      const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+      const items = menuItems(m.items, `app:${label}:${menuSeq}`, appClicks, true);
+      menuReady().then(() => invoke('set_app_menu', { items })).catch((e) => rlog('error', 'application menu failed:', e));
+    }
     static getApplicationMenu() { return null; }
   }
   const shell = {

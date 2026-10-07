@@ -226,13 +226,18 @@ pub fn run() {
             ssh::ssh_end,
             winstate::save_win,
             menu::popup_menu,
+            menu::set_app_menu,
         ])
         .on_menu_event(|app, e| menu::on_event(app, e.id().as_ref()))
         .setup(|app| {
             let (pos, width, height) = winstate::restore(app.handle(), "launchWin");
             let mut b = window_builder(app.handle(), "main", WebviewUrl::App("index.html".into()))
-                .inner_size(width, height)
-                .background_color(tauri::window::Color(0x76, 0x88, 0xd9, 0xff));
+                .inner_size(width, height);
+            // macOS paints this behind the title bar too.
+            #[cfg(not(target_os = "macos"))]
+            {
+                b = b.background_color(tauri::window::Color(0x76, 0x88, 0xd9, 0xff));
+            }
             if let Some((x, y)) = pos {
                 b = b.position(x, y);
             }

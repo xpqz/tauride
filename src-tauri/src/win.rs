@@ -138,6 +138,12 @@ pub async fn win_create<R: Runtime>(app: AppHandle<R>, id: u32, url: String, opt
         }
     }
     let w = b.build().map_err(|e| e.to_string())?;
+    // macOS orders a child window in front when it is attached to its
+    // parent, even if it was created invisible.
+    #[cfg(target_os = "macos")]
+    if opts.show == Some(false) {
+        let _ = w.hide();
+    }
     watch(&w);
     Ok(())
 }

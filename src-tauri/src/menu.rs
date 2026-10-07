@@ -18,6 +18,10 @@ pub struct Item {
     #[serde(default = "yes")]
     enabled: bool,
     submenu: Option<Vec<Item>>,
+    /// Electron accelerator, e.g. "Ctrl+C"; dropped if muda cannot parse it.
+    accelerator: Option<String>,
+    /// Electron role, honoured by the application menu only.
+    role: Option<String>,
 }
 
 fn yes() -> bool {
@@ -25,6 +29,21 @@ fn yes() -> bool {
 }
 
 type Built<R> = Box<dyn IsMenuItem<R>>;
+
+/// The system's own item for an Electron role, so macOS gets its standard
+/// behaviour (Hide, clipboard, full screen) rather than a webview round trip.
+fn predefined<R: Runtime, M: Manager<R>>(m: &M, role: Option<&str>) -> tauri::Result<Option<Built<R>>> {
+    Ok(Some(match role {
+        Some("hide") => Box::new(PredefinedMenuItem::hide(m, None)?),
+        Some("hideothers") => Box::new(PredefinedMenuItem::hide_others(m, None)?),
+        Some("unhide") => Box::new(PredefinedMenuItem::show_all(m, None)?),
+        Some("togglefullscreen") => Box::new(PredefinedMenuItem::fullscreen(m, None)?),
+        Some("cut") => Box::new(PredefinedMenuItem::cut(m, None)?),
+        Some("copy") => Box::new(PredefinedMenuItem::copy(m, None)?),
+        Some("paste") => Box::new(PredefinedMenuItem::paste(m, None)?),
+        _ => return Ok(None),
+    }))
+}
 
 fn build<R: Runtime, M: Manager<R>>(m: &M, items: &[Item]) -> tauri::Result<Vec<Built<R>>> {
     items
@@ -39,10 +58,29 @@ fn build<R: Runtime, M: Manager<R>>(m: &M, items: &[Item]) -> tauri::Result<Vec<
                     let s: Submenu<R> = SubmenuBuilder::with_id(m, &it.id, &it.label).enabled(it.enabled).items(&refs).build()?;
                     Box::new(s)
                 }
-                ("checkbox", _) => Box::new(
-                    CheckMenuItemBuilder::with_id(&it.id, &it.label).checked(it.checked).enabled(it.enabled).build(m)?,
-                ),
-                _ => Box::new(MenuItemBuilder::with_id(&it.id, &it.label).enabled(it.enabled).build(m)?),
+                ("checkbox", _) => {
+                    let mk = |acc: Option<&str>| {
+                        let mut b = CheckMenuItemBuilder::with_id(&it.id, &it.label).checked(it.checked).enabled(it.enabled);
+                        if let Some(a) = acc {
+                            b = b.accelerator(a);
+                        }
+                        b.build(m)
+                    };
+                    Box::new(mk(it.accelerator.as_deref()).or_else(|_| mk(None))?)
+                }
+                _ => {
+                    if let Some(p) = predefined(m, it.role.as_deref())? {
+                        return Ok(p);
+                    }
+                    let mk = |acc: Option<&str>| {
+                        let mut b = MenuItemBuilder::with_id(&it.id, &it.label).enabled(it.enabled);
+                        if let Some(a) = acc {
+                            b = b.accelerator(a);
+                        }
+                        b.build(m)
+                    };
+                    Box::new(mk(it.accelerator.as_deref()).or_else(|_| mk(None))?)
+                }
             })
         })
         .collect()
@@ -56,9 +94,18 @@ pub fn popup_menu<R: Runtime>(window: WebviewWindow<R>, items: Vec<Item>) -> Res
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 
+/// Electron's Menu.setApplicationMenu: the menu bar on macOS.
+#[tauri::command]
+pub fn set_app_menu<R: Runtime>(app: tauri::AppHandle<R>, items: Vec<Item>) -> Result<(), String> {
+    let built = build(&app, &items).map_err(|e| e.to_string())?;
+    let refs: Vec<&dyn IsMenuItem<R>> = built.iter().map(|c| c.as_ref()).collect();
+    let menu = Menu::with_items(&app, &refs).map_err(|e| e.to_string())?;
+    app.set_menu(menu).map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// App-wide menu event handler: forwards popup-menu clicks to the webviews.
 pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
-    if id.starts_with("ctx:") {
+    if id.starts_with("ctx:") || id.starts_with("app:") {
         let _ = app.emit("ride-menu", id);
     }
 }

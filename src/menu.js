@@ -1,7 +1,7 @@
 // two menu implementations -- one native and one in html
-// (Tauri builds, which set window.__RIDE__, use the html one)
+// (Tauri builds, which set window.__RIDE__, use the html one except on macOS)
 D.installMenu = function Menu(mx) {
-  if (D.el && !window.__RIDE__) {
+  if (D.el && (!window.__RIDE__ || D.mac)) {
     const pk = D.prf.keys();
     const k = {}; // k:a map of all keyboard shortcuts
     for (let i = 0; i < D.cmds.length; i++) {
