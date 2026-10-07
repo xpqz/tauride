@@ -16,20 +16,25 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tauri::async_runtime::JoinHandle;
 
-enum Out {
+pub(crate) enum Out {
     Data(Vec<u8>),
     End,
 }
 
 #[derive(Default)]
 pub struct Net {
-    sockets: Mutex<HashMap<String, mpsc::UnboundedSender<Out>>>,
+    pub(crate) sockets: Mutex<HashMap<String, mpsc::UnboundedSender<Out>>>,
     servers: Mutex<HashMap<String, JoinHandle<()>>>,
 }
 
-const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+pub(crate) const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
-fn emit<R: Runtime>(app: &AppHandle<R>, payload: Value) {
+#[allow(non_snake_case)]
+pub(crate) fn B64_encode(bytes: &[u8]) -> String {
+    B64.encode(bytes)
+}
+
+pub(crate) fn emit<R: Runtime>(app: &AppHandle<R>, payload: Value) {
     let _ = app.emit("ride-net", payload);
 }
 
@@ -56,7 +61,7 @@ fn err_value(e: &std::io::Error, what: &str) -> Value {
 
 /// Registers a connected stream: a reader task emitting data/end/close and a
 /// writer task fed by the socket's channel.
-fn adopt<R: Runtime, S>(app: &AppHandle<R>, id: String, stream: S)
+pub(crate) fn adopt<R: Runtime, S>(app: &AppHandle<R>, id: String, stream: S)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
 {

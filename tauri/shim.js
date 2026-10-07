@@ -371,7 +371,9 @@
       else if (p.event === 'close') {
         this.destroyed = true;
         sockets.delete(this._id);
-        this.emit('close', false);
+        // An ssh2 exec stream closes with the command's exit code and signal.
+        if ('code' in p) this.emit('close', p.code, p.signal);
+        else this.emit('close', false);
       }
     }
     write(d, enc, cb) {
@@ -463,6 +465,75 @@
     createServer: (o, cb) => new Server(typeof o === 'function' ? o : cb),
     isIP: (s) => (/^\d+\.\d+\.\d+\.\d+$/.test(s) ? 4 : (/:/.test(s) ? 6 : 0)),
   };
+
+  // ------------------------------------------------------------------- ssh2
+  // ssh2's Client over russh (src-tauri/src/ssh.rs). exec and forwardOut
+  // streams, and the connections a forwardIn delivers, are Sockets fed by
+  // ride-net events; client-level events come as ride-ssh.
+  const sshClients = new Map();
+  let sshEvents = null;
+  const sshReady = () => {
+    if (!sshEvents) {
+      sshEvents = Promise.all([netReady(), tev().listen('ride-ssh', ({ payload: p }) => {
+        const c = sshClients.get(p.id);
+        if (c) c._event(p);
+      })]);
+    }
+    return sshEvents;
+  };
+  class SshClient extends EventEmitter {
+    constructor() { super(); this._id = newId('ssh'); sshClients.set(this._id, this); }
+    _event(p) {
+      if (p.event === 'tcp connection') {
+        const s = new Socket(p.conn);
+        this.emit('tcp connection', p.info, () => s, () => s.destroy());
+      } else if (p.event === 'close') {
+        sshClients.delete(this._id);
+        this.emit('close');
+      }
+    }
+    connect(o) {
+      sshReady()
+        .then(() => invoke('ssh_connect', {
+          id: this._id,
+          host: o.host || 'localhost',
+          port: +o.port || 22,
+          username: o.username || '',
+          password: o.password != null ? String(o.password) : null,
+          privateKey: o.privateKey != null ? String(o.privateKey) : null,
+          passphrase: o.passphrase != null ? String(o.passphrase) : null,
+          tryKeyboard: !!o.tryKeyboard,
+        }))
+        .then(() => this.emit('ready'), (e) => this.emit('error', nodeErr(e)));
+      return this;
+    }
+    _stream(cmd, args, cb) {
+      const s = new Socket();
+      s.connecting = true;
+      sshReady()
+        .then(() => invoke(cmd, { id: this._id, chan: s._id, ...args }))
+        .then(() => { s.connecting = false; cb(null, s); s._flush(); }, (e) => { sockets.delete(s._id); cb(nodeErr(e)); });
+      return true;
+    }
+    exec(command, opts, cb) {
+      if (typeof opts === 'function') { cb = opts; opts = {}; }
+      const pty = !!(opts && opts.pty);
+      return this._stream('ssh_exec', { cmd: command, pty, term: (pty && opts.pty.term) || 'xterm' }, cb);
+    }
+    forwardOut(srcIP, srcPort, dstIP, dstPort, cb) {
+      return this._stream('ssh_forward_out', {
+        dstHost: dstIP, dstPort: +dstPort, srcHost: srcIP || '127.0.0.1', srcPort: +srcPort || 0,
+      }, cb);
+    }
+    forwardIn(bindAddr, bindPort, cb) {
+      sshReady()
+        .then(() => invoke('ssh_forward_in', { id: this._id, bindAddr: bindAddr || '', bindPort: +bindPort || 0 }))
+        .then((port) => cb(null, port), (e) => cb(nodeErr(e)));
+      return true;
+    }
+    end() { invoke('ssh_end', { id: this._id }).catch(() => {}); return this; }
+  }
+  builtins.ssh2 = { Client: SshClient };
 
   // ---------------------------------------------------------- child_process
   const procs = new Map();

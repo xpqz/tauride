@@ -2,6 +2,7 @@ mod dialog;
 mod menu;
 mod net;
 mod proc;
+mod ssh;
 mod sync;
 mod win;
 mod winstate;
@@ -184,6 +185,7 @@ pub fn run() {
         .manage(winstate::WinState::load())
         .manage(net::Net::default())
         .manage(proc::Procs::default())
+        .manage(ssh::Ssh::default())
         .invoke_handler(tauri::generate_handler![
             log,
             open_url,
@@ -197,6 +199,11 @@ pub fn run() {
             net::net_close_server,
             proc::proc_spawn,
             proc::proc_kill,
+            ssh::ssh_connect,
+            ssh::ssh_exec,
+            ssh::ssh_forward_out,
+            ssh::ssh_forward_in,
+            ssh::ssh_end,
             winstate::save_win,
             menu::popup_menu,
         ])
