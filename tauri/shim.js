@@ -126,13 +126,15 @@
   path.posix = path;
 
   // ---------------------------------------------------------------- process
+  // R.platform is Rust's OS name; Ride tests Node's (win32, darwin, linux).
+  const nodePlatform = { windows: 'win32', macos: 'darwin' }[R.platform] || R.platform;
   const proc = new EventEmitter();
   Object.assign(proc, {
     env: R.env,
     argv: R.argv,
     pid: R.pid,
     execPath: R.paths.exe,
-    platform: R.platform,
+    platform: nodePlatform,
     arch: R.arch,
     // No `electron` key and no process.type: Monaco's loader treats a page
     // with both as an Electron renderer and loads its modules through Node.
@@ -231,7 +233,7 @@
     homedir: () => R.paths.home,
     tmpdir: () => R.paths.temp,
     networkInterfaces: () => R.networkInterfaces,
-    platform: () => R.platform,
+    platform: () => nodePlatform,
     arch: () => R.arch,
     hostname: () => R.env.HOSTNAME || 'localhost',
     EOL: '\n',
@@ -957,7 +959,7 @@
       relaunch() {},
     },
     getGlobal(name) {
-      if (name === 'D') return { win: R.platform === 'win32', mac: R.platform === 'darwin' };
+      if (name === 'D') return { win: nodePlatform === 'win32', mac: nodePlatform === 'darwin' };
       if (name === 'elw') return BrowserWindow.fromId(1);
       if (name === 'winstate') return winstate;
       return undefined;
