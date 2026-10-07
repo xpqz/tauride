@@ -3,6 +3,8 @@ name: Tauri build
 on:
   push:
     branches: [main]
+    # A v* tag publishes a GitHub release with the installers.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -24,6 +26,12 @@ jobs:
             name: windows-x64
             bin: tauride.exe
             bundles: nsis,msi
+          - os: macos-latest
+            name: macos-arm64
+            bundles: dmg
+          - os: macos-15-intel
+            name: macos-x64
+            bundles: dmg
     runs-on: ${{ matrix.os }}
     env:
       # Only the Electron build needs Electron itself.
@@ -58,7 +66,9 @@ jobs:
       - name: Build
         run: npx --yes @tauri-apps/cli@2.12.1 build --config src-tauri/tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
 
-      - uses: actions/upload-artifact@v6
+      # The macOS app ships inside the dmg, so it has no bare binary.
+      - if: matrix.bin
+        uses: actions/upload-artifact@v6
         with:
           name: tauride-${{ matrix.name }}
           path: src-tauri/target/release/${{ matrix.bin }}
@@ -73,4 +83,28 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: tauride-*-installers
+          path: dist
+          merge-multiple: true
+
+      # Two macOS builds produce dmgs of the same name pattern; the
+      # architecture is in Tauri's file name (aarch64 / x64), so they differ.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Tauride ${TAG#v}" --generate-notes
