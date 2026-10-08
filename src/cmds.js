@@ -79,7 +79,7 @@ D.cmds = [
   ['WI', 'Weak interrupt',          ['Ctrl+PauseBreak']],
   ['WSE','Toggle workspace explorer',[]],
   ['ZM', 'Toggle maximise editor',  []],
-  ['ZMI','Increase font size',      [D.mac?'Cmd+=':'Ctrl+=']],
+  ['ZMI','Increase font size',      D.mac?['Cmd+=','Cmd+Shift+=']:['Ctrl+=','Ctrl+Shift+=']],
   ['ZMO','Decrease font size',      [D.mac?'Cmd+-':'Ctrl+-']],
   ['ZMR','Reset font size',         [D.mac?'Cmd+0':'Ctrl+0']],
   ['PF1' ,'',                       []],
