@@ -493,7 +493,7 @@
                 }
                 offset += ml;
                 if (kw === 'section' || kw === 'endsection') {
-                  addToken(offset, 'white');
+                  addToken(offset, 'comment'); // the rest of a section line is its name and comment
                   offset = eol;
                 }
               } else {
