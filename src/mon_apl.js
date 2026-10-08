@@ -885,7 +885,7 @@
         /* eslint-enable no-template-curly-in-string */
         return { suggestions };
       }
-      const word = (((/⎕?[A-Z_a-zÀ-ÖØ-Ýß-öø-üþ∆⍙Ⓐ-Ⓩ0-9]*$/.exec(s.slice(0, c)) || [])[0] || '')); // match left of cursor
+      const word = (((/⎕?[A-Z_a-zÀ-ÖØ-Ýß-öø-üþ∆⍙Ⓐ-Ⓩ0-9]*$/.exec(s.slice(0, c - 1)) || [])[0] || '')); // match left of cursor
       const limit = D.prf.autoCompleteCharacterLimit();
       if (D.send && (l[s] || ' ') === ' '
         && (word.length >= limit || D.prf.autocompletion() === 'shell')) {
