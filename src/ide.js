@@ -789,6 +789,7 @@ D.IDE = function IDE(opts = {}) {
       }
     },
     OptionsDialog(x) {
+      ide.dialogCount = (ide.dialogCount || 0) + 1;
       D.util.optionsDialog(x, (r) => {
         D.send('ReplyOptionsDialog', { index: r, token: x.token });
       });

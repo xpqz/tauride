@@ -482,7 +482,8 @@ D.Ed.prototype = {
     const ed = this;
     if (err) {
       ed.isClosing = 0;
-      $.err('Cannot save changes');
+      // the interpreter already explained the failure in its own dialog
+      (ed.ide.dialogCount || 0) === ed.dialogCount && $.err('Cannot save changes');
     } else {
       ed.oText = ed.me.getValue();
       ed.isClosing && D.send('CloseWindow', { win: ed.id });
@@ -640,6 +641,7 @@ D.Ed.prototype = {
       ed.isClosing && D.send('CloseWindow', { win: ed.id });
       return;
     }
+    ed.dialogCount = ed.ide.dialogCount || 0;
     D.send('SaveChanges', {
       win: ed.id,
       text: v.split(me.getModel().getEOL()),
