@@ -521,8 +521,11 @@
                 }
                 offset += x.length;
               } else if ((m = sm.match(/^[+\-×÷⌈⌊|⍳⍸?*⍟○!⌹<≤=≥>≠≡≢∊⍷∪∩~∧∨⍲⍱⍴,⍪⌽⊖⍉↑↓⊆⊂⊃⌷⍋⍒⊤⊥⍕⍎⊣⊢→^∣]+/))) {
+                // Stop the run where an idiom starts, so that "+⍴⍴" is not swallowed whole as functions.
+                let len = 1;
+                while (len < m[0].length && !D.syntax.idiomsRE.test(sm.slice(len))) len += 1;
                 addToken(offset, 'keyword.function');
-                offset += m[0].length;
+                offset += len;
               } else if ((m = sm.match(/^[/\\⌿⍀¨⍨⌸⌶&]+/))) {
                 addToken(offset, 'keyword.operator.monadic');
                 offset += m[0].length;
