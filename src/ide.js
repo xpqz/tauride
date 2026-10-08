@@ -386,8 +386,9 @@ D.IDE = function IDE(opts = {}) {
   };
   toggleStats();
   const updTopBtm = $.debounce(100, () => {
-    // the html menu (browser and Tauri builds, see menu.js) takes 23px
-    const htmlMenu = !D.el || window.__RIDE__;
+    // the html menu (browser and Tauri builds, see menu.js) takes 23px;
+    // Tauri on macOS has the native menu bar instead
+    const htmlMenu = !D.el || (window.__RIDE__ && !D.mac);
     ide.dom.style.top = `${(D.prf.lbar() ? I.lb.offsetHeight : 0) + (htmlMenu ? 23 : 0)}px`;
     ide.dom.style.bottom = `${I.sb.offsetHeight}px`;
     gl.updateSize(ide.dom.clientWidth, ide.dom.clientHeight);
