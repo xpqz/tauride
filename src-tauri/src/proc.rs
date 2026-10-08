@@ -18,13 +18,40 @@ pub struct Procs {
 
 /// App exit: end every process RIDE spawned (the interpreter, and what its
 /// wrapper script started) so none outlives Tauride, as Electron's children
-/// did not.
+/// did not. Each process tree is collected before any of it is signalled,
+/// as a child whose parent has gone can no longer be found by parent. Dyalog
+/// serving RIDE ignores SIGTERM (and SIGHUP and SIGINT), so whatever is left
+/// after a moment gets SIGKILL: with the app gone nothing can reach it.
 #[cfg(unix)]
 pub fn kill_all<R: Runtime>(app: &AppHandle<R>) {
-    let pids: Vec<u32> = app.state::<Procs>().running.lock().unwrap().values().map(|(p, _)| *p).collect();
-    for pid in pids {
-        let _ = std::process::Command::new("pkill").args(["-TERM", "-P", &pid.to_string()]).status();
-        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    fn tree(pid: u32, out: &mut Vec<i32>) {
+        out.push(pid as i32);
+        let children = std::process::Command::new("pgrep").args(["-P", &pid.to_string()]).output();
+        for c in children.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default().split_whitespace() {
+            if let Ok(c) = c.parse() {
+                tree(c, out);
+            }
+        }
+    }
+    let mut pids = Vec::new();
+    for (pid, _) in app.state::<Procs>().running.lock().unwrap().values() {
+        tree(*pid, &mut pids);
+    }
+    if pids.is_empty() {
+        return;
+    }
+    for &p in &pids {
+        unsafe { libc::kill(p, libc::SIGTERM) };
+    }
+    let alive = |p: i32| unsafe { libc::kill(p, 0) } == 0;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while std::time::Instant::now() < deadline && pids.iter().any(|&p| alive(p)) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    for &p in &pids {
+        if alive(p) {
+            unsafe { libc::kill(p, libc::SIGKILL) };
+        }
     }
 }
 
