@@ -87,6 +87,8 @@
         model.bqc = e.changes[0].range.startColumn;
       } else if (!e.isRedoing && !e.isUndoing && !e.isFlush) {
         setTimeout(() => {
+          // With autocompletion off, edits must never raise the popup (Backspace re-triggers it below).
+          if (D.prf.autocompletion() === 'off') return;
           const swc = me.getContribution('editor.contrib.suggestController');
           const sw = swc.widget.value;
           if (!sw) return;
