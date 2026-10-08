@@ -120,6 +120,29 @@
     }
   }
 
+  // Does a ⋄ occur between the opening bracket at s[0] and its matching closer (or the end of the
+  // line if unclosed)? A ⋄ after the closer belongs to the enclosing statement, not array notation.
+  const diamondInside = (s) => {
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === "'") {
+        const m = s.slice(i).match(/^'(?:[^'\r\n]|'')*'/);
+        if (m) i += m[0].length - 1; else return false;
+      } else if (c === '⍝') {
+        return false;
+      } else if (c === '(' || c === '[' || c === '{') {
+        depth += 1;
+      } else if (c === ')' || c === ']' || c === '}') {
+        depth -= 1;
+        if (!depth) return false;
+      } else if (c === '⋄') {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const dfnDepth = (a) => {
     let r = 0;
     for (let j = 0; j < a.length; j++) if (a[j].t === '{') r += 1; return r;
@@ -304,7 +327,7 @@
 
             case '(':
               h.rseq += 1;
-              isAplan = /^\(\s*(?:(?=.*⋄).*|(?:[A-Z_a-zÀ-ÖØ-Ýß-öø-üþ∆⍙Ⓐ-Ⓩ][A-Z_a-zÀ-ÖØ-Ýß-öø-üþ∆⍙Ⓐ-Ⓩ\d]*:.*)|\s*\)?|[^)]*)\s*$/.test(sm);
+              isAplan = diamondInside(sm) || /^\(\s*(?:(?:[A-Z_a-zÀ-ÖØ-Ýß-öø-üþ∆⍙Ⓐ-Ⓩ][A-Z_a-zÀ-ÖØ-Ýß-öø-üþ∆⍙Ⓐ-Ⓩ\d]*:.*)|\s*\)?|[^)]*)\s*$/.test(sm);
               a.push({
                 t: c,
                 oi: la.oi,
@@ -316,7 +339,7 @@
 
             case '[':
               h.rseq += 1;
-              isAplan = /^\[\s*(?:(?=.*⋄).*|[^\]]*)\s*$/.test(sm);
+              isAplan = diamondInside(sm) || /^\[\s*(?:[^\]]*)\s*$/.test(sm);
               a.push({
                 t: c,
                 oi: la.oi,
