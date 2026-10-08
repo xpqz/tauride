@@ -809,7 +809,18 @@ D.IDE = function IDE(opts = {}) {
     },
     OptionsDialog(x) {
       ide.dialogCount = (ide.dialogCount || 0) + 1;
+      // The interpreter re-raises an over-long input line's dialog once per chunk of the line,
+      // each as soon as the previous one is answered: answer an immediate repeat
+      // of the dialog just dismissed the same way, rather than showing it again.
+      const key = JSON.stringify([x.title, x.text, x.options, x.type]);
+      const last = ide.lastOptionsDialog;
+      if (last && last.key === key && +new Date() - last.time < 1000) {
+        last.time = +new Date();
+        D.send('ReplyOptionsDialog', { index: last.reply, token: x.token });
+        return;
+      }
       D.util.optionsDialog(x, (r) => {
+        ide.lastOptionsDialog = { key, reply: r, time: +new Date() };
         D.send('ReplyOptionsDialog', { index: r, token: x.token });
       });
     },
