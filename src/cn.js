@@ -1019,8 +1019,8 @@
           interpretersSSH = Array.isArray(sel.exes) ? sel.exes : [];
           updFormDtl();
           updExes();
-          q.fav_name.value = sel.name || '';
           $(':text[name],textarea[name]', q.rhs).each((_, x) => { x.value = sel[x.name] || ''; });
+          q.fav_name.value = sel.name || ''; // after the loop: its input name (favname) has no matching key
           q.exes.value = sel.exe;
           q.exes.value || (q.exes.value = ''); // use sel.exe if available, otherwise use "Other..."
           const a = q.rhs.querySelectorAll('input,textarea');
