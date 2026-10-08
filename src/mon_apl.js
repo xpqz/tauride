@@ -628,7 +628,8 @@
       const kind = monaco.languages.CompletionItemKind;
       const insertTextRules = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
       const { a } = getState(model, l - 1) || {};
-      const { t } = (a || []).slice(-1)[0] || {};
+      // :Section is a transparent grouping, so offer the snippets of the enclosing block
+      const { t } = (a || []).filter((x) => x.t !== 'section').slice(-1)[0] || {};
       const snippets = /^\s*:\w*$/.test(s.slice(0, c - 1)) && a && t !== '{';
       const sc = model.bqc - 1;
       if (s.slice(sc, c - 1) === pk2) {
