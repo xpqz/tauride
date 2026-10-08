@@ -76,6 +76,15 @@
       else D.abt();
     },
     CAM() {
+      // Stops set in an editor since it was last saved are unknown to the interpreter, so it
+      // doesn't count them; tally them here to add to its report.
+      D.ide.unsavedStops = 0;
+      Object.keys(D.ide.wins).forEach((x) => {
+        const w = D.ide.wins[x];
+        if (!+x || w.tc) return;
+        w.updStops();
+        D.ide.unsavedStops += w.getStops().filter((l) => !w.oStop.includes(l)).length;
+      });
       D.send('ClearTraceStopMonitor', { token: 0 });
       Object.keys(D.ide.wins).forEach((x) => { +x && D.ide.wins[x].execCommand('CBP'); });
     },
