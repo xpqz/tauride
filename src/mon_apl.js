@@ -397,6 +397,9 @@
                   h.hdr = 1;
                 }
                 addToken(offset, 'identifier.tradfn'); offset += 1; break;
+              } else if (c === ':' && la.isAplan) {
+                // array notation separator, not a control keyword
+                addToken(offset, 'delimiter.aplan'); offset += 1; break;
               } else if (c === ':') {
                 let ok = 0;
                 m = sm.slice(1).match(/^\w*/);
