@@ -670,6 +670,9 @@ D.Se.prototype = {
         es = [model.getValueInRange(sel)];
       }
     }
+    // An empty line sent to a ⎕ prompt is evaluated as an empty expression and raises VALUE ERROR
+    // instead of asking again, so keep waiting for a value.
+    if (se.promptType === 2 && es.every((x) => /^\s*$/.test(x))) return;
     se.undoChanges();
     se.ide.exec(es, trace);
     se.setDecorations();
