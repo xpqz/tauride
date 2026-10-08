@@ -22,6 +22,8 @@
       const kn = monaco.KeyCode[x.keyCode];
       const be = x.browserEvent;
       const isMeta = meta.has(kn);
+      // the key left of 1 on ISO Mac layouts has the Backquote key code but is labelled §
+      const kl = kn === 'Backquote' && be.key === '§' ? '§' : D.keyMap.labels[kn];
       const s = [
         x.ctrlKey ? 'Ctrl' : '',
         x.shiftKey && (be.type === 'keydown' || be.which) ? 'Shift' : '',
@@ -29,7 +31,7 @@
         x.altKey ? (D.mac ? 'Option' : 'Alt') : '',
         // eslint-disable-next-line no-nested-ternary
         x.metaKey ? (D.mac ? 'Cmd' : (D.win ? 'Win' : 'Meta')) : '',
-        isMeta ? '' : D.keyMap.labels[kn],
+        isMeta ? '' : kl,
       ].filter((k) => k).join('+');
       me.setValue(s || 'Press keystroke...');
       if (!isMeta) {
