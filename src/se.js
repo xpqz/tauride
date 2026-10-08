@@ -824,7 +824,7 @@ D.Se.prototype = {
     const ci = c.column - 1;
     if (sels.length === 1 && sels[0].startLineNumber !== sels[0].endLineNumber) {
       me.trigger('editor', 'editor.action.indentLines');
-    } else if (D.prf.autocompletion() === 'off' || this.promptType === 4) {
+    } else if (D.prf.autocompletion() === 'off' || this.promptType === 4 || D.acBelowLimit(me)) {
       let i = D.prf.indent();
       i = i > 0 ? i : 4;
       me.trigger('editor', 'type', { text: ' '.repeat(i - (ci % i)) });
