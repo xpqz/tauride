@@ -385,7 +385,7 @@ D.Ed.prototype = {
     model.winid = ed.id;
     ed.hasEmbeddedBreaks = ee.text.some((t) => /[\n\r]/.test(t));
     if (ed.hasEmbeddedBreaks) {
-      ed.oText = ee.text.map((t) => t.replace('\n', '␤').replace('\r', '␍')).join(model.getEOL());
+      ed.oText = ee.text.map((t) => t.replace(/\n/g, '␤').replace(/\r/g, '␍')).join(model.getEOL());
     } else {
       ed.oText = ee.text.join(model.getEOL());
     }
