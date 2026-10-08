@@ -697,7 +697,11 @@ D.Ed.prototype = {
         endColumn: q.column,
       }, monaco.editor.EndOfLinePreference.LF).split('\n'); //  l:lines
       const u = l.map((x) => x.replace(/'[^']*'?/g, (y) => ' '.repeat(y.length))); // u:scrubbed strings
-      const c = u.map((x) => x.indexOf('⍝')); // c:column index of ⍝
+      // c:column index of ⍝; a ⍝ before the selection start can't be padded within the edit range
+      const c = u.map((x, i) => {
+        const ci = x.indexOf('⍝');
+        return i === 0 && ci < p.column - 1 ? -1 : ci;
+      });
       return {
         p, q, l, u, c,
       };
