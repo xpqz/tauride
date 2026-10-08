@@ -485,7 +485,8 @@ D.Ed.prototype = {
       $.err('Cannot save changes');
     } else {
       ed.oText = ed.me.getValue();
-      ed.isClosing && D.send('CloseWindow', { win: ed.id });
+      ed.oStop = ed.getStops(); // saved stops are now known to the interpreter
+      ed.isClosing &&D.send('CloseWindow', { win: ed.id });
     }
   },
   close() {
