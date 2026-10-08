@@ -55,7 +55,7 @@ D.Ed = function Ed(ide, opts) { // constructor
     iconsInSuggestions: false,
     language: 'apl',
     lineHeight: fs + 2,
-    lineNumbers: D.prf.lineNums() ? ((x) => `[${x - 1}]`) : 'off',
+    lineNumbers: ed.lineNumFmt(),
     matchBrackets: !!D.prf.matchBrackets(),
     minimap: {
       enabled: D.prf.minimapEnabled(),
@@ -272,9 +272,32 @@ D.Ed.prototype = {
     ed.breakpoints = !!x;
     ed.me.updateOptions({ glyphMargin: ed.isCode && ed.breakpoints });
   },
+  lineNumChars() { return this.isScript ? 13 : 5; }, // gutter width in characters (Monaco's default is 5); a script label "[l] [rel]" is wider than "[l]"
+  lineNumFmt() { // gutter formatter; inside a script, lines of a tradfn also get a function-relative number
+    const ed = this;
+    if (!D.prf.lineNums()) return 'off';
+    let ver; let rel;
+    return (l) => {
+      const model = ed.me && ed.me.getModel();
+      if (!ed.isScript || !model) return `[${l - 1}]`;
+      if (ver !== model.getVersionId()) {
+        ver = model.getVersionId();
+        rel = [];
+        let k = -1;
+        for (let i = 1, n = model.getLineCount(); i <= n; i++) {
+          const isDel = /^\s*∇/.test(model.getLineContent(i));
+          if (k < 0 && isDel) k = 0;
+          else if (k >= 0) k += 1;
+          rel[i] = k;
+          if (k > 0 && isDel) k = -1;
+        }
+      }
+      return rel[l] >= 0 ? `[${l - 1}] [${rel[l]}]` : `[${l - 1}]`;
+    };
+  },
   setLN(x) { // update the display of line numbers and the state of the "[...]" button
     const ed = this;
-    ed.me.updateOptions({ lineNumbers: D.prf.lineNums() ? ((l) => `[${l - 1}]`) : 'off' });
+    ed.me.updateOptions({ lineNumbers: ed.lineNumFmt(), lineNumbersMinChars: ed.lineNumChars() });
     ed.dom.querySelector('.tb_LN').classList.toggle('pressed', !!x);
   },
   setTC(x) {
@@ -413,6 +436,7 @@ D.Ed.prototype = {
       128: 'charvec',
     }[ee.entityType];
     ed.isCode = [1, 256, 512, 1024, 2048, 4096, 262144].indexOf(ee.entityType) >= 0;
+    ed.isScript = [256, 512, 1024].indexOf(ee.entityType) >= 0;
     ed.canBeAplan = [2, 4, 8, 16, 128, 256].indexOf(ee.entityType) >= 0;
     const isAplan = ee.entityType === 262144;
     model.setValue(ed.oText);
@@ -425,7 +449,7 @@ D.Ed.prototype = {
       etype && ed.dom.classList.add(etype);
       (isAplan || ed.canBeAplan) && ed.dom.classList.add('variable');
     }
-    me.updateOptions({ folding: ed.isCode && !!D.prf.fold() });
+    me.updateOptions({ folding: ed.isCode && !!D.prf.fold(), lineNumbers: ed.lineNumFmt(), lineNumbersMinChars: ed.lineNumChars() });
     if (ed.isCode && D.prf.indentOnOpen()) ed.RD(me);
     else ed.firstOpen = false;
     ed.setRO(ee.debugger);
