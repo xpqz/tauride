@@ -125,8 +125,13 @@
     for (let j = 0; j < a.length; j++) if (a[j].t === '{') r += 1; return r;
   };
 
-  const sw = 4; // default indent unit (vim calls that "sw" for "shift width")
-  const swm = 2; // indent unit for methods
+  // indent units follow the Auto-indent preferences; (vim calls the first "sw" for "shift width")
+  const swPref = () => (D.prf.indent() > 0 ? D.prf.indent() : 4);
+  const swmPref = () => (D.prf.indentMethods() >= 0 ? D.prf.indentMethods() : 2);
+  let sw = swPref();
+  let swm = swmPref();
+  D.prf.indent(() => { sw = swPref(); });
+  D.prf.indentMethods(() => { swm = swmPref(); });
 
   const aplTokens = {
     getInitialState: () => new State(1, [{
