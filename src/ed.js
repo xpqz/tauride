@@ -265,6 +265,7 @@ D.Ed.prototype = {
     ed.breakpoints = !!x;
     ed.me.updateOptions({ glyphMargin: ed.isCode && ed.breakpoints });
   },
+  lineNumChars() { return this.isScript ? 13 : 5; }, // gutter width in characters (Monaco's default is 5); a script label "[l] [rel]" is wider than "[l]"
   lineNumFmt() { // gutter formatter; inside a script, lines of a tradfn also get a function-relative number
     const ed = this;
     if (!D.prf.lineNums()) return 'off';
@@ -289,7 +290,7 @@ D.Ed.prototype = {
   },
   setLN(x) { // update the display of line numbers and the state of the "[...]" button
     const ed = this;
-    ed.me.updateOptions({ lineNumbers: ed.lineNumFmt() });
+    ed.me.updateOptions({ lineNumbers: ed.lineNumFmt(), lineNumbersMinChars: ed.lineNumChars() });
     ed.dom.querySelector('.tb_LN').classList.toggle('pressed', !!x);
   },
   setTC(x) {
@@ -441,7 +442,7 @@ D.Ed.prototype = {
       etype && ed.dom.classList.add(etype);
       (isAplan || ed.canBeAplan) && ed.dom.classList.add('variable');
     }
-    me.updateOptions({ folding: ed.isCode && !!D.prf.fold(), lineNumbers: ed.lineNumFmt() });
+    me.updateOptions({ folding: ed.isCode && !!D.prf.fold(), lineNumbers: ed.lineNumFmt(), lineNumbersMinChars: ed.lineNumChars() });
     if (ed.isCode && D.prf.indentOnOpen()) ed.RD(me);
     else ed.firstOpen = false;
     ed.setRO(ee.debugger);
