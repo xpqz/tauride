@@ -187,6 +187,13 @@
           background: RGB(h.bg).slice(1),
         });
         colors['editor.background'] = RGBO(h.bg, h.bgo || 1);
+        // Monaco's default slider colours are a fixed grey at low alpha, which
+        // vanishes against dark backgrounds; derive them from the text colour.
+        if (h.fg) {
+          colors['scrollbarSlider.background'] = RGBO(h.fg, 0.5);
+          colors['scrollbarSlider.hoverBackground'] = RGBO(h.fg, 0.7);
+          colors['scrollbarSlider.activeBackground'] = RGBO(h.fg, 0.85);
+        }
       } else if (g.e) {
         if (/background/i.test(g.e) && h.bg) {
           colors[g.e] = RGBO(h.bg, h.bgo);
