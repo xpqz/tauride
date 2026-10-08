@@ -334,6 +334,7 @@
                 ii: la.ii,
                 r: h.rseq,
                 isAplan,
+                col: offset,
               });
               addToken(offset, isAplan ? 'delimiter.aplan' : 'delimiter.parenthesis'); offset += 1; break;
 
@@ -346,6 +347,7 @@
                 ii: la.ii,
                 r: h.rseq,
                 isAplan,
+                col: offset,
               });
               addToken(offset, isAplan ? 'delimiter.aplan' : 'delimiter.square'); offset += 1; break;
 
@@ -356,6 +358,7 @@
                 oi: 0,
                 ii: sw,
                 r: h.rseq,
+                col: offset,
               });
               tkn = `identifier.dfn.${dfnDepth(a)}`;
               addToken(offset, tkn); offset += 1; break;
@@ -646,6 +649,21 @@
       h.l += 1;
       lt.tokens = t.tokens.slice();
       h.h = t.endState.clone();
+      // Session lines are entered one at a time, so a bracket still open at the end of
+      // the line can never be closed. Mark it as an error, except a bare trailing
+      // opener, which may begin a multi-line array.
+      const unclosed = h.h.a.filter((e) => e.col != null && !h1.a.includes(e)
+        && !/^\s*(?:⍝.*)?$/.test(line.slice(e.col + 1)));
+      unclosed.forEach((e) => {
+        const i = lt.tokens.reduce((r, x, j) => (x.startIndex <= e.col ? j : r), 0);
+        const { startIndex, scopes } = lt.tokens[i];
+        const next = lt.tokens[i + 1];
+        const kind = { '(': 'parenthesis', '[': 'square', '{': 'dfn' }[e.t];
+        const ins = [{ startIndex: e.col, scopes: `invalid.${kind}.apl` }];
+        if (!next || next.startIndex > e.col + 1) ins.push({ startIndex: e.col + 1, scopes });
+        lt.tokens.splice(startIndex === e.col ? i : i + 1, startIndex === e.col ? 1 : 0, ...ins);
+      });
+      if (unclosed.length) h.h.a = h.h.a.filter((e) => !unclosed.includes(e));
       return lt;
     },
   };
