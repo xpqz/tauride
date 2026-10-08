@@ -835,7 +835,7 @@
       // A session is what an Electron RIDE process was: quitting ends this
       // window's session; the app exits with its last session.
       // macOS: Cmd-Q quits every session; its windows close one at a time.
-      quit: () => (nodePlatform === 'darwin' ? invoke('quit_all') : sessionWindow().close()),
+      quit: () => (nodePlatform === 'darwin' ? tev().emit('ride-quit-now').then(() => invoke('quit_all')) : sessionWindow().close()),
       exit: () => sessionWindow().destroy(),
       relaunch() {},
     },
@@ -880,6 +880,9 @@
   window.close = closeWindow;
   window.addEventListener('DOMContentLoaded', () => {
     tev().listen('ride-close-request', ({ payload: { id } }) => { if (id === currentId()) closeWindow(); });
+    // Quitting the app was confirmed once, by the window that started it:
+    // the other sessions close without asking again.
+    tev().listen('ride-quit-now', () => { window.__rideQuitting = true; });
   });
 
   // ------------------------------------------------------------- titles

@@ -201,14 +201,24 @@ const Console = console;
       D.ide2 = new D.IDE();
       I.splash.hidden = 1;
     }
-    // Tauri on macOS: Cmd-Q quits every session, not just this window's.
-    if (!D.quit) D.quit = window.__RIDE__ && D.mac ? () => D.el.app.quit() : window.close;
+    // Tauri on macOS: Cmd-Q quits every session, not just this window's, and
+    // asks once rather than once per session.
+    if (!D.quit && window.__RIDE__ && D.mac) {
+      D.quit = () => {
+        if (D.prf.sqp() && D.ide && D.ide.connected) {
+          $.confirm('Quit Tauride and all its sessions. Are you sure?', document.title, (x) => { if (x) D.el.app.quit(); });
+        } else {
+          D.el.app.quit();
+        }
+      };
+    }
+    if (!D.quit) D.quit = window.close;
     window.onbeforeunload = (e) => {
       if (D.ide && D.ide.connected && !D.ide.closing) {
         e.returnValue = false;
         setTimeout(() => {
           let q = true;
-          if (D.prf.sqp() && !(D.el && process.env.NODE_ENV === 'test')) {
+          if (D.prf.sqp() && !window.__rideQuitting && !(D.el && process.env.NODE_ENV === 'test')) {
             const msg = D.spawned ? 'Quit Dyalog APL.' : 'Disconnect from interpreter.';
             $.confirm(`${msg} Are you sure?`, document.title, (x) => { q = x; });
           }
