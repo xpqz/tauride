@@ -834,7 +834,8 @@
       getLocale: () => builtins['os-locale'].sync(),
       // A session is what an Electron RIDE process was: quitting ends this
       // window's session; the app exits with its last session.
-      quit: () => sessionWindow().close(),
+      // macOS: Cmd-Q quits every session; its windows close one at a time.
+      quit: () => (nodePlatform === 'darwin' ? invoke('quit_all') : sessionWindow().close()),
       exit: () => sessionWindow().destroy(),
       relaunch() {},
     },

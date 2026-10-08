@@ -29,7 +29,7 @@ fn session_of(id: u32) -> u32 {
     id / SESSION_SPAN
 }
 
-fn is_session_window(id: u32) -> bool {
+pub fn is_session_window(id: u32) -> bool {
     id % SESSION_SPAN == 1
 }
 
@@ -65,10 +65,30 @@ pub fn session_window<R: Runtime, M: Manager<R>>(manager: &M, label: &str) -> ta
     b.build()
 }
 
+/// Set by quit_all: the app exits once the last session window is gone.
+/// Elsewhere that is always so; macOS keeps running with no windows.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Cmd-Q: close every session window (each runs RIDE's quit prompt), then
+/// exit. If a session cancels, the app keeps running and the flag is reset
+/// when the next session window opens.
+#[tauri::command]
+pub fn quit_all<R: Runtime>(app: AppHandle<R>) {
+    QUITTING.store(true, Ordering::Relaxed);
+    let sessions: Vec<_> = app.webview_windows().into_iter().filter(|(l, _)| is_session_window(id_of(l))).collect();
+    if sessions.is_empty() {
+        app.exit(0);
+    }
+    for (_, w) in sessions {
+        let _ = w.close();
+    }
+}
+
 /// A new session in its own window. `env` overrides the startup
 /// environment for that window, so RIDE_SPAWN, RIDE_CONNECT, RIDE_LISTEN
 /// and the like say what the session does, as for a spawned RIDE.
 pub fn open_session<R: Runtime>(app: &AppHandle<R>, env: Map<String, Value>) -> Result<u32, String> {
+    QUITTING.store(false, Ordering::Relaxed);
     let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed) * SESSION_SPAN + 1;
     let label = label_of(id);
     SESSION_ENV.lock().unwrap().get_or_insert_with(HashMap::new).insert(label.clone(), env);
@@ -106,7 +126,7 @@ fn hold_close_for_page(id: u32) -> bool {
 /// Every window, however it was created: close requests go to the page
 /// first, session windows' geometry is saved, a session's helper windows
 /// close with its session window (as Electron children close with their
-/// parent), and the app exits with the last session window.
+/// parent), and the app exits with the last session window (macOS: only when quitting).
 pub fn watch<R: Runtime>(w: &Window<R>) {
     let app = w.app_handle().clone();
     let label = w.label().to_owned();
@@ -135,7 +155,9 @@ pub fn watch<R: Runtime>(w: &Window<R>) {
                         let _ = ww.destroy();
                     }
                 }
-                if !others.keys().any(|l| *l != label && is_session_window(id_of(l))) {
+                if !others.keys().any(|l| *l != label && is_session_window(id_of(l)))
+                    && (cfg!(not(target_os = "macos")) || QUITTING.load(Ordering::Relaxed))
+                {
                     app.exit(0);
                 }
             }

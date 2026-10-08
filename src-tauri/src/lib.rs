@@ -216,6 +216,7 @@ pub fn run() {
             open_url,
             win::win_op,
             win::session_new,
+            win::quit_all,
             net::net_connect,
             net::net_connect_tls,
             net::net_write,
@@ -241,6 +242,21 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Tauride");
+        .build(tauri::generate_context!())
+        .expect("error while building Tauride")
+        .run(|_app, _event| {
+            // Clicking the Dock icon with no session window open starts one.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                let any = _app.webview_windows().keys().any(|l| win::is_session_window(win::id_of(l)));
+                if !any {
+                    let app = _app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = win::open_session(&app, serde_json::Map::new()) {
+                            eprintln!("tauride: cannot open a session window: {e}");
+                        }
+                    });
+                }
+            }
+        });
 }

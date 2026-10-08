@@ -100,7 +100,21 @@ pub fn set_app_menu<R: Runtime>(app: tauri::AppHandle<R>, items: Vec<Item>) -> R
     let built = build(&app, &items).map_err(|e| e.to_string())?;
     let refs: Vec<&dyn IsMenuItem<R>> = built.iter().map(|c| c.as_ref()).collect();
     let menu = Menu::with_items(&app, &refs).map_err(|e| e.to_string())?;
-    app.set_menu(menu).map(|_| ()).map_err(|e| e.to_string())
+    app.set_menu(menu.clone()).map_err(|e| e.to_string())?;
+    // macOS lists the open windows in its Window menu and adds its search
+    // field to the Help menu. This must follow set_menu, which creates the
+    // native menus.
+    #[cfg(target_os = "macos")]
+    for it in &items {
+        if let Some(sub) = menu.get(&it.id).and_then(|k| k.as_submenu().cloned()) {
+            match it.role.as_deref() {
+                Some("window") => sub.set_as_windows_menu_for_nsapp().map_err(|e| e.to_string())?,
+                Some("help") => sub.set_as_help_menu_for_nsapp().map_err(|e| e.to_string())?,
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 /// App-wide menu event handler: forwards popup-menu clicks to the webviews.
