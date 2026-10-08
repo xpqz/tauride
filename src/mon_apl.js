@@ -731,6 +731,15 @@
             },
           );
         }
+        if (t === 'class') {
+          suggestions.push({
+            label: 'Field',
+            kind: kind.Snippet,
+            insertText: 'Field ${1:Public} ${2:name}',
+            insertTextRules,
+            documentation: 'Field declaration',
+          });
+        }
         if (t === 'class' || t === 'interface') {
           suggestions.push(
             {
