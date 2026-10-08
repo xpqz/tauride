@@ -19,10 +19,29 @@ D.IDE = function IDE(opts = {}) {
   ide.pending = [];
   ide.promptType = 1;
   ide.hasSubscribe = true;
+  // The interpreter's ∇Name header form is refused with "defn error" when Name already
+  // exists, so a pasted ⎕VR-style definition is fixed with ⎕FX instead, which also
+  // redefines. Anything not clearly such a listing is left to the interpreter as typed.
+  const fxDefns = (a) => {
+    const r = [];
+    for (let i = 0; i < a.length; i++) {
+      const j = /^\s*∇\s*[^\s[]+[^[]*$/.test(a[i]) ? a.findIndex((l, k) => k > i && /^\s*∇\s*$/.test(l)) : -1;
+      const body = j < 0 ? [] : a.slice(i + 1, j);
+      if (j < 0 || !body.every((l) => /^\s*\[\d+\]/.test(l))) r.push(a[i]);
+      else {
+        const q = [a[i].replace(/^\s*∇\s*/, ''), ...body.map((l) => l.replace(/^\s*\[\d+\]\s*/, ''))]
+          .map((l) => `(⊂,'${l.replace(/'/g, "''")}')`);
+        r.push(`{''≡0⍴⍵:_←0 ⋄ ⎕←'defn error'}⎕FX ,${q.join(',')}`);
+        i = j;
+      }
+    }
+    return r;
+  };
   ide.exec = (a, tc) => {
     if (a && a.length) {
-      tc || (ide.pending = a.slice(1));
-      D.send('Execute', { trace: tc, text: `${a[0]}\n` });
+      const es = tc || !window.__RIDE__ ? a : fxDefns(a);
+      tc || (ide.pending = es.slice(1));
+      D.send('Execute', { trace: tc, text: `${es[0]}\n` });
       ide.getStats();
     }
   };
