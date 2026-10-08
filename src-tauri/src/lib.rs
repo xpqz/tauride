@@ -240,6 +240,26 @@ pub fn run() {
             if app.state::<winstate::WinState>().get()["devTools"].as_bool().unwrap_or(false) {
                 main.open_devtools();
             }
+            // A signal ends the app without the quit prompt; exiting through
+            // Tauri runs the exit handler that ends the spawned interpreters.
+            #[cfg(unix)]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let (Ok(mut term), Ok(mut int), Ok(mut hup)) =
+                        (signal(SignalKind::terminate()), signal(SignalKind::interrupt()), signal(SignalKind::hangup()))
+                    else {
+                        return;
+                    };
+                    tokio::select! {
+                        _ = term.recv() => {}
+                        _ = int.recv() => {}
+                        _ = hup.recv() => {}
+                    }
+                    handle.exit(0);
+                });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
