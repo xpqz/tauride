@@ -617,6 +617,17 @@
   };
 
   const getState = (m, l) => m._tokenization._tokenizationStateStore._beginState[l];
+  // True when a manual completion request would find nothing to offer, because the word left of
+  // the cursor is shorter than the autocompletion threshold. Monaco would then show "No suggestions."
+  D.acBelowLimit = (me) => {
+    const model = me.getModel();
+    const { lineNumber: l, column: c } = me.getPosition();
+    const s = model.getLineContent(l);
+    const pk = D.prf.prefixKey();
+    const word = (/⎕?[A-Z_a-zÀ-ÖØ-Ýß-öø-üþ∆⍙Ⓐ-Ⓩ0-9]*$/.exec(s.slice(0, c - 1)) || [])[0] || '';
+    return D.prf.autocompletion() !== 'shell' && word.length < D.prf.autoCompleteCharacterLimit()
+      && !model.bqc && s[c - 2] !== pk && !/^\s*:\w*$/.test(s.slice(0, c - 1));
+  };
   const aplCompletions = (pk) => ({
     triggerCharacters: `1234567890:.⎕()[]${pk}`.split(''),
     provideCompletionItems: (model, position) => {
