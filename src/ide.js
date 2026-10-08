@@ -824,6 +824,8 @@ D.IDE = function IDE(opts = {}) {
       });
     },
     ReplyClearTraceStopMonitor(x) {
+      x.stops += ide.unsavedStops || 0;
+      ide.unsavedStops = 0;
       $.alert(`The following items were cleared:
       ${x.traces} traces
       ${x.stops} stops
