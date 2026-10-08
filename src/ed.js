@@ -132,7 +132,10 @@ D.Ed = function Ed(ide, opts) { // constructor
     const t = e.target;
     const mt = monaco.editor.MouseTargetType;
     const p = t.position;
-    const inEmptySpace = t.type === mt.CONTENT_EMPTY;
+    // In a tracer, blank space (right of a line, or the line-number gutter) is the
+    // click target for switching to the editor; short functions have no text to click.
+    const inEmptySpace = t.type === mt.CONTENT_EMPTY
+      || (!!ed.tc && (t.type === mt.GUTTER_LINE_NUMBERS || t.type === mt.GUTTER_LINE_DECORATIONS));
     if (e.event.middleButton) {
       e.event.preventDefault();
       e.event.stopPropagation();
