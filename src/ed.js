@@ -596,7 +596,7 @@ D.Ed.prototype = {
       const { vt } = model;
       const l = vt.position.lineNumber;
       const value = '```'
-      + `${x.class === 2 || x.class === 14 ? 'plaintext' : 'apl'}\n`
+      + `${[2, 9, 14].includes(x.class) ? 'plaintext' : 'apl'}\n`
       + `${x.tip.join('\n')}\n`
       + '```';
       vt.complete({
