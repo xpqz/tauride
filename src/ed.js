@@ -36,6 +36,10 @@ D.Ed = function Ed(ide, opts) { // constructor
     autoClosingBrackets: !!D.prf.autoCloseBrackets(),
     automaticLayout: false, // laid out below, a frame after each resize
     autoIndent: D.prf.indent() >= 0,
+    detectIndentation: false,
+    indentSize: D.prf.indent() > 0 ? D.prf.indent() : 4,
+    tabSize: D.prf.indent() > 0 ? D.prf.indent() : 4,
+    insertSpaces: true,
     'bracketPairColorization.enabled': false,
     contextmenu: false,
     cursorStyle: D.prf.blockCursor() ? 'block' : 'line',
@@ -513,7 +517,11 @@ D.Ed.prototype = {
   getDocument() { return this.dom.ownerDocument; },
   refresh() { },
   autoCloseBrackets(x) { this.me.updateOptions({ autoClosingBrackets: x }); },
-  indent(x) { this.me.updateOptions({ autoIndent: x >= 0 }); },
+  indent(x) {
+    this.me.updateOptions({ autoIndent: x >= 0 });
+    const sw = D.prf.indent() > 0 ? D.prf.indent() : 4;
+    this.me.updateOptions({ indentSize: sw, tabSize: sw });
+  },
   fold(x) { this.me.updateOptions({ folding: this.isCode && !!x }); },
   matchBrackets(x) { this.me.updateOptions({ matchBrackets: !!x }); },
   minimapEnabled(x) { this.me.updateOptions({ minimap: { enabled: !!x } }); },
