@@ -582,7 +582,8 @@ D.Ed.prototype = {
     ed.setStop();
     if (ed.tc) {
       ed.hl();
-      u.lineNumber = ed.HIGHLIGHT.lineStart;
+      // The interpreter may not send SetHighlightLine before the first format reply
+      if (ed.HIGHLIGHT) u.lineNumber = ed.HIGHLIGHT.lineStart;
     }
     if (ed.firstOpen) {
       if (lines.length === 1 && /\s?[a-z|@]+$/.test(lines[0])) u.column = model.getLineContent(1).length + 1;
