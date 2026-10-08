@@ -245,6 +245,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Tauride")
         .run(|_app, _event| {
+            if let tauri::RunEvent::Exit = _event {
+                proc::kill_all(_app);
+            }
             // Clicking the Dock icon with no session window open starts one.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {

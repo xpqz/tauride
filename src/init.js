@@ -201,7 +201,8 @@ const Console = console;
       D.ide2 = new D.IDE();
       I.splash.hidden = 1;
     }
-    if (!D.quit) D.quit = window.close;
+    // Tauri on macOS: Cmd-Q quits every session, not just this window's.
+    if (!D.quit) D.quit = window.__RIDE__ && D.mac ? () => D.el.app.quit() : window.close;
     window.onbeforeunload = (e) => {
       if (D.ide && D.ide.connected && !D.ide.closing) {
         e.returnValue = false;

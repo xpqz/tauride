@@ -16,6 +16,21 @@ pub struct Procs {
     running: Mutex<HashMap<String, (u32, Option<tokio::process::ChildStdin>)>>,
 }
 
+/// App exit: end every process RIDE spawned (the interpreter, and what its
+/// wrapper script started) so none outlives Tauride, as Electron's children
+/// did not.
+#[cfg(unix)]
+pub fn kill_all<R: Runtime>(app: &AppHandle<R>) {
+    let pids: Vec<u32> = app.state::<Procs>().running.lock().unwrap().values().map(|(p, _)| *p).collect();
+    for pid in pids {
+        let _ = std::process::Command::new("pkill").args(["-TERM", "-P", &pid.to_string()]).status();
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
+}
+
+#[cfg(not(unix))]
+pub fn kill_all<R: Runtime>(_app: &AppHandle<R>) {}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpawnOpts {
