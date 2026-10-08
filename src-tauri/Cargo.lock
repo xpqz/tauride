@@ -4931,7 +4931,7 @@ dependencies = [
 
 [[package]]
 name = "tauride"
-version = "4.8.0"
+version = "4.8.1"
 dependencies = [
  "base64 0.23.1",
  "gtk",
