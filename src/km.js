@@ -568,5 +568,6 @@
     MAX_VALUE: 'MAX_VALUE',
   };
   Object.keys(l).forEach((k) => { l[l[k]] = k; });
+  l['§'] = 'Backquote'; // ISO Mac layouts: the key left of 1 reports the Backquote key code but types §
   D.keyMap.labels = l;
 }
