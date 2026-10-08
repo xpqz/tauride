@@ -67,6 +67,11 @@ tag `vX.Y.Z` and push both. macOS builds are Apple silicon only and ad-hoc signe
 - Never use `--no-verify`; fix the failure instead.
 - Commit only when asked. Pushing, tagging and moving a tag are outward-facing: do them
   only when asked, and never move a published tag without being told to.
+- Fixes: one branch per issue, named `<issue id>-<slug>`, from `main`, with no stacking
+  of branches on each other. Once a fix is verified in the running app, merge it into
+  `main` (`git merge --no-ff`) and delete the branch and its worktree
+  (`git worktree remove --force`, `git branch -d`); do not leave spent branches around.
+  Merging is local; pushing still waits for an instruction.
 - Commit messages: a short imperative summary, then a body that says why. No attribution
   lines.
 
