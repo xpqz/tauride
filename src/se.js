@@ -451,7 +451,9 @@ D.Se.prototype = {
     let j = 0;
     let prev = {};
     let curr = {};
-    let next = se.lines[0];
+    // a model row with no session log entry yet (the prompt line of a
+    // session that has had no output) decorates as an empty entry
+    let next = se.lines[0] || {};
     for (let i = 0; i < rows; i++) {
       if (se.dirty[i + 1] !== 0) {
         prev = curr;
