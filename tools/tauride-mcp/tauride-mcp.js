@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // CLI and MCP stdio adapter for the Tauride agent socket: the client side of
-// "Phase 1: wire format" in tauri/agent-pairing.md. One file, no dependencies.
+// the wire format sections in tauri/agent-pairing.md. One file, no dependencies.
 const fs = require('fs');
 const net = require('net');
 const os = require('os');
@@ -19,6 +19,18 @@ const USAGE = `usage: tauride-mcp [--session <label>] [--socket <path>] [--timeo
   interrupt [weak|strong]  interrupt the interpreter (default weak)
   tail [n]                 the last n transcript events (default 100), one JSON object per line
   watch                    print transcript events as they arrive, until Ctrl-C
+  windows                  the open editors and tracers, one JSON object per line
+  window-text <token>      one window: token, name, kind, text, currentLine, stops, saved
+  edit <name>              open an editor on a name (as )ed does) and print its token
+  save <token> <file|text> replace an editor's text and save it through the editor
+  stops <token> <lines...> set a window's stop lines (0-based) and print the stop list
+  trace <token> <action>   step_into, step_over, continue, continue_trace, back, forward,
+                           cutback, restart or edit in a tracer; prints the next highlight
+  stack                    the SI stack as JSON
+  value <name>             the value of a name in the current frame, as a tooltip shows it
+  wait [--since n] [--prefix s] [--origin human|agent]
+                           print the first transcript event after seq n (default the latest)
+                           whose text starts with s, from that origin; exit 2 on --timeout
   mcp                      serve MCP over stdio
 
 The socket is --socket, else $TAURIDE_SOCKET, else
@@ -36,7 +48,13 @@ const ERR_MSG = {
   timeout: 'no result within the timeout',
   closed: 'the session is not connected to an interpreter',
   bad_request: 'bad request',
+  denied: 'the person denied the request',
+  not_found: 'no such window',
+  save: 'the interpreter did not save the changes',
+  unauthorized: 'the connection was not authenticated',
 };
+
+const TRACE_ACTIONS = ['step_into', 'step_over', 'continue', 'continue_trace', 'back', 'forward', 'cutback', 'restart', 'edit'];
 
 class AppError extends Error {
   constructor(err) {
@@ -170,10 +188,21 @@ const connect = (spec, onEvent) => new Promise((resolve, reject) => {
 // plain reading of "ok is an object", and a bare array is accepted in case the core
 // chose the other.
 const events = (ok) => (Array.isArray(ok) ? ok : (ok && ok.events) || []);
+// windows is read the same way: the design writes its result as the array itself.
+const windows = (ok) => (Array.isArray(ok) ? ok : (ok && ok.windows) || []);
+// wait returns "the first event", so ok is the event; {"event": ...} is accepted too.
+const waited = (ok) => ((ok && ok.event) || ok);
+// value returns the ValueTip text: its tip lines when the payload is passed through.
+const tipText = (ok) => {
+  if (typeof ok === 'string') return ok;
+  if (ok && Array.isArray(ok.tip)) return ok.tip.join('\n');
+  if (ok && typeof ok.text === 'string') return ok.text;
+  return JSON.stringify(ok);
+};
 
-const fmtDmx = (d) => ((d && (d.EM || d.Message))
-  ? [d.EM, d.Message].filter(Boolean).join(': ')
-  : JSON.stringify(d));
+// The HadError payload Dyalog sends is numbers only ({error, dmx}); its text is already in
+// the output lines, so there is nothing to add unless an interpreter supplies the DMX text.
+const fmtDmx = (d) => (d ? [d.EM, d.Message].filter(Boolean).join(': ') : '');
 
 // Prints an execute/answer result (or the partial one a timeout carries) as the session shows it.
 const printResult = (r) => {
@@ -184,14 +213,56 @@ const printResult = (r) => {
   if (r.truncated) log('tauride-mcp: output truncated; the rest is in the transcript');
 };
 
+// A window token on the command line.
+const tokenArg = (cmd, s) => {
+  const t = Number(s);
+  if (s === undefined || !Number.isInteger(t) || t < 0) throw usage(`${cmd} needs a window token, not ${s}`);
+  return t;
+};
+
+// save takes the new text as a file when one of that name exists, else as the text itself;
+// either way without a final newline, which the editor never has.
+const saveText = (args) => {
+  const s = args.slice(1).join(' ');
+  const text = args.length === 2 && fs.existsSync(s) ? fs.readFileSync(s, 'utf8') : s;
+  return text.replace(/\r\n/g, '\n').replace(/\n$/, '');
+};
+
+// wait's own options follow the command; --timeout is read with the global options.
+const waitArgs = (args) => {
+  const w = {};
+  for (let i = 0; i < args.length; i += 1) {
+    const m = /^--(since|prefix|origin)(?:=(.*))?$/.exec(args[i]);
+    if (!m) throw usage(`wait does not take ${args[i]}`);
+    let v = m[2];
+    if (v === undefined) { i += 1; v = args[i]; }
+    if (v === undefined) throw usage(`--${m[1]} needs a value`);
+    if (m[1] === 'since') {
+      v = Number(v);
+      if (!Number.isInteger(v) || v < 0) throw usage(`--since takes a seq, not ${args[i]}`);
+    } else if (m[1] === 'origin' && !['human', 'agent'].includes(v)) throw usage(`--origin takes human or agent, not ${v}`);
+    w[m[1]] = v;
+  }
+  return w;
+};
+
+const COMMANDS = ['status', 'exec', 'answer', 'interrupt', 'tail', 'watch', 'windows', 'window-text', 'edit', 'save', 'stops', 'trace', 'stack', 'value', 'wait'];
+
 const cli = async (opts, cmd, args) => {
   // Arguments are checked before connecting, so a usage error never reads as "cannot connect".
-  if (!['status', 'exec', 'answer', 'interrupt', 'tail', 'watch'].includes(cmd)) throw usage(`unknown command: ${cmd}`);
+  if (!COMMANDS.includes(cmd)) throw usage(`unknown command: ${cmd}`);
   if ((cmd === 'exec' || cmd === 'answer') && !args.length) throw usage(`${cmd} needs <text>`);
   const strength = args[0] || 'weak';
   if (cmd === 'interrupt' && !['weak', 'strong'].includes(strength)) throw usage(`interrupt takes weak or strong, not ${strength}`);
   const n = args.length ? Number(args[0]) : undefined;
   if (cmd === 'tail' && n !== undefined && !(n > 0)) throw usage(`tail takes a count, not ${args[0]}`);
+  const token = ['window-text', 'save', 'stops', 'trace'].includes(cmd) ? tokenArg(cmd, args[0]) : undefined;
+  if ((cmd === 'edit' || cmd === 'value') && args.length !== 1) throw usage(`${cmd} needs <name>`);
+  if (cmd === 'save' && args.length < 2) throw usage('save needs <token> <file-or-text>');
+  const lines = cmd === 'stops' ? args.slice(1).map(Number) : [];
+  if (cmd === 'stops' && lines.some((l) => !Number.isInteger(l) || l < 0)) throw usage(`stops takes line numbers, not ${args.slice(1).join(' ')}`);
+  if (cmd === 'trace' && !TRACE_ACTIONS.includes(args[1])) throw usage(`trace takes one of ${TRACE_ACTIONS.join(', ')}, not ${args[1]}`);
+  const wait = cmd === 'wait' ? waitArgs(args) : null;
   const client = await connect(opts.socket, cmd === 'watch' ? (ev) => console.log(JSON.stringify(ev)) : null);
   try {
     switch (cmd) {
@@ -204,7 +275,8 @@ const cli = async (opts, cmd, args) => {
         const r = await client.request(req, { text: args.join(' '), timeout: opts.timeout });
         printResult(r);
         if (r && r.error) {
-          log(`tauride-mcp: ${fmtDmx(r.error)}`);
+          const text = fmtDmx(r.error);
+          if (text) log(`tauride-mcp: ${text}`);
           return 1;
         }
         return 0;
@@ -217,6 +289,33 @@ const cli = async (opts, cmd, args) => {
       }
       case 'tail':
         events(await client.request('tail', { n })).forEach((ev) => console.log(JSON.stringify(ev)));
+        return 0;
+      case 'windows':
+        windows(await client.request('windows')).forEach((w) => console.log(JSON.stringify(w)));
+        return 0;
+      case 'window-text':
+        console.log(JSON.stringify(await client.request('window_text', { token }), null, 2));
+        return 0;
+      case 'edit':
+        console.log(JSON.stringify(await client.request('edit', { name: args[0] })));
+        return 0;
+      case 'save':
+        console.log(JSON.stringify(await client.request('save', { token, text: saveText(args) })));
+        return 0;
+      case 'stops':
+        console.log(JSON.stringify(await client.request('stops', { token, lines })));
+        return 0;
+      case 'trace':
+        console.log(JSON.stringify(await client.request('trace', { token, action: args[1], timeout: opts.timeout })));
+        return 0;
+      case 'stack':
+        console.log(JSON.stringify(await client.request('stack'), null, 2));
+        return 0;
+      case 'value':
+        console.log(tipText(await client.request('value', { name: args[0] })));
+        return 0;
+      case 'wait':
+        console.log(JSON.stringify(waited(await client.request('wait', { ...wait, timeout: opts.timeout }))));
         return 0;
       default: // watch: events print as they arrive until Ctrl-C or the session goes away
         process.on('SIGINT', () => process.exit(0));
@@ -231,7 +330,7 @@ const cli = async (opts, cmd, args) => {
   }
 };
 
-// MCP tools, one per phase 1 request.
+// MCP tools, one per request (wait is exposed as wait_for_input, its one use for a model).
 const TOOLS = [
   {
     name: 'execute',
@@ -273,7 +372,9 @@ const TOOLS = [
   {
     name: 'tail',
     description: 'The last n transcript events (default 100), one JSON object per line. Kinds: input '
-      + '(origin human or agent), output, error, prompt, window, stack; each has seq and t.',
+      + '(origin human or agent), output, error, prompt, window, stack, agent; each has seq and t. '
+      + 'Use it to see what the person typed and what the interpreter answered; to wait for a new '
+      + 'line, use wait_for_input instead.',
     inputSchema: {
       type: 'object',
       properties: { n: { type: 'integer', minimum: 1 } },
@@ -284,6 +385,109 @@ const TOOLS = [
     description: 'The session: caption, prompt type, level (observe or control), interpreter version, '
       + 'transcript path and the seq of the latest event.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'windows',
+    description: 'The open editor and tracer windows (the session excluded): token, name, kind (editor or '
+      + 'tracer), text, currentLine, stops, trace, monitor, saved. Use it to find the token that save, '
+      + 'stops, trace and window_text need, or to see which line a tracer is on.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'window_text',
+    description: 'One window by token, with the same fields as windows. Use it to re-read an editor or '
+      + 'tracer after a change instead of listing every window.',
+    inputSchema: {
+      type: 'object',
+      properties: { token: { type: 'integer', description: 'the window token, from windows' } },
+      required: ['token'],
+    },
+  },
+  {
+    name: 'edit',
+    description: 'Open an editor on a name, as )ed does, and return its window token once the editor is '
+      + 'open. Use it before save when no editor is open for that function or variable.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'the function or variable name' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'save',
+    description: 'Replace the text of an open editor and save it through the editor\'s own save path, so '
+      + 'the window shows the new text; optional stops are 0-based line numbers. Returns {token, saved: true} '
+      + 'or the interpreter\'s refusal (for a function suspended in the tracer, say). Use it to define or '
+      + 'change a function instead of ⎕FX in the session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        token: { type: 'integer', description: 'the editor\'s window token, from windows or edit' },
+        text: { type: 'string', description: 'the whole new text, lines separated by newlines, header first' },
+        stops: { type: 'array', items: { type: 'integer' }, description: 'stop lines to save with it (0-based)' },
+      },
+      required: ['token', 'text'],
+    },
+  },
+  {
+    name: 'stops',
+    description: 'Set the stop (breakpoint) lines of a window, as 0-based line numbers, the way a margin '
+      + 'click does: immediate in a tracer, saved with the editor otherwise. Returns the window\'s stop list. '
+      + 'Use it before executing a function you want to suspend inside.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        token: { type: 'integer' },
+        lines: { type: 'array', items: { type: 'integer' }, description: 'the complete stop list; [] clears it' },
+      },
+      required: ['token', 'lines'],
+    },
+  },
+  {
+    name: 'trace',
+    description: 'Run one tracer action on a tracer window: step_into, step_over, continue, continue_trace, '
+      + 'back, forward, cutback, restart or edit. Returns the next highlighted line, {closed: true} when the '
+      + 'tracer closed, or {prompt} if the session prompt changed first. Use it to step through a suspended '
+      + 'function; windows and stack show where it is.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        token: { type: 'integer', description: 'the tracer\'s window token, from windows' },
+        action: { type: 'string', enum: TRACE_ACTIONS },
+        timeout: { type: 'integer', description: 'milliseconds to wait for the tracer to move (default 30000)' },
+      },
+      required: ['token', 'action'],
+    },
+  },
+  {
+    name: 'stack',
+    description: 'The SI stack (ReplyGetSIStack): one entry per suspended or pendent function, innermost '
+      + 'first. Use it to see where execution is suspended before tracing or cutting back.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'value',
+    description: 'The value of a name in the current frame, as the editor\'s tooltip shows it, without '
+      + 'executing anything in the session. Names only; for an expression use execute.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'a variable or function name' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'wait_for_input',
+    description: 'Blocks until the person enters a line in the session, optionally one starting with a '
+      + 'prefix such as \'⍝ Claude:\'. Use it to wait for instructions instead of polling tail. Returns the '
+      + 'input event (seq, t, text, prompt), or a timeout error after timeout ms (default 300000).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prefix: { type: 'string', description: 'only a line starting with this' },
+        since: { type: 'integer', description: 'look from this transcript seq on (default: the latest, so only a new line counts)' },
+        timeout: { type: 'integer', description: 'milliseconds to wait (default 300000)' },
+      },
+    },
   },
 ];
 
@@ -314,6 +518,31 @@ const mcp = (opts) => new Promise((resolve) => {
       }
       case 'tail':
         return { text: events(await c.request('tail', { n: a.n })).map((ev) => JSON.stringify(ev)).join('\n') };
+      case 'windows':
+        return { text: JSON.stringify(windows(await c.request('windows'))) };
+      case 'window_text':
+        return { text: JSON.stringify(await c.request('window_text', { token: a.token })) };
+      case 'edit':
+        return { text: JSON.stringify(await c.request('edit', { name: a.name })) };
+      case 'save':
+        return { text: JSON.stringify(await c.request('save', { token: a.token, text: a.text, stops: a.stops })) };
+      case 'stops':
+        return { text: JSON.stringify(await c.request('stops', { token: a.token, lines: a.lines })) };
+      case 'trace':
+        return { text: JSON.stringify(await c.request('trace', { token: a.token, action: a.action, timeout: a.timeout })) };
+      case 'stack':
+        return { text: JSON.stringify(await c.request('stack')) };
+      case 'value':
+        return { text: tipText(await c.request('value', { name: a.name })) };
+      case 'wait_for_input': {
+        // Only the app's timeout ends the wait: request() itself never times out, so a long
+        // wait is not cut short here. since is left out unless given, so the app starts
+        // from its latest event.
+        const f = { kinds: ['input'], origin: 'human', timeout: a.timeout > 0 ? a.timeout : 300000 };
+        if (a.prefix) f.prefix = a.prefix;
+        if (a.since !== undefined) f.since = a.since;
+        return { text: JSON.stringify(waited(await c.request('wait', f))) };
+      }
       default:
         return { text: JSON.stringify(await c.request('status')) };
     }
@@ -442,10 +671,17 @@ const main = async () => {
   return cli(opts, cmd, args);
 };
 
-main().then((code) => {
-  process.exitCode = code; // not process.exit(): stdout to a pipe is asynchronous on macOS
-}, (e) => {
-  log(`tauride-mcp: ${e.message}`);
-  if (e.usage) log(USAGE);
-  process.exitCode = 2;
-});
+// e2e.js drives the app through the same client, so the socket code lives here once.
+module.exports = {
+  connect, AppError, events, windows, waited, tipText, TOOLS,
+};
+
+if (require.main === module) {
+  main().then((code) => {
+    process.exitCode = code; // not process.exit(): stdout to a pipe is asynchronous on macOS
+  }, (e) => {
+    log(`tauride-mcp: ${e.message}`);
+    if (e.usage) log(USAGE);
+    process.exitCode = 2;
+  });
+}
