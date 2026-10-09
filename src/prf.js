@@ -7,6 +7,7 @@
 'use strict'
 D.prf = {};
 [ // name                 default (type is determined from default value; setter enforces type and handles encoding)
+  ['agent',              '0'], // agent pairing port (Tauri): '0' off, '1' observe, 'control'; a string so 'control' fits
   ['autoStart',          0], // Auto-start default configuration when Ride starts
   ['autoCloseBrackets',  1], //whether to insert {}[]() in pairs
   ['autocompletion',     'classic'],

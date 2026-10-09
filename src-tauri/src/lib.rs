@@ -1,3 +1,4 @@
+mod agent;
 mod dialog;
 mod menu;
 mod net;
@@ -211,6 +212,7 @@ pub fn run() {
         .manage(net::Net::default())
         .manage(proc::Procs::default())
         .manage(ssh::Ssh::default())
+        .manage(agent::Agent::default())
         .invoke_handler(tauri::generate_handler![
             log,
             open_url,
@@ -230,6 +232,9 @@ pub fn run() {
             ssh::ssh_forward_out,
             ssh::ssh_forward_in,
             ssh::ssh_end,
+            agent::agent_listen,
+            agent::agent_close,
+            agent::agent_send,
             winstate::save_win,
             menu::popup_menu,
             menu::set_app_menu,
