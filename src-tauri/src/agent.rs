@@ -96,14 +96,31 @@ async fn serve<R: Runtime>(
     }
 }
 
+/// Tells a connection that arrived while another is served that the port is
+/// busy. A client writes its request as soon as it connects, which on a
+/// Unix socket is before this side has accepted; dropping the stream right
+/// after the frame would turn that write into EPIPE on the client, and a
+/// Node client then closes without reading the frame. So the write half is
+/// shut down and the client's bytes are drained until it closes (or a
+/// second passes), which lets its request land and the refusal be read.
+#[cfg(unix)]
+async fn refuse(mut stream: tokio::net::UnixStream) {
+    use tokio::io::AsyncWriteExt;
+    if stream.write_all(BUSY).await.is_err() || stream.shutdown().await.is_err() {
+        return;
+    }
+    let mut sink = tokio::io::sink();
+    let drain = tokio::io::copy(&mut stream, &mut sink);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), drain).await;
+}
+
 /// Accepts connections for one port. A connection arriving while another is
 /// served is told so and dropped, so the tap never sees two clients.
 #[cfg(unix)]
 async fn accept_loop<R: Runtime>(app: AppHandle<R>, label: String, listener: tokio::net::UnixListener) {
-    use tokio::io::AsyncWriteExt;
     let mut n = 0u64;
     loop {
-        let mut stream = match listener.accept().await {
+        let stream = match listener.accept().await {
             Ok((s, _)) => s,
             Err(e) => {
                 eprintln!("tauride: agent socket {label}: accept: {e}");
@@ -124,8 +141,9 @@ async fn accept_loop<R: Runtime>(app: AppHandle<R>, label: String, listener: tok
                 }
             }
         };
+        // Spawned so a client that never closes cannot hold up the accepts.
         if !accepted {
-            let _ = stream.write_all(BUSY).await;
+            tauri::async_runtime::spawn(refuse(stream));
             continue;
         }
         // The connect notice goes out before the connection's task can emit
