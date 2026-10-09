@@ -93,14 +93,17 @@ if (window.__RIDE__) {
       // As the session's ED does for the name under the cursor.
       edit: (name) => D.ide.Edit({ win: 0, pos: 0, text: name }),
       // The editor's own save: FX compares the text and stops with what the
-      // interpreter has and sends SaveChanges only when they differ.
+      // interpreter has and sends SaveChanges only when they differ. The
+      // stops are read before setValue, which drops the model's decorations,
+      // and put back after it, as ReplyFormatCode does.
       save: (token, lines, stops) => {
         const w = D.ide.wins[token];
         const { me } = w;
         const text = lines.join(me.getModel().getEOL());
-        if (text !== me.getValue()) me.setValue(text);
-        if (stops) { w.stop = new Set(stops); w.setStop(); }
         w.updStops();
+        if (stops) w.stop = new Set(stops);
+        if (text !== me.getValue()) me.setValue(text);
+        w.setStop();
         const changed = text !== w.oText || `${w.getStops()}` !== `${w.oStop}`;
         w.FX(me);
         return changed;
