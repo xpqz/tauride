@@ -322,12 +322,12 @@ plus `windows`, `window_text`, `edit`, `save`, `stops`, `trace`, `stack`,
 ## Status
 
 Phases 1 to 3 are implemented as the two wire-format sections above
-describe. The one deviation the verification run recorded is the Windows
-transport. `agent_listen` and
-`agent_send` return "not supported" where there is no Unix socket
-(`src-tauri/src/agent.rs`); no `.port` file or token is written, and the CLI
-has no `.port` or `tcp://` handling. The `unauthorized` code is reserved in
-the CLI and the core; nothing in Rust sends it.
+describe, including the Windows transport (loopback TCP with a `.port` file
+and a token, `src-tauri/src/agent.rs`; the CLI reads the `.port` file and
+accepts `tcp://`). The Windows side was built and tested on Windows with
+Dyalog 21.0: status, execute, an APL error, tail, `busy` on a second
+connection, wrong, missing and silent auth (`unauthorized`), and the
+observe level refusing control requests.
 
 Verified on macOS against Dyalog 21.0.54424 from this worktree's build:
 

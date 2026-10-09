@@ -185,11 +185,10 @@ and a function the agent saved as a `window` event with `event: save` and
 
 **Limits.**
 
-- Unix only. The socket is a Unix domain socket; on Windows `agent_listen`
-  returns "not supported", so the port cannot open (the transcript is still
-  written). The loopback-port-and-token
-  transport in the design is not written, and the CLI has no `.port` or
-  `tcp://` handling.
+- On Windows the port is a loopback TCP socket instead of a Unix socket:
+  `agent/<session>.port` holds `127.0.0.1:<port> <token>`, the client's first
+  frame must be `{"auth": "<token>"}`, and the CLI reads the `.port` file
+  itself (or `TAURIDE_SOCKET=tcp://127.0.0.1:<port>?token=<token>`).
 - One agent per session: a second connection is answered `busy` and closed.
   Sessions are independent, so each can have its own agent. One request in
   flight per session; a second while one is running also gets `busy`.
