@@ -322,11 +322,12 @@ plus `windows`, `window_text`, `edit`, `save`, `stops`, `trace`, `stack`,
 ## Status
 
 Phases 1 to 3 are implemented as the two wire-format sections above
-describe, with one exception: the Windows transport. `agent_listen` and
+describe. The one deviation the verification run recorded is the Windows
+transport. `agent_listen` and
 `agent_send` return "not supported" where there is no Unix socket
 (`src-tauri/src/agent.rs`); no `.port` file or token is written, and the CLI
 has no `.port` or `tcp://` handling. The `unauthorized` code is reserved in
-the CLI and the core but nothing sends it.
+the CLI and the core; nothing in Rust sends it.
 
 Verified on macOS against Dyalog 21.0.54424 from this worktree's build:
 
@@ -354,5 +355,6 @@ Verified on macOS against Dyalog 21.0.54424 from this worktree's build:
   `stack` event; no JS or Rust errors logged.
 
 Not verified: Linux and Windows, the confirm toast end to end (the deny
-timeout and `denied` code are unit tested only), transcript rotation at
+timeout is not tested; the unit tests only check which requests ask),
+transcript rotation at
 32 MB, and the MCP adapter under Claude Code itself beyond its stdio tests.

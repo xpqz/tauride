@@ -186,7 +186,8 @@ and a function the agent saved as a `window` event with `event: save` and
 **Limits.**
 
 - Unix only. The socket is a Unix domain socket; on Windows `agent_listen`
-  returns "not supported" and the feature is off. The loopback-port-and-token
+  returns "not supported", so the port cannot open (the transcript is still
+  written). The loopback-port-and-token
   transport in the design is not written, and the CLI has no `.port` or
   `tcp://` handling.
 - One agent per session: a second connection is answered `busy` and closed.
