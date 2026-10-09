@@ -148,7 +148,8 @@ const fmtDmx = (d) => ((d && (d.EM || d.Message))
 const printResult = (r) => {
   if (!r) return;
   if (r.echo != null) console.log(r.echo);
-  (r.lines || []).forEach((l) => console.log(l.text));
+  // Output text keeps the interpreter's own line end, and the error line (HadError) has no text.
+  (r.lines || []).forEach((l) => { if (l.text != null) console.log(l.text.replace(/\n$/, '')); });
   if (r.truncated) log('tauride-mcp: output truncated; the rest is in the transcript');
 };
 

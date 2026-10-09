@@ -40,11 +40,14 @@ const reply = (f) => {
     case 'answer':
       if (f.text === '⍳5') return { ok: ok('      ⍳5', [{ kind: 'output', type: 1, text: '1 2 3 4 5' }], null, 1) };
       if (f.text === '1÷0') {
+        // Shaped as Dyalog 21.0 produces it: HadError carries no text, and the message
+        // follows as output lines that keep their line ends.
         return {
           ok: ok('      1÷0', [
-            { kind: 'error', type: 14, text: 'DOMAIN ERROR: Divide by zero' },
-            { kind: 'error', type: 14, text: '      1÷0' },
-            { kind: 'error', type: 14, text: '       ∧' },
+            { kind: 'error', error: 11, dmx: 1 },
+            { kind: 'output', type: 5, text: 'DOMAIN ERROR: Divide by zero\n' },
+            { kind: 'output', type: 5, text: '      1÷0\n' },
+            { kind: 'output', type: 5, text: '       ∧\n' },
           ], DMX, 1),
         };
       }
@@ -69,6 +72,8 @@ const reply = (f) => {
 let current; // the one connection the fake app serves, like the real one
 const server = net.createServer((sock) => {
   if (current) {
+    // end(), as the app does: the write half closes but the client's request is still
+    // read, so the client's write cannot fail before it has seen the frame.
     sock.end('{"err":{"code":"busy"}}\n');
     return;
   }
@@ -124,7 +129,7 @@ test('exec prints the echo and the lines', async () => {
 test('exec exits 1 on an APL error, with the error on stderr', async () => {
   const r = await run(['exec', '1÷0']);
   assert.equal(r.code, 1);
-  assert.match(r.out, /^ {6}1÷0\nDOMAIN ERROR: Divide by zero\n/);
+  assert.equal(r.out, '      1÷0\nDOMAIN ERROR: Divide by zero\n      1÷0\n       ∧\n');
   assert.equal(r.err, 'tauride-mcp: DOMAIN ERROR: Divide by zero\n');
 });
 
