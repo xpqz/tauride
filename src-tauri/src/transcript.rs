@@ -74,7 +74,12 @@ impl Appender {
         }
         self.open()?;
         if self.size > 0 && self.size + buf.len() as u64 > LIMIT {
-            self.rotate()?;
+            // A rename can fail while another process holds the file (a tail
+            // on Windows). Keeping the lines beats keeping the size limit:
+            // the reopen below picks the file up again at its real size.
+            if let Err(e) = self.rotate() {
+                eprintln!("tauride: transcript {}: rotate: {e}", self.path.display());
+            }
         }
         let f = self.open()?;
         f.write_all(&buf)?;
