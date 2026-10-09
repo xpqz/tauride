@@ -1,0 +1,15 @@
+{
+  "name": "tauride-mcp",
+  "version": "0.1.0",
+  "description": "CLI and MCP stdio adapter for the Tauride agent socket",
+  "private": true,
+  "bin": {
+    "tauride-mcp": "./tauride-mcp.js"
+  },
+  "scripts": {
+    "test": "node --test test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
