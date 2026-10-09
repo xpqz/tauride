@@ -194,6 +194,88 @@ if (window.__RIDE__) {
       });
     };
 
+    // The confirm toast. The request's fields are shown as text, never as
+    // HTML, since the agent chose them. The toast is sticky and its own timer
+    // ends it with a deny, in step with the core's deadline, so a toast never
+    // outlives the request it asks about.
+    const confirm = (m) => new Promise((resolve) => {
+      if (!on(pref('agentConfirm'))) { resolve(true); return; }
+      let done = false;
+      let $toast;
+      let timer;
+      const answer = (yes) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(yes);
+        $toast && toastr.clear($toast, { force: true });
+      };
+      const fields = Object.keys(m).filter((k) => !['id', 'req', 'timeout'].includes(k))
+        .map((k) => `${k}: ${typeof m[k] === 'string' ? m[k] : JSON.stringify(m[k])}`).join('\n');
+      const $msg = $('<div class=agent-confirm>')
+        .append($('<pre>').text(fields.length > 400 ? `${fields.slice(0, 400)}…` : fields))
+        .append($('<button>').text('Run').on('click', () => answer(true)))
+        .append($('<button>').text('Deny').on('click', () => answer(false)));
+      $toast = toastr.info($msg, `Agent: ${m.req}`, {
+        timeOut: 0,
+        extendedTimeOut: 0,
+        tapToDismiss: false,
+        closeButton: true,
+        preventDuplicates: false, // the same line asked for twice is two questions
+        onHidden: () => answer(false),
+      });
+      timer = setTimeout(() => answer(false), window.agentCore.CONFIRM_MS);
+    });
+
+    // Marking the agent's input lines. The echo reaches the tap before the
+    // session renders it (ide.js queues protocol messages), so the text waits
+    // until the session model changes; an edit whose inserted text holds the
+    // line is the rendering, and the line is then found among the lines that
+    // edit appended. Entries nothing renders (an echo rewritten by \b, say)
+    // are dropped after a while.
+    const echoes = [];
+    let watched = null; // the session model listened to; a reconnect makes a new one
+    const same = (a, b) => a === b || a.trim() === b.trim();
+    const markEchoes = (me, ev) => {
+      const now = Date.now();
+      for (let i = echoes.length - 1; i >= 0; i--) if (now - echoes[i].at > 5000) echoes.splice(i, 1);
+      if (!echoes.length) return;
+      const model = me.getModel();
+      ev.changes.forEach((c) => {
+        const lines = c.text.split('\n');
+        const last = model.getLineCount();
+        echoes.slice().forEach((e) => {
+          if (!lines.some((s) => same(s, e.text))) return;
+          for (let l = last; l > Math.max(0, last - lines.length); l--) {
+            if (same(model.getLineContent(l), e.text)) {
+              echoes.splice(echoes.indexOf(e), 1);
+              me.deltaDecorations([], [{
+                range: new monaco.Range(l, 1, l, 1),
+                options: {
+                  isWholeLine: true,
+                  className: 'agent-line',
+                  glyphMarginClassName: 'agent-line-glyph',
+                  stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+                },
+              }]);
+              break;
+            }
+          }
+        });
+      });
+    };
+    const onAgentEcho = (seq, text) => {
+      const se = D.ide && D.ide.wins[0];
+      // A blank line would match any empty line; it gets no mark.
+      if (!se || !text.trim()) return;
+      const model = se.me.getModel();
+      if (model !== watched) {
+        watched = model;
+        model.onDidChangeContent((ev) => markEchoes(se.me, ev));
+      }
+      echoes.push({ text, at: Date.now() });
+    };
+
     D.agent = {
       // observe opens the port; control also allows the control requests.
       // Refusals follow at once; the port opens or closes with the level.
@@ -208,10 +290,11 @@ if (window.__RIDE__) {
       level: () => want,
       connected: () => !!(core && core.connected()),
       // Asked before every control request except interrupt while agentConfirm
-      // is on; the UI task replaces it with a Run / Deny toast.
-      confirm: async () => true,
-      // onAgentEcho(seq, text), set by the UI task: an agent-originated input
-      // echo has arrived, ahead of the session rendering it.
+      // is on: Run or Deny; no answer within CONFIRM_MS is a deny.
+      confirm,
+      // An agent-originated input echo has arrived, ahead of the session
+      // rendering it; the line gets the agent-line decoration once it has.
+      onAgentEcho,
     };
     status();
 

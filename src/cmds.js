@@ -9,6 +9,11 @@ D.cmds = [
   //code description                default keys
   ['ABT','About Ride',              ['Shift+F1']],
   ['AC', 'Align comments',          []],
+  // The agent pairing port (tauri/agent-pairing.md) exists in Tauride only.
+  ...(window.__RIDE__ ? [
+  ['AGC','Agent: allow control',    []],
+  ['AGO','Agent: observe session',  []],
+  ] : []),
   ['AO', 'Comment out lines',       []],
   ['ASW', 'Auto Status',            []],
   ['BH', 'Run to exit (in tracer)', []],

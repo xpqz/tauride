@@ -106,4 +106,19 @@
   &.modified::before{
     color: red;
   }
+  // The marker of a line the agent entered (tauri/agent-pairing.md). The
+  // group brackets draw in ::before, so this one sits in ::after, at the
+  // right edge of the margin, clear of their vertical line.
+  &.agent-line-glyph::after{
+    content: '◆';
+    position: absolute;
+    right: 2px;
+    color: @THEME_PRIMARY;
+    font-size: 0.55em;
+  }
+}
+// The muted wash over a line the agent entered; the theme colour at low
+// alpha reads on the light and the dark session background alike.
+.monaco-editor .agent-line{
+  background-color: fade(@THEME_PRIMARY, 15%);
 }

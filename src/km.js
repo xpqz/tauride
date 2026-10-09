@@ -287,6 +287,8 @@
     DBG() { D.prf.dbg.toggle(); },
     WSE() { D.prf.wse.toggle(); },
     POE() { D.prf.pauseOnError.toggle(); },
+    AGO() { D.prf.agent.toggle(); },
+    AGC() { D.prf.agentControl.toggle(); },
     PAT() { D.send('PauseAllThreads', { pause: 1 }); },
     UAT() { D.send('PauseAllThreads', { pause: 0 }); },
     ZM(me) {
@@ -302,6 +304,14 @@
 
   const pfKey = (i) => () => D.ide.pfKey(i);
   for (let i = 1; i <= 48; i++) D.commands[`PF${i}`] = pfKey(i);
+
+  // The agent port follows the two preferences live, however they change
+  // (menu, Preferences dialog, a floating window's broadcast). Control
+  // implies observation, so the level is control while that box is ticked.
+  // D.agent exists in the Tauri session window only.
+  const agentLevel = () => D.agent && D.agent.setLevel(!!D.prf.agent(), !!D.prf.agentControl());
+  D.prf.agent(agentLevel);
+  D.prf.agentControl(agentLevel);
 
   // order: used to measure how "complicated"
   // (for some made-up definition of the word) a shortcut is.

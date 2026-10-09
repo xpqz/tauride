@@ -40,6 +40,8 @@
       WSE: { checkBoxPref: D.prf.wse },
       DBG: { checkBoxPref: D.prf.dbg },
       POE: { checkBoxPref: D.prf.pauseOnError },
+      AGO: { checkBoxPref: D.prf.agent },
+      AGC: { checkBoxPref: D.prf.agentControl },
     };
     const stk = [{ ind: -1, items: [] }];
     const lines = md.split('\n');
@@ -57,9 +59,10 @@
         mac: D.mac,
         win: D.win,
         rp21: !D.get_configuration_na,
+        tauri: !!window.__RIDE__, // the agent pairing port exists in Tauride only
         true: true,
       };
-      const RE = /(!)?(mac|win|browser|local|rp21|(\(.*\)))/g;
+      const RE = /(!)?(mac|win|browser|local|rp21|tauri|(\(.*\)))/g;
       const test = (_, x, y) => {
         if (!y) return false;
         const exp = y[0] === '(' ? y.slice(1, y.length - 1).replace(RE, test) : y;

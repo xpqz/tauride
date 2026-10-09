@@ -10,4 +10,31 @@
         -webkit-box-shadow: 0 0 12px rgba(0,0,0,0.5);
         box-shadow: 0 0 12px rgba(0,0,0,0.5);
     }
+    // The agent's Run / Deny request (tauri/agent-pairing.md): the request
+    // text in the session font, the two buttons beneath it.
+    .agent-confirm {
+        pre {
+            margin: 4px 0;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            font-family: @APL_FONT;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        button {
+            margin: 4px 8px 0 0;
+            padding: 2px 12px;
+            border: 1px solid rgba(255,255,255,0.6);
+            border-radius: 3px;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            &:hover {
+                background: rgba(255,255,255,0.2);
+            }
+        }
+    }
   }
