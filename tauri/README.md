@@ -22,7 +22,12 @@ development files.
 Both first run `npm run css` and `node tauri/stage.js`, which copies the
 files the pages load into `_/tauri-dist` (the Electron build's `mk` filter,
 with only the `node_modules` trees the pages use) and generates
-`tauri-modules.js` (see below). Ride's environment variables work as before:
+`tauri-modules.js` (see below). The staged dist and `tauri/shim.js` are
+embedded in the binary at compile time, so after a change to `src/`, `lib/`,
+`style/` or the HTML pages run `node tauri/stage.js` and then rebuild
+(`touch src-tauri/src/lib.rs` so cargo notices, then `cargo build` or
+`cargo tauri build`); a plain `cargo build` without restaging runs the old
+frontend. Ride's environment variables work as before:
 `RIDE_SPAWN=/usr/bin/dyalog`, `RIDE_CONNECT=host:port`, `RIDE_LOG`,
 `RIDE_JS`, `RIDE_EDITOR`, `RIDE_CONF`, `RIDE_PREFS`.
 
@@ -104,6 +109,96 @@ Ride's frontend changes:
   pages cannot load `file://` scripts.
 - `src/abt.js`: About reports Tauri and the webview instead of Electron,
   Chrome and Node.
+
+## Pair programming with an agent
+
+An agent such as Claude Code can work in the same session as you: it runs
+lines at your prompt, drives your tracer, and reads what you typed and what
+the interpreter answered. Tauride stays the only thing talking to the
+interpreter; the agent attaches to Tauride over a local socket. The design
+and the wire format are in `agent-pairing.md`.
+
+**Switching on.** Off by default. Per session, from the Agent menu: *Observe
+Session* opens the socket and the transcript; *Allow Control* also lets the
+agent execute, answer prompts, interrupt, edit, save and trace. The same two
+switches, plus *Confirm each action*, are checkboxes under Agent on the
+General tab of Preferences. `RIDE_AGENT=1` (observe) or `RIDE_AGENT=control`
+in the environment sets the level when Tauride starts; after that the menu
+drives it, and turning observe off closes the socket and drops the agent.
+
+**Status bar.** While the level is at least observe the status bar shows
+`agent: observing` or `agent: control`, with ` (connected)` appended while a
+client is attached.
+
+**Where things are.** Under the Ride config directory
+(`$XDG_CONFIG_HOME/Ride-4.8`, `~/.config/Ride-4.8` by default):
+
+- the socket, `agent/<session>.sock`: `main.sock` for the first session
+  window, `w<id>.sock` for the others. Unix domain socket, directory 0700,
+  file 0600, removed when the session closes.
+- the transcript, `sessions/<session>-<appid>.jsonl`: one JSON event per
+  line (`input` with `origin: human | agent`, `output`, `error`, `prompt`,
+  `window`, `stack`, `agent`), each with a `seq` and a timestamp, appended
+  while observing and rotated once to `.1` at 32 MB. It is an ordinary
+  file: `tail -f` it, or `jq` it afterwards to see who did what.
+
+**The CLI.** `tools/tauride-mcp/tauride-mcp.js` is a Node script with no
+dependencies. It talks to `--socket`, else `$TAURIDE_SOCKET`, else the
+socket of `--session` (default `main`) in the config directory.
+
+    node tools/tauride-mcp/tauride-mcp.js status
+    node tools/tauride-mcp/tauride-mcp.js exec '⍳5'
+    node tools/tauride-mcp/tauride-mcp.js watch           # events as they arrive
+    node tools/tauride-mcp/tauride-mcp.js windows         # open editors and tracers
+
+Run it without arguments for the full list (`answer`, `interrupt`, `tail`,
+`window-text`, `edit`, `save`, `stops`, `trace`, `stack`, `value`, `wait`).
+Exit status 0 is success, 1 means the line ended in an APL error, 2 anything
+else, with the reason on stderr.
+
+**Claude Code.** The same script serves MCP over stdio. From the Tauride
+checkout:
+
+    claude mcp add tauride -- node tools/tauride-mcp/tauride-mcp.js mcp
+
+(use the absolute path to the script if you add it from elsewhere). Claude
+gets one tool per request: `execute`, `answer`, `interrupt`, `tail`,
+`status`, `windows`, `window_text`, `edit`, `save`, `stops`, `trace`,
+`stack`, `value` and `wait_for_input`. The last one blocks until you enter a
+line in the session, optionally one starting with a prefix, for up to five
+minutes by default. The convention is to address the agent from the session
+itself: type `⍝ Claude: have a look at foo`, and an agent waiting on
+`wait_for_input` with prefix `⍝ Claude:` wakes with that line, so you can
+tell Claude to wait for instructions in the session instead of polling.
+
+**Confirm mode.** With *Confirm each action* on, every control request
+except an interrupt shows a toast with the request text and Run / Deny
+buttons. No answer within 60 seconds is a deny; a denied request fails with
+`denied`. Interrupts are never gated, so you can always have the agent stop
+a loop.
+
+**Agent lines in the session.** A line the agent entered is echoed like any
+other, with a `◆` in the margin and a muted background, so the session
+itself shows who typed what; the transcript records it as `origin: agent`,
+and a function the agent saved as a `window` event with `event: save` and
+`origin: agent`.
+
+**Limits.**
+
+- Unix only. The socket is a Unix domain socket; on Windows `agent_listen`
+  returns "not supported" and the feature is off. The loopback-port-and-token
+  transport in the design is not written, and the CLI has no `.port` or
+  `tcp://` handling.
+- One agent per session: a second connection is answered `busy` and closed.
+  Sessions are independent, so each can have its own agent. One request in
+  flight per session; a second while one is running also gets `busy`.
+- Output attribution is best effort. The interpreter does not tag output by
+  request, so `execute` reports what arrived between its echo and the
+  prompt's return; output from other threads (`&`) interleaves. Results are
+  capped at 200 lines or 64 KB with `truncated: true`; the rest is in the
+  transcript.
+- The whole feature is gated on `window.__RIDE__`; the Electron build does
+  not have it.
 
 ## Status
 

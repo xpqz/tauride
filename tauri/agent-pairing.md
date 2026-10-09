@@ -1,6 +1,6 @@
 # Pair programming with an agent in Tauride
 
-Design note. Nothing here is implemented.
+Design note. What is built is in Status at the end.
 
 ## Goal
 
@@ -318,3 +318,41 @@ over the socket, as a release check. CLI and MCP keep
 plus `windows`, `window_text`, `edit`, `save`, `stops`, `trace`, `stack`,
 `value` and `wait_for_input` (= `wait` with `origin: human`, optional
 `prefix`, default timeout 300 s).
+
+## Status
+
+Phases 1 to 3 are implemented as the two wire-format sections above
+describe, with one exception: the Windows transport. `agent_listen` and
+`agent_send` return "not supported" where there is no Unix socket
+(`src-tauri/src/agent.rs`); no `.port` file or token is written, and the CLI
+has no `.port` or `tcp://` handling. The `unauthorized` code is reserved in
+the CLI and the core but nothing sends it.
+
+Verified on macOS against Dyalog 21.0.54424 from this worktree's build:
+
+- `node --test test/agent_core.js`: 29/29. `node --test
+  tools/tauride-mcp/test.js`: 24/24.
+- `npm run css`, `node tauri/stage.js` and `cargo build` clean, no warnings.
+- `tools/tauride-mcp/e2e.js`: 38/38 against a launched Tauride with a private
+  config directory. Covered: `status`; `execute` (a result, an APL error
+  with its DMX, truncation at 200 lines, opening a `⎕` prompt, refusal at a
+  `⎕` prompt with `err prompt`, a timeout carrying the partial result);
+  `answer`; `interrupt` (weak, prompt back); `tail` and `since`; a second
+  connection refused `busy`; `windows` after `)ed`, `window_text`,
+  `not_found` for a stale token; `save` with and without stops and the saved
+  function running; stops suspending the function and the tracer shown by
+  `windows`; `stack`; `value` of a global and in the suspended frame, an
+  expression `bad_request`; `trace` `step_over` and `continue` (editor
+  closed, output arrives); `edit`; `wait` resolving and timing out; the CLI
+  through `XDG_CONFIG_HOME`; a second launch with `RIDE_AGENT=1` at
+  `observe`, where `execute` and `interrupt` are `refused` and `tail` works.
+- Observed by hand in the same run: agent directory 0700 and socket 0600;
+  socket removed and directory empty after the app exits; the transcript
+  parses with contiguous `seq` and carries `agent`
+  connected/disconnected/level, `input` with `origin: agent`, `error` with
+  the `HadError` payload, `window` open/highlight/close/save/stops and a
+  `stack` event; no JS or Rust errors logged.
+
+Not verified: Linux and Windows, the confirm toast end to end (the deny
+timeout and `denied` code are unit tested only), transcript rotation at
+32 MB, and the MCP adapter under Claude Code itself beyond its stdio tests.
