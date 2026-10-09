@@ -5,6 +5,7 @@ mod net;
 mod proc;
 mod ssh;
 mod sync;
+mod transcript;
 mod win;
 mod winstate;
 
@@ -213,6 +214,7 @@ pub fn run() {
         .manage(proc::Procs::default())
         .manage(ssh::Ssh::default())
         .manage(agent::Agent::default())
+        .manage(transcript::Transcript::default())
         .invoke_handler(tauri::generate_handler![
             log,
             open_url,
@@ -235,6 +237,8 @@ pub fn run() {
             agent::agent_listen,
             agent::agent_close,
             agent::agent_send,
+            transcript::transcript_append,
+            transcript::transcript_status,
             winstate::save_win,
             menu::popup_menu,
             menu::set_app_menu,
@@ -272,6 +276,7 @@ pub fn run() {
         .run(|_app, _event| {
             if let tauri::RunEvent::Exit = _event {
                 proc::kill_all(_app);
+                agent::cleanup_all(_app);
             }
             // Clicking the Dock icon with no session window open starts one.
             #[cfg(target_os = "macos")]

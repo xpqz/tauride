@@ -220,3 +220,18 @@ pub fn agent_close<R: Runtime>(app: AppHandle<R>, label: String) {}
 pub fn agent_send<R: Runtime>(app: AppHandle<R>, label: String, line: String) -> Result<(), String> {
     Err("not supported".into())
 }
+
+/// Closes every port and removes its socket file. Called when the process
+/// exits, where no session window is left to call `agent_close`, so a
+/// socket file does not outlive the run that made it.
+#[cfg(unix)]
+pub fn cleanup_all<R: Runtime>(app: &AppHandle<R>) {
+    let ports: Vec<Port> = app.state::<Agent>().ports.lock().unwrap().drain().map(|(_, p)| p).collect();
+    for p in ports {
+        p.accept.abort();
+        let _ = std::fs::remove_file(&p.path);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn cleanup_all<R: Runtime>(_app: &AppHandle<R>) {}
