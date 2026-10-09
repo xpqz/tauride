@@ -83,9 +83,39 @@ jobs:
             src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
+  # Zero-footprint Ride: the tree an interpreter serves from [DYALOG]/RIDEapp.
+  zf:
+    runs-on: ubuntu-24.04
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run css
+
+      - run: node mk zf
+
+      # Loads the bundle in the runner's preinstalled Chrome.
+      - run: node tools/zf-smoke.js _/zf
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tauride-zf
+          path: _/tauride-zf-*.zip
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, zf]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -95,6 +125,11 @@ jobs:
           pattern: tauride-*-installers
           path: dist
           merge-multiple: true
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: tauride-zf
+          path: dist
 
       - name: Publish release
         env:

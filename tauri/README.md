@@ -29,6 +29,36 @@ with only the `node_modules` trees the pages use) and generates
 Preferences, saved connections and window state live in the same place as
 Electron Ride's (`~/.config/Ride-4.8` on Linux), so the two share them.
 
+## Zero-footprint Ride
+
+`node mk zf` writes `_/zf`: the frontend laid out as Dyalog's `RIDEapp`
+directory (`index.html` and the other pages at the root, `src/`, `lib/`,
+`style/`, `_/version.js`, and under `node_modules/` only the jquery, toastr
+and monaco-editor builds the pages load), zipped as
+`_/tauride-zf-<version>.zip`, which unpacks as `RIDEapp/`. A Dyalog
+interpreter started with `RIDE_INIT=HTTP:*:<port>` serves that directory
+from `[DYALOG]/RIDEapp` to a web browser, and the page connects back to the
+interpreter over a WebSocket on the same port. Putting the tree there is a
+build-time concern for whoever assembles a Dyalog installation, not a step
+an end user takes; the Tauride installers do not include it. CI's `zf` job
+builds the zip and the release job publishes it with the installers.
+
+Testing: `node tools/zf-smoke.js _/zf` serves the tree and loads it in
+headless Chrome (`CHROME=<binary>` overrides the browser), printing the
+console and failing on an uncaught exception, on a request for a file the
+tree lacks, or when the DOM lacks the session tab and the html menu. In
+browser mode the page builds its IDE before its WebSocket connects, so no
+interpreter is involved. The interpreter-served check needs a real copy of
+a Dyalog installation (`rsync -a --exclude RIDEapp`), since `[DYALOG]` is
+resolved from the real path of the binary and a symlinked installation does
+not work: symlink `RIDEapp` in the copy to `_/zf`, start `<copy>/mapl +s -q`
+with `ENABLE_CEF=0` and `RIDE_INIT='HTTP:*:<port>'` in its environment, and
+open `http://localhost:<port>` in a browser.
+
+In this mode only the serving interpreter is available (no New Session),
+preferences live in browser storage, window captions cannot be set, and
+floating Trace/Edit windows are not available (`docs/ride_in_the_browser.md`).
+
 ## How it works
 
 `tauri/shim.js` is injected into every Ride window ahead of the page's own
