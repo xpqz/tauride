@@ -208,8 +208,11 @@ const fmtDmx = (d) => (d ? [d.EM, d.Message].filter(Boolean).join(': ') : '');
 const printResult = (r) => {
   if (!r) return;
   if (r.echo != null) console.log(r.echo);
-  // Output text keeps the interpreter's own line end, and the error line (HadError) has no text.
-  (r.lines || []).forEach((l) => { if (l.text != null) console.log(l.text.replace(/\n$/, '')); });
+  // The interpreter sends output in chunks that need not end at line ends (a
+  // matrix arrives as "1 2 3", "\n", "4 5 6\n"), so the chunks are joined before
+  // printing. The error line (HadError) has no text.
+  const text = (r.lines || []).map((l) => l.text || '').join('');
+  if (text) process.stdout.write(text.replace(/\n?$/, '\n'));
   if (r.truncated) log('tauride-mcp: output truncated; the rest is in the transcript');
 };
 
