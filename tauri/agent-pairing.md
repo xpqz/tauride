@@ -170,3 +170,81 @@ written.
 - One agent per session. The socket accepts one connection per session and
   refuses a second with `busy` until the first disconnects. Sessions are
   independent, so two sessions can each have an agent.
+
+## Phase 1: wire format
+
+Fixed here so the Rust side, the frontend tap and the CLI are written
+against one description.
+
+**Switching on.** `RIDE_AGENT=1` opens the port for observation only;
+`RIDE_AGENT=control` also allows `execute`, `answer` and `interrupt`. The
+same two levels exist as preferences `agent` (`0`, `1`, `control`) read at
+session start; the environment wins. The status bar shows `agent: observing`
+/ `agent: control` and ` (connected)` while a client is attached.
+
+**Socket.** One Unix domain socket per session window:
+`<userData>/agent/<label>.sock` (`main.sock` for the first session,
+`w<id>.sock` for the others), directory mode 0700, socket 0600, removed
+when the session window closes. One connection at a time; a second
+connection is answered with `{"err":{"code":"busy"}}` and closed. Windows
+is not in phase 1 (`agent_listen` returns an error there).
+
+**Frames.** Newline-delimited JSON, UTF-8, one object per line, both ways.
+
+Client to Tauride, `id` chosen by the client:
+
+| `req` | fields | notes |
+|---|---|---|
+| `status` | | caption, prompt type, level (`observe`/`control`), interpreter version, transcript path, `seq` of the latest event |
+| `execute` | `text`, `timeout` (ms, default 30000) | refused unless level is `control` and the prompt type is 1 |
+| `answer` | `text`, `timeout` | as `execute`, but only at prompt types 2 and 4 |
+| `interrupt` | `strength`: `weak` \| `strong` | control only |
+| `tail` | `n` (default 100) | the last `n` transcript events |
+| `since` | `seq` | every event after `seq` |
+
+Tauride to client: `{"id": n, "ok": {...}}` or
+`{"id": n, "err": {"code": c, "message": m, ...}}`, and unsolicited
+`{"ev": {...}}` for every new transcript event while connected (so `tail`
+and `since` are for backfill). Error codes: `refused` (level too low),
+`prompt` (wrong prompt type; carries `prompt`), `busy` (a request is already
+in flight, or a second connection), `timeout` (carries the `partial` result
+collected so far), `closed` (session disconnected from the interpreter),
+`bad_request`.
+
+**`execute` / `answer` result.** `{"echo": text, "lines": [{"kind":
+"output" | "error", "type": t, "text": s}, ...], "error": dmx | null,
+"prompt": p, "truncated": bool, "seq": [first, last]}`. The line goes
+through `D.ide.exec`; the result is the transcript slice from its
+`EchoInput` to the next `SetPromptType` that leaves 0, capped at 200 lines
+or 64 KB with `truncated: true` (the rest is in the transcript). One request
+in flight per session; the human's own input in the meantime is reported as
+`input` events, not mixed into the result.
+
+**Transcript.** `<userData>/sessions/<label>-<appid>.jsonl`, one event per
+line, appended as events happen while the level is at least `observe`:
+
+```
+{"seq": 17, "t": "2026-10-09T10:21:03.412Z", "kind": "input",  "origin": "human", "prompt": 1, "text": "⍳5"}
+{"seq": 18, "t": "...", "kind": "output", "origin": "human", "type": 1, "text": "1 2 3 4 5"}
+{"seq": 19, "t": "...", "kind": "prompt", "prompt": 1}
+{"seq": 20, "t": "...", "kind": "error",  "origin": "agent", "dmx": {...}}
+{"seq": 21, "t": "...", "kind": "window", "event": "open" | "update" | "close" | "save" | "highlight", "token": 7, "name": "foo", "debugger": true, ...}
+```
+
+`origin` on `output` and `error` is the origin of the line being executed
+when they arrived (best effort, as the design says). `kind: window` events
+carry the message's own fields; `save` ones add `origin`. `stack` events
+carry `ReplyGetSIStack`.
+
+**Hooks.** The tap wraps `D.recv` and `D.send` once `D.ide` exists and
+re-wraps if either is reassigned (both are reassigned on connect). It is
+loaded only under `window.__RIDE__`; the Electron build never sees it.
+
+**CLI / MCP adapter.** `tools/tauride-mcp` (Node, no dependencies):
+`tauride-mcp [--session main | --socket path] status | exec <text> |
+answer <text> | interrupt [weak|strong] | tail [n] | watch | mcp`.
+`watch` prints events as they arrive; `mcp` serves MCP over stdio
+(newline-delimited JSON-RPC: `initialize`, `tools/list`, `tools/call`,
+`ping`) with the tools `execute`, `answer`, `interrupt`, `tail`, `status`.
+The socket path defaults to `~/.config/Ride-4.8/agent/<session>.sock` and
+can be set with `TAURIDE_SOCKET`.
