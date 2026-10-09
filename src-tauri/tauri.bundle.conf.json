@@ -2,6 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "active": true,
+    "publisher": "longthorn.net",
     "category": "DeveloperTool",
     "shortDescription": "Remote IDE for Dyalog APL",
     "longDescription": "Ride, the remote IDE for Dyalog APL, in a Tauri shell.",
