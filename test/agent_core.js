@@ -13,7 +13,7 @@ const fake = (over) => {
     calls: [], // IDE actions asked for
     wins: {}, // token -> the wire shape of a window
     ideState: {
-      connected: true, prompt: 1, pending: 0, caption: 'Dyalog', version: '21.0',
+      connected: true, prompt: 1, quiescent: true, pending: 0, caption: 'Dyalog', version: '21.0',
     },
     send(f) { io.frames.push(f); },
     append(lines) { io.appended.push(lines); },
@@ -48,6 +48,13 @@ const setup = (t, level, over) => {
   const io = fake(over);
   const c = core.create(io);
   io.core = c;
+  // The fake IDE catches up with each prompt at once; a test that wants it
+  // behind the tap clears ideState.quiescent.
+  const { recv } = c;
+  c.recv = (x, y) => {
+    if (x === 'SetPromptType') io.ideState.prompt = y.type;
+    recv(x, y);
+  };
   c.setLevel(level || 'control');
   c.socket(true);
   io.frames.length = 0;
@@ -109,6 +116,9 @@ test('fields are validated before anything runs', async (t) => {
   await bad({ req: 'edit', name: ' ' });
   await bad({ req: 'value', name: '1+2' });
   await bad({ req: 'value', name: 'foo bar' });
+  await bad({ req: 'value', name: '⎕IO' });
+  await bad({ req: 'value', name: '⎕SE' });
+  await bad({ req: 'value', name: 'a.⎕PW' });
   await bad({ req: 'window_text', token: 'x' });
   await bad({ req: 'save', token: 1, text: 5 });
   await bad({
@@ -130,6 +140,8 @@ test('the request table and the error codes match the design', () => {
   assert.deepEqual(at('control'), ['answer', 'edit', 'execute', 'interrupt', 'save', 'stops', 'trace']);
   assert.equal(core.REQUESTS.interrupt.confirm, false);
   at('control').filter((k) => k !== 'interrupt').forEach((k) => assert.equal(core.REQUESTS[k].confirm, true, k));
+  // What neither reads nor drives D.ide answers at once, interrupt included.
+  assert.deepEqual(Object.keys(core.REQUESTS).filter((k) => !core.REQUESTS[k].settle).sort(), ['interrupt', 'since', 'status', 'tail', 'wait']);
   ['refused', 'prompt', 'busy', 'timeout', 'closed', 'bad_request', 'not_found', 'save', 'denied', 'unauthorized']
     .forEach((code) => assert.ok(core.CODES.includes(code), code));
   assert.deepEqual(core.TRACE_ACTIONS, ['step_into', 'step_over', 'continue', 'continue_trace', 'back', 'forward', 'cutback', 'restart', 'edit']);
@@ -186,7 +198,6 @@ test('closing the port drops the client and stops recording, but the prompt is s
 
   c.setLevel('control');
   c.socket(true);
-  io.ideState.prompt = 2;
   await req(c, { id: 2, req: 'execute', text: '⍳5' });
   assert.equal(last(io).err.code, 'prompt');
   assert.equal(last(io).err.prompt, 2);
@@ -291,12 +302,13 @@ test('a timeout carries the partial result and frees the slot', async (t) => {
   assert.equal(replies(io).length, 3);
 });
 
-test('execute needs prompt 1 and answer prompt 2 or 4, in both views of the prompt', async (t) => {
+test('execute needs prompt 1 and answer prompt 2 or 4, as the tap last saw it', async (t) => {
   const { io, c } = setup(t);
   prompt(c, 2);
-  io.ideState.prompt = 2;
   await req(c, { id: 1, req: 'execute', text: '5' });
   assert.equal(last(io).err.code, 'prompt');
+  assert.equal(last(io).err.prompt, 2);
+  assert.match(last(io).err.message, /prompt type is 2/);
   await req(c, { id: 2, req: 'answer', text: '5' });
   assert.deepEqual(io.calls, [['exec', '5']]);
   // ⎕ input is echoed like a line; the slice starts at the send either way.
@@ -305,14 +317,56 @@ test('execute needs prompt 1 and answer prompt 2 or 4, in both views of the prom
   assert.deepEqual(last(io).ok.lines, [{ kind: 'output', type: 1, text: 'got 5' }]);
   assert.equal(last(io).ok.echo, '5');
   assert.equal(last(io).ok.prompt, 1);
-  io.ideState.prompt = 1;
   await req(c, { id: 3, req: 'answer', text: '5' });
   assert.equal(last(io).err.code, 'prompt');
-  // The IDE lags the tap by a tick: both must agree.
   prompt(c, 0);
   await req(c, { id: 4, req: 'execute', text: '5' });
   assert.equal(last(io).err.code, 'prompt');
   assert.equal(last(io).err.prompt, 0);
+});
+
+test('a request that reads or drives the IDE waits for ide.js to catch up with the tap', async (t) => {
+  const { io, c } = setup(t);
+  io.wins[7] = editor(7);
+  // The tap has seen the prompt return; the session is still rendering.
+  io.ideState.quiescent = false;
+  io.ideState.prompt = 0;
+  const p = req(c, { id: 1, req: 'execute', text: '⍳5' });
+  const q = req(c, { id: 2, req: 'windows' });
+  await sleep(core.SETTLE_MS * 3);
+  assert.deepEqual(io.calls, []);
+  assert.equal(replies(io).length, 0);
+  // The slot is held meanwhile; what does not touch the IDE answers at once.
+  await req(c, { id: 3, req: 'execute', text: '1' });
+  assert.equal(last(io).err.code, 'busy');
+  await req(c, { id: 4, req: 'status' });
+  assert.equal(last(io).id, 4);
+  await req(c, { id: 5, req: 'interrupt' });
+  assert.deepEqual(io.calls, [['interrupt', 'weak']]);
+  io.ideState.quiescent = true;
+  io.ideState.prompt = 1;
+  await Promise.all([p, q]);
+  assert.deepEqual(io.calls, [['interrupt', 'weak'], ['exec', '⍳5']]);
+  assert.deepEqual(replies(io).find((f) => f.id === 2).ok, [editor(7)]);
+  run(c, '⍳5', ['1 2 3 4 5']);
+  assert.equal(last(io).id, 1);
+  assert.equal(last(io).ok.prompt, 1);
+  // The wait is bounded by the request's timeout, and nothing is sent after it.
+  io.ideState.quiescent = false;
+  await req(c, {
+    id: 6, req: 'stack', timeout: core.SETTLE_MS * 2,
+  });
+  assert.equal(last(io).id, 6);
+  assert.equal(last(io).err.code, 'timeout');
+  assert.equal(io.calls.length, 2);
+  // A disconnect while waiting drops the request: nothing runs when the client is gone.
+  const r = req(c, { id: 7, req: 'execute', text: '2' });
+  await sleep(0);
+  c.socket(false);
+  io.ideState.quiescent = true;
+  await Promise.race([r, sleep(core.SETTLE_MS * 3)]);
+  assert.equal(io.calls.length, 2);
+  assert.equal(c.connected(), false);
 });
 
 test('queued lines are busy and a dead session is closed', async (t) => {
@@ -628,8 +682,15 @@ test('value asks for a tip and matches the reply by token', async (t) => {
     token: 7, tip: ['1 2 3'], class: 2, startCol: 0, endCol: 3,
   });
   assert.deepEqual(last(io), { id: 1, ok: { name: 'foo', tip: ['1 2 3'], class: 2 } });
+  // A name inside ⎕SE is asked for; a system name is not, as the interpreter never answers.
+  await req(c, { id: 2, req: 'value', name: '⎕SE.bar' });
+  assert.deepEqual(io.calls.at(-1), ['value', '⎕SE.bar']);
+  await req(c, { id: 3, req: 'value', name: '⎕PW' });
+  assert.equal(last(io).err.code, 'bad_request');
+  assert.match(last(io).err.message, /system name/);
+  assert.deepEqual(io.calls.at(-1), ['value', '⎕SE.bar']);
   prompt(c, 0);
-  await req(c, { id: 2, req: 'value', name: 'foo' });
+  await req(c, { id: 4, req: 'value', name: 'foo' });
   assert.equal(last(io).err.code, 'prompt');
 });
 

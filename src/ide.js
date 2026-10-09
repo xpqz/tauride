@@ -156,6 +156,10 @@ D.IDE = function IDE(opts = {}) {
   D.recv = (x, y) => { mq.push([x, y]); rrd(); };
   ide.block = () => { blk += 1; };
   ide.unblock = () => { (blk -= 1) || rrd(); };
+  // Whether every message received so far has been handled. The agent tap
+  // (src/agent.js) sees messages at D.recv, ahead of this queue, and acts on
+  // ide.promptType and ide.wins only once they have caught up.
+  ide.quiescent = () => !mq.length && !blk;
   ide.tracer = () => ide.getMRUWin(1);
   [{ comp_name: 'wse', prop_name: 'WSEwidth' }, { comp_name: 'dbg', prop_name: 'DBGwidth' }].forEach((obj) => {
     Object.defineProperty(ide, obj.prop_name, {

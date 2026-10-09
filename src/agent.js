@@ -81,6 +81,7 @@ if (window.__RIDE__) {
         return i ? {
           connected: !!i.connected,
           prompt: i.promptType,
+          quiescent: i.quiescent(),
           pending: (i.pending || []).length,
           caption: i.caption,
           version: (D.remoteIdentification || {}).version || null,

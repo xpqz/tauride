@@ -14,6 +14,11 @@
 //               already serves this socket (test.js does this with its fake); nothing
 //               is launched or killed
 //
+// A Tauride that is already running is left alone. The binary under test must then carry
+// its own identifier (TAURI_CONFIG='{"identifier":"..."}' at build time), or the running
+// app's single-instance plugin takes the launch as a new window and the launch check
+// fails at once, saying so.
+//
 // Unix only: it finds and ends the interpreter with ps and signals.
 const fs = require('fs');
 const path = require('path');
@@ -83,9 +88,10 @@ const descendants = (pid) => {
   walk(pid);
   return out;
 };
-// Any Tauride but this script's own child. The single-instance plugin hands a second
-// launch to the running app as a new session window, so a run alongside one would open
-// a window in it and never get its own socket.
+// Every Tauride process. The single-instance plugin hands a launch to a running app with
+// the same identifier as a new session window, and the launched process exits at once;
+// a binary built with its own identifier (TAURI_CONFIG) runs alongside. Which case a
+// launch is cannot be told from ps, so the launch goes ahead and an exit is diagnosed.
 const otherTauride = () => processes().filter((p) => /(^|\/)tauride$/i.test(p.comm));
 
 const launch = (dir, level) => {
@@ -109,7 +115,12 @@ const attach = async (sock, app) => {
   const t0 = Date.now();
   let client = null;
   while (!client) {
-    if (app && app.gone) throw new Error(`the app exited: ${app.spawnError ? app.spawnError.message : await app.exited}`);
+    if (app && app.gone) {
+      const why = app.spawnError ? app.spawnError.message : await app.exited;
+      const others = otherTauride().map((p) => p.pid);
+      const taken = others.length ? `; another Tauride is running (pid ${others.join(', ')}): a binary with its identifier hands the launch to it as a window` : '';
+      throw new Error(`the app exited: ${why}${taken}`);
+    }
     if (Date.now() - t0 > ATTACH_MS) throw new Error(`no socket at ${sock} within ${ATTACH_MS} ms`);
     client = await connect(sock).catch(() => null);
     if (!client) await sleep(250);
@@ -324,6 +335,9 @@ const socketChecks = async (client, sock, status0) => {
   await check('wait resolves on the next event', async () => {
     const since = await seqNow();
     const pending = client.request('wait', { since, kinds: ['input'], timeout: 10000 });
+    // If the execute throws, the wait is left outstanding and is rejected when the
+    // connection closes; that rejection is this check's, not the process's.
+    pending.catch(() => {});
     await exec('1+1');
     const ev = waited(await pending);
     // The input text is the echo, which carries the session's indent.
@@ -378,8 +392,6 @@ const main = async () => {
   // Without an interpreter the app shows a dialog and never serves the socket; say so now
   // rather than after the attach timeout. A bare command name is left to PATH.
   if (SPAWN.includes('/') && !fs.existsSync(SPAWN)) return cannot(`no such interpreter: ${SPAWN} (set RIDE_SPAWN)`);
-  const others = otherTauride();
-  if (others.length) return cannot(`another Tauride is running (pid ${others.map((p) => p.pid).join(', ')}); its single-instance plugin would open the launch as a window in it`);
   const given = process.env.E2E_DIR;
   const dir = given || fs.mkdtempSync('/tmp/tauride-e2e-');
   fs.mkdirSync(dir, { recursive: true });

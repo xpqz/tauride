@@ -14,34 +14,42 @@
   const FLUSH_MS = 100;
   const DEFAULT_TIMEOUT = 30000;
   const CONFIRM_MS = 60000; // no answer from the person is a deny
+  const SETTLE_MS = 10; // the poll for ide.js having handled every message the tap has seen
 
   // The codes a reply can carry. unauthorized is Rust's: it closes a Windows
   // connection whose first frame is not the token. It is listed so a client
   // finds every code in one place.
   const CODES = ['refused', 'prompt', 'busy', 'timeout', 'closed', 'bad_request', 'not_found', 'save', 'denied', 'unauthorized'];
-  // Each request's level, and whether the confirm mode gates it.
+  // Each request's level, whether the confirm mode gates it, and whether it
+  // reads or drives D.ide (settle: it runs once ide.js has handled every
+  // message the tap has seen). The confirmed requests are the ones that hold
+  // the session's one control slot.
   const REQUESTS = {
     status: { level: 'observe' },
     tail: { level: 'observe' },
     since: { level: 'observe' },
-    windows: { level: 'observe' },
-    window_text: { level: 'observe' },
-    stack: { level: 'observe' },
-    value: { level: 'observe' },
+    windows: { level: 'observe', settle: true },
+    window_text: { level: 'observe', settle: true },
+    stack: { level: 'observe', settle: true },
+    value: { level: 'observe', settle: true },
     wait: { level: 'observe' },
-    execute: { level: 'control', confirm: true },
-    answer: { level: 'control', confirm: true },
+    execute: { level: 'control', confirm: true, settle: true },
+    answer: { level: 'control', confirm: true, settle: true },
     interrupt: { level: 'control', confirm: false },
-    edit: { level: 'control', confirm: true },
-    save: { level: 'control', confirm: true },
-    stops: { level: 'control', confirm: true },
-    trace: { level: 'control', confirm: true },
+    edit: { level: 'control', confirm: true, settle: true },
+    save: { level: 'control', confirm: true, settle: true },
+    stops: { level: 'control', confirm: true, settle: true },
+    trace: { level: 'control', confirm: true, settle: true },
   };
   const TRACE_ACTIONS = ['step_into', 'step_over', 'continue', 'continue_trace', 'back', 'forward', 'cutback', 'restart', 'edit'];
   // What value accepts: a dotted APL name, optionally from #, ## or ⎕SE.
   // Anything else is an expression, which value does not evaluate.
   const PART = '⎕?[\\p{L}_∆⍙][\\p{L}\\p{N}_∆⍙¯]*';
   const NAME = new RegExp(`^(?:(?:#|##|⎕SE)\\.)?${PART}(?:\\.${PART})*$`, 'u');
+  // Dyalog 21.0 answers GetValueTip for a system name (⎕IO, ⎕PW, ⎕SE itself)
+  // with nothing at all, so asking would only time out; a name inside ⎕SE is
+  // answered.
+  const SYSTEM = /(^|\.)⎕[^.]*$/u;
 
   const isInt = (x) => Number.isInteger(x);
   const isLines = (x) => Array.isArray(x) && x.every((l) => isInt(l) && l >= 0);
@@ -71,7 +79,8 @@
       case 'edit':
         return oneLine(m.name) && m.name.trim() ? null : 'name must be a non-empty line';
       case 'value':
-        return typeof m.name === 'string' && NAME.test(m.name) ? null : 'name must be a name, not an expression';
+        if (!(typeof m.name === 'string' && NAME.test(m.name))) return 'name must be a name, not an expression';
+        return SYSTEM.test(m.name) ? 'the interpreter gives no value tip for a system name such as ⎕IO; execute it instead' : null;
       case 'wait':
         if (m.since !== undefined && typeof m.since !== 'number') return 'since must be a seq number';
         if (m.kinds !== undefined && typeof m.kinds !== 'string' && !isStrings(m.kinds)) return 'kinds must be a kind or a list of kinds';
@@ -218,24 +227,22 @@
     };
 
     // cn.js drops most sends while D.ide.promptType is 0, so a request that
-    // needs one fails now rather than at its timeout. slot: the request is a
-    // control request, one at a time. busyAtZero: it sends such a message.
+    // needs one fails now rather than at its timeout. A handler runs once
+    // ide.js has caught up with the tap (handle settles first), so the tap's
+    // prompt is D.ide.promptType too. slot: the request is a control request,
+    // one at a time. busyAtZero: it sends such a message.
     const blocked = (fail, slot, busyAtZero) => {
       const i = io.ide();
       if (!i || !i.connected) return fail('closed', 'the session is not connected to an interpreter');
       if (slot && inflight) return fail('busy', 'a request is in flight');
-      if (busyAtZero && (!i.prompt || !prompt)) return fail('prompt', 'the interpreter is busy', { prompt: 0 });
+      if (busyAtZero && !prompt) return fail('prompt', 'the interpreter is busy', { prompt: 0 });
       return false;
     };
     const exec = (m, ok, fail, prompts) => {
       if (blocked(fail, true, false)) return;
-      const i = io.ide();
-      // Both views of the prompt must agree: the tap's, so a change already
-      // received is not missed, and the IDE's, as cn.js drops an Execute
-      // while D.ide.promptType is 0.
-      if (!prompts.includes(i.prompt) || i.prompt !== prompt) { fail('prompt', `prompt type is ${prompt}`, { prompt }); return; }
+      if (!prompts.includes(prompt)) { fail('prompt', `prompt type is ${prompt}`, { prompt }); return; }
       // exec replaces the queue of lines the person pasted.
-      if (i.pending) { fail('busy', 'lines are queued for execution'); return; }
+      if (io.ide().pending) { fail('busy', 'lines are queued for execution'); return; }
       const text = m.text.replace(/\n$/, '');
       const timeout = ms(m);
       const f = {
@@ -445,6 +452,28 @@
         () => { clearTimeout(t); resolve(false); },
       );
     });
+    // ide.js handles the interpreter's messages from a queue that it runs
+    // down on a timer and holds while a window is being built, so D.ide
+    // (promptType, wins) lags what the tap saw at D.recv: by the rendering of
+    // a large output, or by the opening of a tracer at a stop. A request that
+    // reads or drives D.ide waits for the queue to drain, within its timeout:
+    // the interpreter is ready, the session is only catching up. The poll is
+    // a waiter, so a disconnect drops it along with the request.
+    const settle = (deadline) => new Promise((resolve) => {
+      const w = { feed: () => false };
+      const poll = () => {
+        const i = io.ide();
+        if (!i || i.quiescent) {
+          remove(w);
+          resolve(true);
+        } else if (Date.now() >= deadline) {
+          remove(w);
+          resolve(false);
+        } else w.timer = setTimeout(poll, SETTLE_MS);
+      };
+      waiters.push(w);
+      poll();
+    });
     const handle = async (m) => {
       const { id, req } = m;
       const ok = (r) => { reply(id, { ok: r }); return true; };
@@ -465,7 +494,24 @@
         if (level !== 'control') { fail('refused', `${req} needs control`); return; }
         if (!allowed) { fail('denied', 'the person denied the request'); return; }
       }
-      await handlers[req](m, ok, fail);
+      let fields = m;
+      if (spec.settle) {
+        // A control request holds the slot while it waits, so a second one is
+        // busy rather than interleaved.
+        if (spec.confirm) {
+          if (inflight) { fail('busy', 'a request is in flight'); return; }
+          inflight = { req, id, settling: true };
+        }
+        const timeout = ms(m);
+        const deadline = Date.now() + timeout;
+        const settled = await settle(deadline);
+        if (spec.confirm) inflight = null;
+        if (spec.level === 'control' && level !== 'control') { fail('refused', `${req} needs control`); return; }
+        if (!settled) { fail('timeout', `the session was still handling the interpreter's messages after ${timeout} ms`); return; }
+        // The handler's own wait gets what is left of the timeout.
+        fields = { ...m, timeout: Math.max(1, deadline - Date.now()) };
+      }
+      await handlers[req](fields, ok, fail);
     };
     const frame = (line) => {
       let m;
@@ -518,7 +564,7 @@
   };
 
   const api = {
-    create, REQUESTS, CODES, TRACE_ACTIONS, NAME, matches, RING, MAX_LINES, MAX_CHARS, BATCH, FLUSH_MS, DEFAULT_TIMEOUT, CONFIRM_MS,
+    create, REQUESTS, CODES, TRACE_ACTIONS, NAME, matches, RING, MAX_LINES, MAX_CHARS, BATCH, FLUSH_MS, DEFAULT_TIMEOUT, CONFIRM_MS, SETTLE_MS,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else {
