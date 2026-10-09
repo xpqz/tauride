@@ -152,7 +152,8 @@ if (window.__RIDE__) {
           // received is not missed, and the IDE's, as cn.js drops an Execute
           // while D.ide.promptType is 0.
           const p = ide.promptType;
-          if (!(req === 'execute' ? [1] : [2, 4]).includes(p) || p !== prompt) return fail('prompt', `prompt type is ${p}`, { prompt: p });
+          // The tap's prompt is the interpreter's latest; the IDE's lags it by a tick.
+          if (!(req === 'execute' ? [1] : [2, 4]).includes(p) || p !== prompt) return fail('prompt', `prompt type is ${prompt}`, { prompt });
           // exec replaces the queue of lines the person pasted.
           if (ide.pending.length) return fail('busy', 'lines are queued for execution');
           const timeout = +m.timeout > 0 ? +m.timeout : 30000;

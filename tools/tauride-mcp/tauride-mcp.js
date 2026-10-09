@@ -288,7 +288,7 @@ const mcp = (opts) => new Promise((resolve) => {
     }
   };
   const send = (m) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...m })}\n`);
-  const handle = async (m) => {
+  const handleOne = async (m) => {
     const { id, method, params = {} } = m;
     const notification = id === undefined;
     try {
@@ -330,6 +330,23 @@ const mcp = (opts) => new Promise((resolve) => {
       }
     }
   };
+  // A client may close stdin with a call outstanding; its reply still goes out
+  // before the socket is closed.
+  let active = 0;
+  let stdinClosed = false;
+  const finish = () => {
+    if (connecting) connecting.then((c) => c.close(), () => {});
+    resolve(0);
+  };
+  const handle = async (m) => {
+    active += 1;
+    try {
+      await handleOne(m);
+    } finally {
+      active -= 1;
+      if (stdinClosed && active === 0) finish();
+    }
+  };
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   rl.on('line', (line) => {
     if (!line.trim()) return;
@@ -350,8 +367,8 @@ const mcp = (opts) => new Promise((resolve) => {
     });
   });
   rl.on('close', () => {
-    if (connecting) connecting.then((c) => c.close(), () => {});
-    resolve(0);
+    stdinClosed = true;
+    if (active === 0) finish();
   });
 });
 
