@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // CLI and MCP stdio adapter for the Tauride agent socket: the client side of
 // "Phase 1: wire format" in tauri/agent-pairing.md. One file, no dependencies.
+const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
@@ -21,8 +22,10 @@ const USAGE = `usage: tauride-mcp [--session <label>] [--socket <path>] [--timeo
   mcp                      serve MCP over stdio
 
 The socket is --socket, else $TAURIDE_SOCKET, else
-$XDG_CONFIG_HOME/Ride-4.8/agent/<session>.sock (~/.config when XDG_CONFIG_HOME is unset),
-where <session> is --session (default main).
+$XDG_CONFIG_HOME/Ride-4.8/agent/<session>.sock (~/.config when XDG_CONFIG_HOME is unset;
+%APPDATA% on Windows), where <session> is --session (default main). Where there is no
+.sock, the <session>.port file beside it names a loopback TCP port and its token
+(Windows); a socket can also be given as a .port file or as tcp://127.0.0.1:<port>?token=<t>.
 Exit status: 0 ok, 1 the line ended in an APL error, 2 anything else (message on stderr).`;
 
 // Error frames need not carry a message (the busy frame sent to a second connection has none).
@@ -53,6 +56,29 @@ const defaultSocket = (session) => {
   return path.join(base || os.tmpdir(), 'Ride-4.8', 'agent', `${session}.sock`);
 };
 
+// Where to connect: {path} for a Unix socket, or {host, port, token} for the TCP port
+// Windows uses. A .port file holds "127.0.0.1:<port> <token>".
+const resolveSocket = (spec) => {
+  const u = /^tcp:\/\/([^:/?]+):(\d+)\/?(?:\?(.*))?$/.exec(spec);
+  if (u) {
+    const token = new URLSearchParams(u[3] || '').get('token');
+    if (!token) throw new Error(`${spec}: a tcp:// socket needs ?token=<token>`);
+    return { host: u[1], port: +u[2], token, shown: `${u[1]}:${u[2]}` };
+  }
+  const portFile = /\.port$/.test(spec) ? spec
+    : (/\.sock$/.test(spec) && !fs.existsSync(spec) && fs.existsSync(spec.replace(/\.sock$/, '.port')) && spec.replace(/\.sock$/, '.port'));
+  if (!portFile) return { path: spec, shown: spec };
+  let text;
+  try {
+    text = fs.readFileSync(portFile, 'utf8');
+  } catch (e) {
+    throw new Error(`cannot read ${portFile}: ${e.code === 'ENOENT' ? 'no such file; is Tauride running with RIDE_AGENT set?' : e.message}`);
+  }
+  const m = /^\s*([^\s:]+):(\d+)\s+(\S+)/.exec(text);
+  if (!m) throw new Error(`${portFile}: expected "127.0.0.1:<port> <token>"`);
+  return { host: m[1], port: +m[2], token: m[3], shown: `${m[1]}:${m[2]} (${portFile})` };
+};
+
 const connectFailure = (e, sockPath) => {
   const why = {
     ENOENT: 'no such socket; is Tauride running with RIDE_AGENT set?',
@@ -65,13 +91,15 @@ const connectFailure = (e, sockPath) => {
 // frame's ok or rejects with an AppError carrying its err. Unsolicited {"ev":...} frames
 // go to onEvent. An err frame without an id (busy, on a second connection) and a lost
 // connection fail every pending and future request, so nothing waits on a dead socket.
-const connect = (sockPath, onEvent) => new Promise((resolve, reject) => {
+const connect = (spec, onEvent) => new Promise((resolve, reject) => {
+  const target = resolveSocket(spec);
+  const sockPath = target.shown;
   const pending = new Map();
   let nextId = 1;
   let buf = '';
   let fatal;
   let connected = false;
-  const sock = net.createConnection(sockPath);
+  const sock = target.path ? net.createConnection(target.path) : net.createConnection(target.port, target.host);
   // Decoded before splitting on \n, so a chunk boundary inside a multibyte APL char is harmless.
   sock.setEncoding('utf8');
   const fail = (e) => {
@@ -131,6 +159,9 @@ const connect = (sockPath, onEvent) => new Promise((resolve, reject) => {
   };
   sock.on('connect', () => {
     connected = true;
+    // The TCP port answers nothing until it has the token, and closes on anything else.
+    if (target.token) sock.write(`${JSON.stringify({ auth: target.token })}
+`);
     resolve(client);
   });
 });
