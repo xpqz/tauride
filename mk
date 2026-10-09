@@ -48,6 +48,15 @@ const incl = new RegExp('^$'
   + '|^/(D\\.png|favicon.*|[^/]*\\.html|main\\.js|package\\.json)$'
   + '|^/(src|lib|node_modules|_)(/|$)'
   + '|^/style($|/(fonts|img)|.*\\.css$)');
+// what the packages leave out of node_modules: only the jquery, toastr and
+// monaco builds the pages load, and no source maps, dev builds or tests
+const excl = p => /monaco-editor\/(dev|esm|min-maps)/.test(p)
+  || /toastr\/(?!build($|\/toastr.min))/.test(p)
+  || /jquery\/(?!dist($|\/jquery\.min\.js))/.test(p)
+  || /node_modules\/.*\/node_gyp_bins/.test(p)
+  || /node_modules\/\.bin/.test(p)
+  || /\/test/.test(p)
+  || /\.map$/.test(p);
 const pkg = (x, y, f) => {
   const version = isDyalogBuild ? process.env.APPVERSION : v;
   const tmpdir = `/tmp/ridebuild_${version}_${rq('os').userInfo().username}`;
@@ -60,14 +69,7 @@ const pkg = (x, y, f) => {
     overwrite: true,
     'download.cache': 'cache',
     icon: 'D',
-    ignore: p => (!incl.test(p) && !(x === 'win32' && /^\/windows-ime(\/set-ime.exe|$)/.test(p)))
-      || /monaco-editor\/(dev|esm|min-maps)/.test(p)
-      || /toastr\/(?!build($|\/toastr.min))/.test(p)
-      || /jquery\/(?!dist($|\/jquery\.min\.js))/.test(p)
-      || /node_modules\/.*\/node_gyp_bins/.test(p)
-      || /node_modules\/\.bin/.test(p)
-      || /\/test/.test(p)
-      || /\.map$/.test(p),
+    ignore: p => (!incl.test(p) && !(x === 'win32' && /^\/windows-ime(\/set-ime.exe|$)/.test(p))) || excl(p),
     appBundleId: `com.dyalog.${pj.name}`,
     appCopyright: `(c) 2014-${new Date().getFullYear()} Dyalog Ltd`,
     appVersion: version,
@@ -102,6 +104,38 @@ const d = (f) => { async.series([l, w, o, a], (e) => { f(e); }); };
 
 const c = (f) => { rm('_'); rm('/tmp/ridebuild'); f(); };
 
+// zero-footprint Ride: the tree an interpreter serves from [DYALOG]/RIDEapp
+// when started with RIDE_INIT=HTTP:*:<port>. The pages keep their paths, so
+// node_modules holds just the trees they load; main.js and package.json
+// belong to Electron.
+const zfIncl = new RegExp('^$'
+  + '|^/(D\\.png|favicon.*|[^/]*\\.html)$'
+  + '|^/(src|lib)(/|$)'
+  + '|^/_$|^/_/version\\.js$'
+  + '|^/style($|/(fonts|img)|.*\\.css$)'
+  + '|^/node_modules$|^/node_modules/(jquery|toastr|monaco-editor)(/|$)');
+const zf = (f) => {
+  b((e) => {
+    if (e) { f(e); return; }
+    const out = '_/zf';
+    rm(out);
+    const cp = (p) => { // p:path from the project root, starting with /
+      if (!zfIncl.test(p) || excl(p)) return;
+      if (fs.statSync(`.${p}`).isDirectory()) fs.readdirSync(`.${p}`).forEach(y => cp(`${p}/${y}`));
+      else { md(path.dirname(`${out}${p}`)); fs.copyFileSync(`.${p}`, `${out}${p}`); }
+    };
+    cp('');
+    const zip = `tauride-zf-${v}.zip`;
+    rm(`_/${zip}`);
+    // zip follows the symlink, so the archive unpacks as RIDEapp/, the name
+    // the interpreter looks for under [DYALOG]
+    fs.symlinkSync('zf', '_/RIDEapp');
+    try { execSync(`zip -qr ${zip} RIDEapp`, { cwd: '_' }); } finally { fs.unlinkSync('_/RIDEapp'); }
+    console.info(`_/${zip}`);
+    f();
+  });
+};
+
 tasks.b = b; tasks.build = b;
 tasks.l = l; tasks.linux = l;
 tasks.la = la; tasks.linuxarm = la;
@@ -113,6 +147,7 @@ tasks.ma=ma; tasks.masarm = ma;
 tasks.a = a; tasks.arm = a;
 tasks.d = d; tasks.dist = d;
 tasks.c = c; tasks.clean = c;
+tasks.zf = zf; tasks.zerofootprint = zf;
 
 async.each(
   process.argv.length > 2 ? process.argv.slice(2) : ['build'],
