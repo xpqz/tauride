@@ -251,3 +251,70 @@ answer <text> | interrupt [weak|strong] | tail [n] | watch | mcp`.
 `ping`) with the tools `execute`, `answer`, `interrupt`, `tail`, `status`.
 The socket path defaults to `~/.config/Ride-4.8/agent/<session>.sock` and
 can be set with `TAURIDE_SOCKET`.
+
+## Phases 2 and 3: wire format additions
+
+Same framing as phase 1. Levels: `observe` requests work whenever the port
+is open; `control` requests need control. `interrupt` is never gated by the
+confirm mode below, so the person can always ask the agent to stop a loop.
+
+**Switching on, revised.** Two boolean preferences replace the three-valued
+`agent`: `agent` (observe) and `agentControl` (control, implies observe),
+both default off, changeable while running from the menu (Agent ▸ Observe
+session, Agent ▸ Allow control; command codes `AGO`, `AGC`) and from the
+Preferences dialog. The tap follows them live: turning observe off closes
+the port and drops the client. `RIDE_AGENT=1` / `RIDE_AGENT=control` set
+them for the process at startup. A third preference `agentConfirm` (default
+off) makes every control request except `interrupt` show a non-modal toast
+with the request text and Run / Deny; no answer within 60 s is a deny,
+reported to the agent as `denied`.
+
+**Requests added.**
+
+| `req` | level | fields | returns |
+|---|---|---|---|
+| `windows` | observe | | `[{token, name, kind: "editor" \| "tracer", text, currentLine, stops, trace, monitor, saved}]` from `D.ide.wins` (the session excluded) |
+| `window_text` | observe | `token` | the same object for one window, or `not_found` |
+| `edit` | control | `name` | opens an editor through the protocol's `Edit` message; returns `{token}` once its `OpenWindow` arrives |
+| `save` | control | `token`, `text`, `stops` (optional) | the editor's own save path; `{token, saved: true}` on a clean `ReplySaveChanges`, else `err save` with the interpreter's message |
+| `stops` | control | `token`, `lines` | sets the stop lines in that window as a margin click would (`SetLineAttributes` for tracers, saved with the editor otherwise); returns `{stops}` |
+| `trace` | control | `token`, `action` | one of `step_into`, `step_over`, `continue`, `continue_trace`, `back`, `forward`, `cutback`, `restart`, `edit`; runs the matching Ride command on that window; returns the next `{highlight}` for it, or `{closed: true}`, or `{prompt}` if the session prompt changed first, within `timeout` |
+| `stack` | observe | | the `ReplyGetSIStack` payload |
+| `value` | observe | `name` | the `ValueTip` text for that name in the current frame (names only; expressions are `bad_request`) |
+| `wait` | observe | `since` (seq, default the latest), `kinds`, `origin`, `prefix`, `timeout` | long-poll: the first event after `since` that matches, else `err timeout`; this is how an agent waits for the next `⍝ Claude:` line without polling |
+
+**Events added.** `kind: "agent"` with `event: connected | disconnected |
+level`, so the transcript shows when an agent was attached and at which
+level. `window` events gain `event: "save"` with `origin`, and `event:
+"stops"`.
+
+**Transcript writer.** The tap batches events and hands them to Rust
+(`transcript_append(path, lines)`), which appends from a task off the UI
+thread. A file is rotated at 32 MB to `<name>.1` (one generation kept). The
+tap keeps the last 1000 events in memory for `tail` and `since`; older
+events are only in the file. `status` reports the path and size.
+
+**Agent lines in the session.** Input echoed for an agent-originated line
+gets a gutter marker and a muted background (Monaco decoration, class
+`agent-line`), so the session itself shows who typed what.
+
+**Windows transport.** Where there is no Unix socket, `agent_listen` binds
+`127.0.0.1` on a free port and writes `<userData>/agent/<label>.port`
+containing `127.0.0.1:<port> <token>` (a random 32-byte hex token; the file
+is private to the user). The client's first frame must be
+`{"auth": "<token>"}`; anything else closes the connection with `err
+unauthorized`. The CLI reads the `.port` file when there is no `.sock`, and
+`TAURIDE_SOCKET` accepts `tcp://127.0.0.1:<port>?token=<token>`.
+
+**Testing.** `test/agent_core.js` (`node --test`) covers the pure parts of
+the tap, kept in `src/agent_core.js`: frame parsing and validation, request
+routing, the execute correlation, truncation, the ring and `since`, the
+`wait` matching. `tools/tauride-mcp/e2e.js` launches a built Tauride with a
+private config directory and a spawned interpreter and runs every request
+over the socket, as a release check. CLI and MCP keep
+`tools/tauride-mcp/test.js`.
+
+**MCP tools.** `execute`, `answer`, `interrupt`, `tail`, `status` as before,
+plus `windows`, `window_text`, `edit`, `save`, `stops`, `trace`, `stack`,
+`value` and `wait_for_input` (= `wait` with `origin: human`, optional
+`prefix`, default timeout 300 s).
