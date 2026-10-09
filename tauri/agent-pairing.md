@@ -43,7 +43,7 @@ Three sources are available for "the session log"; they are not the same.
 | Source | Has inputs | Live | Use |
 |---|---|---|---|
 | Interpreter `GetLog` / `ReplyGetLog` | no: input lines come back as empty strings (xpqz/tauride#33) | on request | not used |
-| The session window's own buffer (`src/se.js`), filled live from `EchoInput`, `AppendSessionOutput`, `HadError` | yes | yes | the live transcript, and the backfill when the agent attaches |
+| The session window's own buffer (`src/se.js`), filled live from the input echo, `AppendSessionOutput`, `HadError` | yes | yes | the live transcript, and the backfill when the agent attaches |
 | `hist.txt` in the user data dir, written by `se.histWrite` | inputs only | written on exit | history across restarts |
 
 The tap writes a **transcript**: one JSON line per event, appended to a file
@@ -61,8 +61,10 @@ streamed to a connected agent. Events:
   `SetHighlightLine`: editor and tracer text, which line is current.
 - `stack`: `ReplyGetSIStack`.
 "The person's typing" means entered lines, which is what `input` carries:
-`EchoInput` arrives once a line has been submitted, so the agent sees each
-complete line in order with the output that followed it, and nothing of the
+the echo of a submitted line (`EchoInput`, or the `AppendSessionOutput` of
+type 14 that interpreters such as Dyalog 21.0 send instead) arrives once the
+line has been entered, so the agent sees each complete line in order with
+the output that followed it, and nothing of the
 editing that preceded Enter. Keystrokes in progress are not part of this
 design; if they are ever wanted, they are a separate `draft` subscription
 from Monaco's content-change events, never mixed into the transcript.
@@ -214,8 +216,9 @@ collected so far), `closed` (session disconnected from the interpreter),
 **`execute` / `answer` result.** `{"echo": text, "lines": [{"kind":
 "output" | "error", "type": t, "text": s}, ...], "error": dmx | null,
 "prompt": p, "truncated": bool, "seq": [first, last]}`. The line goes
-through `D.ide.exec`; the result is the transcript slice from its
-`EchoInput` to the next `SetPromptType` that leaves 0, capped at 200 lines
+through `D.ide.exec`; the result is the transcript slice from its echo
+(`EchoInput`, or the type-14 `AppendSessionOutput` that Dyalog 21.0 sends
+instead) to the next `SetPromptType` that leaves 0, capped at 200 lines
 or 64 KB with `truncated: true` (the rest is in the transcript). One request
 in flight per session; the human's own input in the meantime is reported as
 `input` events, not mixed into the result.
