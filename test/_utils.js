@@ -10,6 +10,16 @@ async function nativeInput(client, command, args) {
 }
 exports.keys = async (client, ...keys) => nativeInput(client, 'ui_test_keys', { keys });
 exports.typeText = async (client, text) => exports.keys(client, text);
+// Commit one edit rather than saving WebDriver's intermediate empty value.
+exports.setFieldValue = async (client, element, value) => client.execute((field, text) => {
+  if (!field || !field.isConnected || field.disabled || field.readOnly) throw new Error('Field is not editable');
+  const prototype = field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, text);
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  if (field.value !== text) throw new Error('Field did not retain the requested value');
+}, element, value);
+
 exports.moveTo = async (client, element) => {
   const position = await client.execute((target) => {
     const rect = target.getBoundingClientRect();
@@ -37,10 +47,7 @@ class TFW {
       t.context.userData = t.context.app.userData;
     });
     test.afterEach.always(async (t) => {
-      if (t.context.app) {
-        if (!t.passed) await t.context.app.captureFailure();
-        await t.context.app.stop();
-      }
+      if (t.context.app) await t.context.app.stop();
     });
   }
 }

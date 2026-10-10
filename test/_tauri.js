@@ -136,19 +136,6 @@ class TauriApplication {
     });
   }
 
-  async captureFailure() {
-    if (process.platform !== 'linux' || process.env.RIDE_TEST_DEBUG_STARTUP !== '1' || !this.isRunning()) return;
-    console.error(`Tauride failed test output:\n${this.output}`);
-    try {
-      const trace = await promisify(execFile)('sudo', ['-n', 'gdb', '-batch',
-        '-ex', 'set pagination off', '-ex', 'thread apply all bt', '-p', String(this.child.pid)],
-      { timeout: 15000, maxBuffer: 256 * 1024 });
-      console.error(`Failed test backtrace:\n${trace.stdout}\n${trace.stderr}`);
-    } catch (error) {
-      console.error(`Failed test backtrace failed: ${error.message}\n${error.stdout || ''}\n${error.stderr || ''}`);
-    }
-  }
-
   async stop() {
     if (this.stopping) return this.stopping;
     this.stopping = this.cleanup();
