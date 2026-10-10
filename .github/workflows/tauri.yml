@@ -65,6 +65,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           RIDE_TEST_BINARY: src-tauri/target/ui-tests/debug/tauride
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
         run: xvfb-run --auto-servernum npm run test:connection
 
       # Runs beforeBuildCommand (npm run css && node tauri/stage.js) first.

@@ -54,15 +54,21 @@ async function freePort() {
 
 async function waitForStatus(port, child, timeout = 30000) {
   const deadline = Date.now() + timeout;
+  let lastStatus = 'no status response';
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null) throw new Error('Tauride exited before WebDriver became ready');
     try {
       const response = await fetch(`http://127.0.0.1:${port}/status`, { signal: AbortSignal.timeout(1000) });
-      if (response.ok && (await response.json()).value.ready) return;
-    } catch (_) { /* The embedded server starts after the app. */ }
+      const body = await response.text();
+      lastStatus = `HTTP ${response.status}: ${body.slice(0, 500)}`;
+      if (response.ok && JSON.parse(body).value.ready) return;
+    } catch (error) {
+      const cause = error.cause || error;
+      lastStatus = `${error.message}${cause.code ? ` (${cause.code})` : ''}`;
+    }
     await delay(100);
   }
-  throw new Error(`Tauride WebDriver did not become ready on port ${port}; build with --features ui-tests`);
+  throw new Error(`Tauride WebDriver did not become ready on port ${port}; build with --features ui-tests; last status: ${lastStatus}`);
 }
 
 class TauriApplication {

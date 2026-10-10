@@ -40,6 +40,20 @@ test('readiness waits for the embedded W3C status endpoint to report ready', asy
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
+test('readiness timeout distinguishes an initializing webview from an unreachable server', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ value: { ready: false, message: 'waiting for webview initialization' } }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const child = { exitCode: null, signalCode: null };
+  try {
+    await assert.rejects(waitForStatus(port, child, 150), /last status: HTTP 200:.*waiting for webview initialization/);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+  await assert.rejects(waitForStatus(port, child, 150), /last status:.*ECONNREFUSED/);
+});
+
 test('startup failure stops its child and removes its temporary profile', { skip: process.platform === 'win32' }, async () => {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'tauride-fixture-'));
   const binary = path.join(fixture, 'exit-app');
