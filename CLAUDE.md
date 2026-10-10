@@ -31,7 +31,10 @@ existing frontend in a Tauri 2 shell instead of Electron. The Electron build (`m
   `RIDE_CONNECT=host:port`. Webview `console.error`/`warn` and uncaught errors are
   printed on stderr as `[webview ...]`. `"devTools": true` in
   `~/.config/Ride-4.8/winstate.json` opens devtools on the main window.
-- `npm test` is the Electron/ava suite; it does not exercise the Tauri build.
+- `npm test` builds and runs the Tauri UI suite (AVA/WebdriverIO). It needs a
+  Dyalog interpreter on PATH or `RIDE_TEST_DYALOG`, plus an unlocked desktop for
+  native input. See `tauri/README.md` for test setup and focused runs.
+- `npm run test:unit` runs display-independent frontend and harness regressions.
 - Verify changes in the running app, not only by compiling. Check the window with
   `screencapture -l <window id>` (window ids from `CGWindowListCopyWindowInfo`), never a
   full-screen capture.

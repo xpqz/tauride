@@ -19,6 +19,29 @@ D.IDE = function IDE(opts = {}) {
   ide.pending = [];
   ide.promptType = 1;
   ide.hasSubscribe = true;
+  ide.saveRequests = new Map();
+  ide.pasteSources = new Set();
+  ide.pasteFinishes = new Map();
+  ide.pasteStarts = new Map();
+  if (!ide.floating) {
+    const send = D.send.sessionSend || D.send;
+    D.send = (name, payload) => {
+      if (name === 'Execute') {
+        if (ide.promptType === 0) return;
+        ide.inputOperation = {};
+        if (payload.text === ide.pasteCleanup) {
+          ide.pasteSources.clear(); ide.pasteCleanup = null;
+        }
+        const started = ide.pasteStarts.get(payload.text);
+        if (started) { ide.pasteSources.add(started); ide.pasteStarts.delete(payload.text); }
+        const source = ide.pasteFinishes.get(payload.text);
+        if (source) { ide.pasteSources.delete(source); ide.pasteFinishes.delete(payload.text); }
+      }
+      if (name === 'SaveChanges') ide.saveRequests.set(payload.win, { explained: false });
+      send(name, payload);
+    };
+    D.send.sessionSend = send;
+  }
   // The interpreter's ∇Name header form is refused with "defn error" when Name already
   // exists, so a pasted ⎕VR-style definition is fixed with ⎕FX instead, which also
   // redefines. Anything not clearly such a listing is left to the interpreter as typed.
@@ -29,17 +52,59 @@ D.IDE = function IDE(opts = {}) {
       const body = j < 0 ? [] : a.slice(i + 1, j);
       if (j < 0 || !body.every((l) => /^\s*\[\d+\]/.test(l))) r.push(a[i]);
       else {
-        const q = [a[i].replace(/^\s*∇\s*/, ''), ...body.map((l) => l.replace(/^\s*\[\d+\]\s*/, ''))]
-          .map((l) => `(⊂,'${l.replace(/'/g, "''")}')`);
-        r.push(`{''≡0⍴⍵:_←0 ⋄ ⎕←'defn error'}⎕FX ,${q.join(',')}`);
+        const lines = [a[i].replace(/^\s*∇\s*/, ''), ...body.map((l) => l.replace(/^\s*\[\d+\] ?/, ''))];
+        const name = `ridePaste${window.crypto.randomUUID().replace(/-/g, '')}`;
+        const variable = `⎕SE.${name}`;
+        const start = `${variable}←⍬`;
+        r.push(start);
+        ide.pasteStarts.set(`${start}\n`, name);
+        // Keep generated inputs below 450 UTF-8 bytes, including quoting and prefixes.
+        const encoder = new window.TextEncoder();
+        let batch = [];
+        let batchBytes = 0;
+        const flush = () => {
+          if (batch.length) r.push(`${variable},←,${batch.join(',')}`);
+          batch = [];
+          batchBytes = 0;
+        };
+        lines.forEach((line) => {
+          const quoted = `(⊂,'${line.replace(/'/g, "''")}')`;
+          const quotedBytes = encoder.encode(quoted).length;
+          if (quotedBytes < 300) {
+            if (batchBytes + quotedBytes > 300) flush();
+            batch.push(quoted);
+            batchBytes += quotedBytes + 1;
+          } else {
+            flush();
+            r.push(`${variable},←⊂,''`);
+            const characters = Array.from(line);
+            for (let k = 0; k < characters.length; k += 50) {
+              const chunk = characters.slice(k, k + 50).join('').replace(/'/g, "''");
+              const last = `${variable}[¯1+⎕IO+≢${variable}]`;
+              r.push(`${last}←⊂(⊃${last}),'${chunk}'`);
+            }
+          }
+        });
+        flush();
+        const finish = `{''≡0⍴⍵:_←0 ⋄ ⎕←'defn error'}⎕FX {_←⎕SE.⎕EX '${name}' ⋄ ⍵}${variable}`;
+        r.push(finish);
+        ide.pasteFinishes.set(`${finish}\n`, name);
         i = j;
       }
     }
     return r;
   };
   ide.exec = (a, tc) => {
+    if (ide.promptType === 0) return;
     if (a && a.length) {
-      const es = tc || !window.__RIDE__ ? a : fxDefns(a);
+      let cleanup;
+      if (!tc) {
+        if (ide.pasteSources.size) cleanup = `⍬⊣⎕SE.⎕EX ${[...ide.pasteSources].map((name) => `'${name}'`).join(' ')}`;
+        ide.pasteStarts.clear();
+        ide.pasteFinishes.clear();
+      }
+      const es = tc || !window.__RIDE__ ? a.slice() : fxDefns(a);
+      if (cleanup) { ide.pasteCleanup = `${cleanup}\n`; es.unshift(cleanup); }
       tc || (ide.pending = es.slice(1));
       D.send('Execute', { trace: tc, text: `${es[0]}\n` });
       ide.getStats();
@@ -126,29 +191,33 @@ D.IDE = function IDE(opts = {}) {
     }
   };
   function rd() { // run down the queue
-    while (mq.length && !blk) {
-      const a = mq.shift(); // a[0]:command name, a[1]:command args
-      if (a[0] === 'AppendSessionOutput') { // special case: batch sequences of AppendSessionOutput together
-        const so = a[1];
-        const s = [{ text: so.result, group: so.group || 0, type: so.type || 0 }];
-        const nq = Math.min(mq.length, 256);
-        let i;
-        for (i = 0; i < nq && mq[i][0] === 'AppendSessionOutput'; i++) {
-          const r = mq[i][1];
-          s.push({ text: r.result, group: r.group || 0, type: r.type || 0 });
+    try {
+      while (mq.length && !blk) {
+        const a = mq.shift(); // a[0]:command name, a[1]:command args
+        if (a[0] === 'AppendSessionOutput') { // special case: batch sequences of AppendSessionOutput together
+          const so = a[1];
+          const s = [{ text: so.result, group: so.group || 0, type: so.type || 0 }];
+          const nq = Math.min(mq.length, 256);
+          let i;
+          for (i = 0; i < nq && mq[i][0] === 'AppendSessionOutput'; i++) {
+            const r = mq[i][1];
+            s.push({ text: r.result, group: r.group || 0, type: r.type || 0 });
+          }
+          i && mq.splice(0, i);
+          ide.wins[0].add(s);
+        } else {
+          const f = ide.handlers[a[0]];
+          f ? f.apply(ide, a.slice(1)) : D.send('UnknownCommand', { name: a[0] });
         }
-        i && mq.splice(0, i);
-        ide.wins[0].add(s);
-      } else {
-        const f = ide.handlers[a[0]];
-        f ? f.apply(ide, a.slice(1)) : D.send('UnknownCommand', { name: a[0] });
+        if (pfqtid) {
+          clearTimeout(pfqtid);
+          pfqtid = setTimeout(pfKeyRun, 100);
+        }
       }
-      if (pfqtid) {
-        clearTimeout(pfqtid);
-        pfqtid = setTimeout(pfKeyRun, 100);
-      }
+    } finally {
+      last = +new Date(); tid = 0;
+      if (mq.length && !blk) tid = setTimeout(rd, 20);
     }
-    last = +new Date(); tid = 0;
   }
   function rrd() { // request rundown
     tid || (new Date() - last < 20 ? (tid = setTimeout(rd, 20)) : rd());
@@ -303,7 +372,7 @@ D.IDE = function IDE(opts = {}) {
     return w;
   }
   function WSE(c) {
-    const u = new D.WSE();
+    const u = ide.wse || new D.WSE();
     ide.wse = u;
     u.container = c;
     c.on('tab', (tab) => {
@@ -590,6 +659,7 @@ D.IDE = function IDE(opts = {}) {
     },
     SetPromptType(x) {
       const t = x.type;
+      if (t) ide.inputOperation = null;
       ide.promptType = t;
       I.sb_busy.hidden = t > 0;
       if (t && ide.pending.length) {
@@ -622,6 +692,14 @@ D.IDE = function IDE(opts = {}) {
       // Each of these will set the focus on the new window,
       // but on error we want focus on SE.
       ide.pending.splice(0, ide.pending.length);
+      if (ide.pasteSources.size) {
+        const names = [...ide.pasteSources].map((name) => `'${name}'`).join(' ');
+        const cleanup = `⍬⊣⎕SE.⎕EX ${names}`;
+        ide.pending.push(cleanup);
+        ide.pasteCleanup = `${cleanup}\n`;
+      }
+      ide.pasteFinishes.clear();
+      ide.pasteStarts.clear();
       const se = ide.wins['0'];
       se.focus();
       // set timer in case no new window is opened
@@ -676,8 +754,14 @@ D.IDE = function IDE(opts = {}) {
       const w = ide.wins[x.token];
       w && w.update(x);
     },
-    ReplySaveChanges(x) { const w = ide.wins[x.win]; w && w.saved(x.err); },
+    ReplySaveChanges(x) {
+      const request = ide.saveRequests.get(x.win);
+      ide.saveRequests.delete(x.win);
+      const w = ide.wins[x.win];
+      w && w.saved(x.err, !!(request && request.explained));
+    },
     CloseWindow(x) {
+      ide.saveRequests.delete(x.win);
       const w = ide.wins[x.win];
       if (!w) return;
       if (w.bwId) {
@@ -808,19 +892,18 @@ D.IDE = function IDE(opts = {}) {
       }
     },
     OptionsDialog(x) {
-      ide.dialogCount = (ide.dialogCount || 0) + 1;
-      // The interpreter re-raises an over-long input line's dialog once per chunk of the line,
-      // each as soon as the previous one is answered: answer an immediate repeat
-      // of the dialog just dismissed the same way, rather than showing it again.
-      const key = JSON.stringify([x.title, x.text, x.options, x.type]);
-      const last = ide.lastOptionsDialog;
-      if (last && last.key === key && +new Date() - last.time < 1000) {
-        last.time = +new Date();
-        D.send('ReplyOptionsDialog', { index: last.reply, token: x.token });
+      if (x.text === "Can't Fix" && x.type === 4 && x.options.length === 1
+        && x.options[0] === 'OK' && ide.saveRequests.size === 1) {
+        [...ide.saveRequests.values()][0].explained = true;
+      }
+      const input = x.text === 'INPUT LIMIT' && x.type === 4
+        && x.options.length === 1 && x.options[0] === 'OK' && ide.inputOperation;
+      if (input && input.reply !== undefined) {
+        D.send('ReplyOptionsDialog', { index: input.reply, token: x.token });
         return;
       }
       D.util.optionsDialog(x, (r) => {
-        ide.lastOptionsDialog = { key, reply: r, time: +new Date() };
+        if (input) input.reply = r;
         D.send('ReplyOptionsDialog', { index: r, token: x.token });
       });
     },
@@ -835,6 +918,9 @@ D.IDE = function IDE(opts = {}) {
       });
     },
     ReplyClearTraceStopMonitor(x) {
+      Object.keys(ide.wins).filter((id) => +id)
+        .forEach((id) => ide.wins[id].clearAllStops());
+      ide.clearingStops = false;
       x.stops += ide.unsavedStops || 0;
       ide.unsavedStops = 0;
       $.alert(`The following items were cleared:
@@ -905,6 +991,8 @@ D.IDE = function IDE(opts = {}) {
     },
     UnknownCommand(x) {
       if (x.name === 'ClearTraceStopMonitor') {
+        ide.clearingStops = false;
+        ide.unsavedStops = 0;
         toastr.warning('Clear all trace/stop/monitor not supported by the interpreter');
       } else if (x.name === 'GetHelpInformation') {
         ide.getHelpExecutor.reject({ supported: false, msg: 'GetHelpInformation not implemented on remote interpreter' });
@@ -959,6 +1047,13 @@ D.IDE.prototype = {
     if (ide.dead) return;
     ide.dead = 1;
     ide.connected = 0;
+    ide.clearingStops = false;
+    ide.unsavedStops = 0;
+    ide.saveRequests.clear();
+    ide.inputOperation = null;
+    ide.pasteSources.clear();
+    ide.pasteFinishes.clear();
+    ide.pasteStarts.clear();
     ide.dom.classList.add('disconnected');
     Object.keys(ide.wins).forEach((k) => { ide.wins[k].die(); });
   },

@@ -1,7 +1,39 @@
+const { Key } = require('webdriverio');
 const test = require('ava');
-const { sessionLastLines, tfw } = require('./_utils');
+const { sessionLastLines, tfw, keys, readClipboard } = require('./_utils');
 
-tfw.init({ src: 'ed', RIDE_SPAWN: 'dyalog' });
+tfw.init({ src: 'ed', interpreter: true });
+
+async function waitForEditor(c) {
+  await c.waitUntil(async () => c.execute(() => Object.values(D.ide.wins).some(w => w !== D.ide.wins[0] && w.me && w.me.getModel() && w.me.getLayoutInfo().width > 0 && w.me.hasTextFocus())), {
+    timeout: 10000, timeoutMsg: 'Editor did not become ready',
+  });
+}
+
+async function waitForPrompt(c) {
+  await c.waitUntil(async () => c.execute(() => D.ide.wins[0].promptType === 1), { timeout: 10000 });
+}
+
+async function executeExpression(c, expression) {
+  await keys(c, expression);
+  await c.waitUntil(async () => (await c.execute(sessionLastLines, 1))[0] === `      ${expression}`, { timeout: 10000 });
+  const lines = await c.execute(() => D.ide.wins[0].me.getModel().getLineCount());
+  await keys(c, Key.Enter);
+  await c.waitUntil(async () => c.execute((before) => {
+    const session = D.ide.wins[0];
+    return session.promptType === 1 && session.me.getModel().getLineCount() > before;
+  }, lines), { timeout: 10000, timeoutMsg: 'Interpreter did not finish the expression' });
+}
+
+async function copiedText(c, expected, suffix = false) {
+  let text;
+  await c.waitUntil(async () => {
+    text = await readClipboard();
+    return suffix ? text.endsWith(expected) : text === expected;
+  }, { timeout: 10000, timeoutMsg: 'Native clipboard did not receive the copied text' });
+  return text;
+}
+
 
 test(
   'ed-uses-os-eol',
@@ -19,43 +51,51 @@ test(
     });
     const [mac, win] = (await c.execute(() => [D.mac, D.win]));
     const eol = win ? '\r\n' : '\n';
-    const cc = mac ? 'Meta' : 'Control';
+    const cc = mac ? Key.Meta : Key.Control;
 
-    await c.keys([')ED <]']);
-    await c.keys([' ls', 'Enter']);
+    await keys(c, ')ED <]');
+    await keys(c, ' ls', Key.Enter);
 
     const edit_trace = await c.$('#ide .ride_win.edit_trace');
     await edit_trace.waitForExist();
+    await waitForEditor(c);
 
-    await c.keys(['A', 'Enter', 'A']);
-    await c.keys([cc, 'a', 'c']);
-    await c.keys(['Escape']);
-    text = await app.electron.clipboard.readText();
+    await keys(c, 'A', Key.Enter, 'A');
+    await keys(c, cc, 'a');
+    await keys(c, cc, 'c');
+    await keys(c, Key.Escape);
+    text = await copiedText(c, `A${eol}A`);
     t.is(text, `A${eol}A`);
 
-    await c.pause(1000);
+    await edit_trace.waitForExist({ reverse: true });
+    await waitForPrompt(c);
 
     const ride_win = await c.$('#ide .ride_win');
     await ride_win.waitForExist();
 
-    await c.keys([')ED f', 'Enter']);
+    await keys(c, ')ED f', Key.Enter);
     await edit_trace.waitForExist();
+    await waitForEditor(c);
 
-    await c.keys(['Enter', '2']);
-    await c.keys([cc, 'a', 'c']);
-    await c.keys(['Escape']);
-    text = await app.electron.clipboard.readText();
+    await keys(c, Key.Enter, '2');
+    await keys(c, cc, 'a');
+    await keys(c, cc, 'c');
+    await keys(c, Key.Escape);
+    text = await copiedText(c, `f${eol}2`);
     t.is(text, `f${eol}2`);
 
-    await c.pause(1000);
+    await edit_trace.waitForExist({ reverse: true });
+    await waitForPrompt(c);
 
-    await c.keys([')ED f', 'Enter']);
+    await keys(c, ')ED f', Key.Enter);
 
     await edit_trace.waitForExist();
+    await waitForEditor(c);
 
-    await c.keys([cc, 'a', 'c']);
-    await c.keys(['Escape']);
-    text = await app.electron.clipboard.readText();
+    await keys(c, cc, 'a');
+    await keys(c, cc, 'c');
+    await keys(c, Key.Escape);
+    text = await copiedText(c, ` f${eol} 2`);
     t.is(text, ` f${eol} 2`);
   },
 );
@@ -71,37 +111,38 @@ test(
       D.prf.pfkeys(pf);
       return D.mac;
     }));
-    const cc = mac ? 'Meta' : 'Control';
+    const cc = mac ? Key.Meta : Key.Control;
     let text;
 
-    await c.keys([')ED f', 'Enter']);
+    await keys(c, ')ED f', Key.Enter);
 
     const edit_trace = await c.$('#ide .ride_win.edit_trace');
     await edit_trace.waitForExist();
-
-    await c.execute(() => D.wins[1].me_ready);
-    await c.keys(['Enter', 'ab']);
-    await c.keys(['F2']);
-    await c.keys([cc, 'a', 'c']);
-    await c.keys(['Escape']);
-    text = await app.electron.clipboard.readText();
+    await waitForEditor(c);
+    await keys(c, Key.Enter, 'ab');
+    await keys(c, Key.F2);
+    await keys(c, cc, 'a');
+    await keys(c, cc, 'c');
+    await keys(c, Key.Escape);
+    text = await copiedText(c, '⍝  ab', true);
     t.is(text.slice(-5), '⍝  ab');
 
+    await edit_trace.waitForExist({ reverse: true });
+    await waitForPrompt(c);
     await c.execute(() => { D.prf.floating(1) });
-    await c.pause(100);
     const whs = await c.getWindowHandles();
-    await c.keys([')ED g', 'Enter']);
-    await c.pause(100);
-    await c.pause(2000);
+    await keys(c, ')ED g', Key.Enter);
+    await c.waitUntil(async () => (await c.getWindowHandles()).some(h => !whs.includes(h)), { timeout: 10000, timeoutMsg: 'Floating editor window did not open' });
     const [wh] = (await c.getWindowHandles()).filter(x => !whs.includes(x));
     await c.switchToWindow(wh);
     await c.waitUntil(async () => {
-      return await c.execute(() => D.ide.wins[1] && D.ide.wins[1].meIsReady)
+      return await c.execute(() => Object.values(D.ide.wins).some(w => w.meIsReady && w !== D.ide.wins[0]))
     }, { timeout: 10000 });
-    await c.keys(['Enter', 'cd', 'F2']);
-    await c.keys([cc, 'a', 'c']);
-    await c.keys(['Escape']);
-    text = await app.electron.clipboard.readText();
+    await keys(c, Key.Enter, 'cd', Key.F2);
+    await keys(c, cc, 'a');
+    await keys(c, cc, 'c');
+    await keys(c, Key.Escape);
+    text = await copiedText(c, '⍝  cd', true);
     t.is(text.slice(-5), '⍝  cd');
   },
 );
@@ -121,21 +162,26 @@ test(
       return D.mac;
     });
 
-    await c.keys(["⎕FIX ':Namespace Sol' '∇ foo' '⍝' '⍝' '⍝' '⍝' '∇' ':EndNamespace'", 'Enter']);
-    await c.keys(['Sol.foo', 'Control', 'Enter', 'Control']);
+    await executeExpression(c, "⎕FIX ':Namespace Sol' '∇ foo' '⍝' '⍝' '⍝' '⍝' '∇' ':EndNamespace'");
+    await waitForPrompt(c);
+    await keys(c, 'Sol.foo');
+    await keys(c, Key.Control, Key.Enter);
 
     const edit_trace = await c.$('#ide .ride_win.edit_trace');
     await edit_trace.waitForExist();
+    await waitForEditor(c);
 
-    await c.keys(['F2']);
-    await c.pause(500);
-    await c.keys(['Escape']);
+    await keys(c, Key.F2);
+    await c.waitUntil(async () => c.execute(() => Object.values(D.ide.wins).some(w => w.me && w.me.getModel().getAllDecorations().some(d => d.options.glyphMarginClassName === 'breakpoint'))), { timeout: 10000, timeoutMsg: 'Breakpoint decoration did not appear' });
+    await keys(c, Key.Escape);
 
     const ride_win = await c.$('#ide .ride_win');
     await ride_win.waitForExist();
 
-    await c.keys(["⎕STOP 'Sol.foo'", 'Enter']);
-    await c.pause(500);
+    await edit_trace.waitForExist({ reverse: true });
+    await waitForPrompt(c);
+    await keys(c, "⎕STOP 'Sol.foo'", Key.Enter);
+    await c.waitUntil(async () => (await c.execute(sessionLastLines, 2))[0] === '1', { timeout: 10000 });
     const r = await c.execute(sessionLastLines, 2);
     t.is(r[0], '1');
   },
@@ -156,21 +202,26 @@ test(
       return D.mac;
     });
 
-    await c.keys(["⎕FIX ':Namespace Sol' '∇ foo' '⍝' '⍝' '⍝' '⍝' '∇' ':EndNamespace'", 'Enter']);
-    await c.keys(['Sol.foo', 'Control', 'Enter', 'Control']);
+    await executeExpression(c, "⎕FIX ':Namespace Sol' '∇ foo' '⍝' '⍝' '⍝' '⍝' '∇' ':EndNamespace'");
+    await waitForPrompt(c);
+    await keys(c, 'Sol.foo');
+    await keys(c, Key.Control, Key.Enter);
 
     const edit_trace = await c.$('#ide .ride_win.edit_trace');
     await edit_trace.waitForExist();
+    await waitForEditor(c);
 
-    await c.keys(['F2']);
-    await c.pause(500);
-    await c.keys(['Escape']);
+    await keys(c, Key.F2);
+    await c.waitUntil(async () => c.execute(() => Object.values(D.ide.wins).some(w => w.me && w.me.getModel().getAllDecorations().some(d => d.options.glyphMarginClassName === 'breakpoint'))), { timeout: 10000, timeoutMsg: 'Breakpoint decoration did not appear' });
+    await keys(c, Key.Escape);
 
     const ride_win = await c.$('#ide .ride_win');
     await ride_win.waitForExist();
 
-    await c.keys(["⎕STOP 'Sol.foo'", 'Enter']);
-    await c.pause(500);
+    await edit_trace.waitForExist({ reverse: true });
+    await waitForPrompt(c);
+    await keys(c, "⎕STOP 'Sol.foo'", Key.Enter);
+    await c.waitUntil(async () => (await c.execute(sessionLastLines, 2))[0] === '1', { timeout: 10000 });
     const r = await c.execute(sessionLastLines, 2);
     t.is(r[0], '1');
   },

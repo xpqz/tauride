@@ -76,17 +76,27 @@
       else D.abt();
     },
     CAM() {
-      // Stops set in an editor since it was last saved are unknown to the interpreter, so it
-      // doesn't count them; tally them here to add to its report.
-      D.ide.unsavedStops = 0;
-      Object.keys(D.ide.wins).forEach((x) => {
-        const w = D.ide.wins[x];
-        if (!+x || w.tc) return;
-        w.updStops();
-        D.ide.unsavedStops += w.getStops().filter((l) => !w.oStop.includes(l)).length;
+      const { ide } = D;
+      if (ide.clearingStops || !ide.promptType) return undefined;
+      ide.clearingStops = true;
+      const operation = {};
+      ide.clearStopsOperation = operation;
+      const counts = Object.keys(ide.wins).filter((x) => +x)
+        .map((x) => ide.wins[x].countUnsavedStops());
+      return Promise.all(counts).then((values) => {
+        if (ide.clearStopsOperation !== operation || !ide.clearingStops
+          || ide.connected === 0) return;
+        if (!ide.promptType) {
+          ide.clearingStops = false;
+          return;
+        }
+        ide.unsavedStops = values.reduce((sum, count) => sum + count, 0);
+        D.send('ClearTraceStopMonitor', { token: 0 });
+      }).catch((err) => {
+        if (ide.clearStopsOperation !== operation || !ide.clearingStops) return;
+        ide.clearingStops = false;
+        $.err(err.message, 'Clear all trace/stop/monitor');
       });
-      D.send('ClearTraceStopMonitor', { token: 0 });
-      Object.keys(D.ide.wins).forEach((x) => { +x && D.ide.wins[x].execCommand('CBP'); });
     },
     CAW() { D.send('CloseAllWindows', {}); },
     CNC() {

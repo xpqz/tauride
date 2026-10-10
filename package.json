@@ -10,9 +10,12 @@
     "styler": "electron ./utils/style-picker/style-picker.js",
     "css": "grunt less",
     "live-style": "grunt",
-    "test": "ava -s -c=1",
+    "test": "node tools/test-tauri.js",
+    "test:unit": "node --test tests-node/*.js",
     "build": "npm run css && node ./mk",
-    "clean": "node ./mk c"
+    "clean": "node ./mk c",
+    "test:build": "node tools/test-tauri.js --build-only",
+    "test:connection": "node tools/test-tauri.js test/cn.js --match=cn-app-starts-ok --match=cn-fav-*"
   },
   "repository": ".",
   "dependencies": {
@@ -45,8 +48,13 @@
     "less-plugin-glob": "^3.0.0",
     "license-checker": "^25.0.1",
     "rimraf": "^5.0.1",
-    "spectron": "^19.0.0",
     "temp": "^0.9.4",
-    "ws": "^8.13.0"
+    "ws": "^8.13.0",
+    "webdriverio": "9.32.0"
+  },
+  "ava": {
+    "files": [
+      "test/*.js"
+    ]
   }
 }

@@ -29,6 +29,50 @@ with only the `node_modules` trees the pages use) and generates
 Preferences, saved connections and window state live in the same place as
 Electron Ride's (`~/.config/Ride-4.8` on Linux), so the two share them.
 
+## Tests
+
+`npm test` builds the Tauri app and runs the 15 AVA UI cases against its native
+webviews. It requires Node.js 22 or later, the build prerequisites above, and
+Dyalog on PATH. Set `RIDE_TEST_DYALOG` to use a specific interpreter executable.
+
+    npm test
+    npm test -- test/se.js
+    npm run test:connection
+    npm run test:unit
+
+`test:connection` runs the three connection-screen cases that do not need an
+interpreter. `test:unit` runs frontend and harness regressions without a display
+or interpreter, including session, editor, tokenizer, floating-window IPC and
+app lifecycle checks. CI runs these regressions and the connection-screen cases
+under Xvfb on Linux, and compiles the test app on all three platforms. The full
+interpreter suite must run where Dyalog is installed.
+
+The UI runner stages the frontend and builds with Cargo's `ui-tests` feature into
+`src-tauri/target/ui-tests`. This enables a loopback WebDriver server and test-only
+native input commands, and disables single-instance redirection. Ordinary builds
+exclude the automation code. Each test gets a fresh preference directory and an
+app process; normal teardown quits that process and removes its profile. AVA uses
+child processes with a 60-second inactivity timeout. A test-only stdin pipe also
+quits the app and its owned interpreters if a worker terminates abruptly. Inherited
+`RIDE_*` startup settings are cleared. Existing Ride preferences and sessions are
+not used.
+
+Keyboard, clipboard and hover cases use native input because the embedded
+WebDriver's synthetic events do not implement those interactions faithfully.
+They require an unlocked desktop with Tauride focused. macOS also needs
+Accessibility permission for the test binary; the adapter fails with an error
+when permission is absent. Linux needs an X11 session (Xvfb works) and `xclip`;
+Windows reads the clipboard through PowerShell. On Linux, building the native
+input adapter also requires `libxkbcommon-dev`. The suite checks the real OS
+clipboard and therefore changes its contents. Running tests on a locked desktop
+can validate app startup and connection forms, but does not validate native input.
+
+`npm run test:build` builds without running tests. To reuse a test-enabled binary,
+set `RIDE_TEST_BINARY` to its path; this skips the build, so rebuild it after source
+changes. `CARGO_TARGET_DIR` overrides the test build directory and binary lookup.
+Use a separate target directory from ordinary builds. AVA arguments pass through
+`npm test --`, for example `npm test -- test/cn.js --match=cn-start-raw`.
+
 ## Zero-footprint Ride
 
 `node mk zf` writes `_/zf`: the frontend laid out as Dyalog's `RIDEapp`
@@ -106,6 +150,18 @@ first (Ride's `onbeforeunload`), the main window's geometry is saved, and the
 app exits with the main window. `win_op` does what the JS API cannot do to
 another window: run a script in it, print it, toggle its devtools, navigate it.
 
+The main window collects unsaved-stop counts from floating editors before
+requesting a global clear. An editor that closes completes its pending count
+request; an unresponsive editor aborts the operation without changing stops.
+Save replies carry whether the interpreter already explained a failed save,
+so the owning editor can retain its generic error when no explanation exists.
+
+Under Tauri, pasted numbered traditional-function listings are assembled in a
+uniquely named temporary variable in `⎕SE` using bounded input commands. The
+temporary is erased before `⎕FX` fixes the function in the current namespace.
+Replacing or interrupting a transfer schedules cleanup. Losing the connection
+mid-transfer can leave the temporary in the remote interpreter's `⎕SE`.
+
 Two channels connect the webview to Rust:
 
 - **Synchronous**: Ride calls `fs.readFileSync`, `dialog.showMessageBoxSync`
@@ -154,4 +210,3 @@ Not done or not yet checked interactively:
 - The application menu is Ride's HTML menu, not a native one.
 - Drag and drop, printing, and clicking popup-menu items need checking by
   hand.
-- The Electron test suite (spectron) does not run against this build.

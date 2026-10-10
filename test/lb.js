@@ -1,7 +1,7 @@
 const test = require('ava');
-const { sessionLastLines, inWin, tfw } = require('./_utils');
+const { sessionLastLines, inWin, tfw, moveTo } = require('./_utils');
 
-tfw.init({ src: 'lb', RIDE_SPAWN: 'dyalog' });
+tfw.init({ src: 'lb', interpreter: true });
 
 test(
   'lb-show-hide',
@@ -12,11 +12,11 @@ test(
     const lb = await c.$('#lb');
     await lb.waitForExist();
     
-    const lbarVisible = await lb.isDisplayedInViewport();
+    const lbarVisible = await lb.isDisplayed({ withinViewport: true });
     await c.execute(inWin, 0, '<LBR>');
-    t.is(await lb.isDisplayedInViewport(), !lbarVisible);
+    t.is(await lb.isDisplayed({ withinViewport: true }), !lbarVisible);
     await c.execute(inWin, 0, '<LBR>');
-    t.is(await lb.isDisplayedInViewport(), lbarVisible);
+    t.is(await lb.isDisplayed({ withinViewport: true }), lbarVisible);
   },
 );
 
@@ -29,32 +29,27 @@ test(
     const lb = await c.$('#lb');
     await lb.waitForExist();
     
-    // turn on if not already
-    let lbarVisible = await lb.isDisplayedInViewport();
+    let lbarVisible = await lb.isDisplayed({ withinViewport: true });
     if (!lbarVisible) {
       await c.execute(inWin, 0, '<LBR>');
-      lbarVisible = await lb.isDisplayedInViewport();
+      lbarVisible = await lb.isDisplayed({ withinViewport: true });
     }
-    // hover over ⍤
     const lb_paw = await c.$('b=⍤');
-    await lb_paw.moveTo();
-    await c.pause(1000);
-    
+    await moveTo(c, lb_paw);
     const lb_tip_body = await c.$('#lb_tip_body');
     const lb_tip_desc = await c.$('#lb_tip_desc');
-    t.true(await lb_tip_body.isDisplayedInViewport());
+    await lb_tip_body.waitForDisplayed();
+    t.true(await lb_tip_body.isDisplayed({ withinViewport: true }));
     t.is(await lb_tip_desc.getText(), 'JOT DIAERESIS (⍤)');
     
-    // move over tip
     const lb_tip = await c.$('#lb_tip');
-    await lb_tip.moveTo();
-    await c.pause(1000);
-    t.true(await lb_tip.isDisplayedInViewport());
-    // move over separator
+    await moveTo(c, lb_tip);
+    await lb_tip.waitForDisplayed();
+    t.true(await lb_tip.isDisplayed({ withinViewport: true }));
     const lb_nbs = await c.$('b=\xA0');
-    await lb_nbs.moveTo();
-    await c.pause(1000);
-    t.false(await lb_tip.isDisplayedInViewport());
+    await moveTo(c, lb_nbs);
+    await lb_tip.waitForDisplayed({ reverse: true });
+    t.false(await lb_tip.isDisplayed({ withinViewport: true }));
   },
 );
 
@@ -68,6 +63,7 @@ test(
     await lb.waitForExist();
     const lb_power = await c.$('b=⍣');
     await lb_power.click();
+    await c.waitUntil(async () => (await c.execute(sessionLastLines, 1))[0].endsWith('⍣'), { timeout: 10000 });
     const r = await c.execute(sessionLastLines, 1);
     t.is(r[0].slice(-1), '⍣');
   },

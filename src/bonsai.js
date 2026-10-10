@@ -22,7 +22,9 @@
         node.expanded = 1 - !!node.expanded; a.textContent = '+-'[+!!node.expanded];
         nodeElement.className = node.expanded ? '' : 'bt_collapsed';
         if (node.expanded) {
+          const { nodes } = bt;
           bt.childrenCb(node.id, (children) => {
+            if (bt.newNodes || bt.nodes !== nodes || nodes[node.id] !== node) return;
             const selected = a.nextSibling.classList.contains('selected');
             node.children = children;
             children.forEach((c) => { 
@@ -141,7 +143,9 @@
       node.path = path ? `${path}.${node.text}` : node.text;
       if (oldNode && oldNode.text === node.text && oldNode.expanded && node.expandable) {
         bt.pendingCalls += 1;
+        const nodes = bt.newNodes;
         bt.childrenCb(node.id, (children) => {
+          if (bt.newNodes !== nodes || nodes[node.id] !== node) return;
           node.expanded = 1;
           node.children = children;
           children.forEach(c => bt.refreshNode(c, node.path, node.depth + 1));
@@ -182,11 +186,13 @@
     }
 
     requestValueTip(node) {
-      if (node.valueRequested || node.id < 2) return;
       const bt = this;
+      if (bt.newNodes || bt.nodes[node.id] !== node || node.valueRequested || node.id < 2) return;
+      const { nodes } = bt;
       node.valueRequested = 1;
       bt.pendingCalls += 1;
       bt.valueTipCb(node, (x) => {
+        if (bt.newNodes || bt.nodes !== nodes || nodes[node.id] !== node) return;
         node.value = x.tip;
         delete node.valueRequested;
         bt.pendingCalls -= 1;

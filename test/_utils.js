@@ -1,9 +1,22 @@
 const test = require('ava');
-const { Application } = require('spectron');
-const electronPath = require('electron');
-const path = require('path');
-const temp = require('temp');
-const rimraf = require('rimraf');
+const { TauriApplication, resolveDyalog, readClipboard } = require('./_tauri');
+
+exports.resolveDyalog = resolveDyalog;
+exports.readClipboard = readClipboard;
+async function nativeInput(client, command, args) {
+  try {
+    await client.execute((name, options) => window.__TAURI_INTERNALS__.invoke(name, options), command, args);
+  } catch (error) { throw new Error(error.message); }
+}
+exports.keys = async (client, ...keys) => nativeInput(client, 'ui_test_keys', { keys });
+exports.typeText = async (client, text) => exports.keys(client, text);
+exports.moveTo = async (client, element) => {
+  const position = await client.execute((target) => {
+    const rect = target.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  }, element);
+  await nativeInput(client, 'ui_test_move_to', position);
+};
 
 exports.inWin = function (id, s) {
   const w = D.ide.wins[id];
@@ -17,43 +30,14 @@ exports.sessionLastLines = function(n) {
 }
 
 class TFW {
-  constructor() {
-    this.counter = 0;
-  }
-
-  init(options) {
-    const o = options || {};
+  init(options = {}) {
     test.beforeEach(async (t) => {
-      this.counter += 1;
-      const x = t.context;
-      x.userData = temp.mkdirSync('ride');
-      const env = {
-        spectron_temp_dir: x.userData,
-      };
-      o.RIDE_SPAWN && (env.RIDE_SPAWN = o.RIDE_SPAWN);
-      x.app = new Application({
-        path: electronPath,
-        args: ['.'],
-        env,
-        webdriverOptions: {
-          deprecationWarnings: true,
-        },
-        chromeDriverArgs: ['remote-debugging-port=9222'],
-      });
-
-      await x.app.start();
-      const c = x.app.client;
-      await c.waitUntilWindowLoaded();
-      await (await c.$('#splash')).waitForDisplayed({timeout: 10000, reverse: true});
-      if (o.src !== 'cn') await (await c.$('#ide .lm_tab.lm_active')).waitForExist();
+      t.context.app = new TauriApplication(options);
+      await t.context.app.start();
+      t.context.userData = t.context.app.userData;
     });
-
     test.afterEach.always(async (t) => {
-      const x = t.context;
-      if (x.app && x.app.isRunning()) {
-        await x.app.stop();
-      }
-      rimraf.sync(x.userData);
+      if (t.context.app) await t.context.app.stop();
     });
   }
 }
