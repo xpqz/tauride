@@ -55,7 +55,22 @@ pub fn kill_all<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(all(windows, feature = "ui-tests"))]
+pub fn kill_all<R: Runtime>(app: &AppHandle<R>) {
+    for (pid, _) in app.state::<Procs>().running.lock().unwrap().values() {
+        match std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output()
+        {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => eprintln!("tauride: cannot end test interpreter {pid}: {} {}",
+                output.status, String::from_utf8_lossy(&output.stderr)),
+            Err(e) => eprintln!("tauride: cannot end test interpreter {pid}: {e}"),
+        }
+    }
+}
+
+#[cfg(all(not(unix), not(all(windows, feature = "ui-tests"))))]
 pub fn kill_all<R: Runtime>(_app: &AppHandle<R>) {}
 
 #[derive(Deserialize)]

@@ -6,6 +6,8 @@ mod ssh;
 mod sync;
 mod win;
 mod winstate;
+#[cfg(feature = "ui-tests")]
+mod ui_tests;
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -17,6 +19,23 @@ const SHIM: &str = include_str!("../../tauri/shim.js");
 #[tauri::command]
 fn log(level: String, msg: String) {
     eprintln!("[webview {level}] {msg}");
+}
+
+#[cfg(feature = "ui-tests")]
+#[tauri::command]
+fn ui_test_window_state<R: Runtime>(app: AppHandle<R>, label: String) -> Result<Value, String> {
+    let w = app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?;
+    let size = w.inner_size().map_err(|e| e.to_string())?;
+    Ok(json!({
+        "label": label,
+        "title": w.title().map_err(|e| e.to_string())?,
+        "visible": w.is_visible().map_err(|e| e.to_string())?,
+        "minimized": w.is_minimized().map_err(|e| e.to_string())?,
+        "focused": w.is_focused().map_err(|e| e.to_string())?,
+        "devtoolsOpen": w.is_devtools_open(),
+        "width": size.width,
+        "height": size.height,
+    }))
 }
 
 /// shell.openExternal: hand a URL or path to the desktop's opener.
@@ -173,7 +192,11 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "ui-tests")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    #[cfg(not(feature = "ui-tests"))]
+    let builder = builder
         // One process for every session: starting Tauride again opens a new
         // session window in the running one, as with VS Code.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -183,7 +206,8 @@ pub fn run() {
                     eprintln!("tauride: cannot open a session window: {e}");
                 }
             });
-        }))
+        }));
+    builder
         .plugin(ride_plugin())
         .register_uri_scheme_protocol("ridefile", |_ctx, req| local_file(&req))
         .register_uri_scheme_protocol("ridesync", |ctx, req| {
@@ -212,6 +236,12 @@ pub fn run() {
         .manage(proc::Procs::default())
         .manage(ssh::Ssh::default())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(feature = "ui-tests")]
+            ui_test_window_state,
+            #[cfg(feature = "ui-tests")]
+            ui_tests::ui_test_keys,
+            #[cfg(feature = "ui-tests")]
+            ui_tests::ui_test_move_to,
             log,
             open_url,
             win::win_op,
@@ -236,6 +266,8 @@ pub fn run() {
         ])
         .on_menu_event(|app, e| menu::on_event(app, e.id().as_ref()))
         .setup(|app| {
+            #[cfg(feature = "ui-tests")]
+            ui_tests::guard_parent(app.handle().clone());
             let main = win::session_window(app, "main")?;
             if app.state::<winstate::WinState>().get()["devTools"].as_bool().unwrap_or(false) {
                 main.open_devtools();

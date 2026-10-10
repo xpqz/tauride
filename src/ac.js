@@ -167,7 +167,7 @@
         const c = ac.position.column;
         const manual = me.tabComplete;
         const swc = me.getContribution('editor.contrib.suggestController');
-        if (D.prf.autocompletion() === 'shell' && manual) {
+        if (D.prf.autocompletion() === 'shell' && manual && x.options.length) {
           const [, prefix] = x.options.join(' ').match(prefixRE) || [];
           if (prefix && prefix.length > x.skip) {
             const endCol = (c - x.skip) + prefix.length;

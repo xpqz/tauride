@@ -6,6 +6,7 @@
       const pending = {};
       this.pending = pending;
       const pendingValueTip = {};
+      let valueTipToken = 0;
       this.pendingValueTip = pendingValueTip;
       this.dom = I.wse;
       this.dom.hidden = 0;
@@ -13,21 +14,25 @@
       this.VT_MAX_WIDTH = 100;
       this.bt = new D.Bonsai(this.dom, {
         children(id, callback) {
-          pending[id] = callback.bind(this);
-          D.send('TreeList', { nodeId: id });
+          // TreeList replies identify only the node, so keep one request per node in flight.
+          const requests = pending[id] || (pending[id] = []);
+          requests.push(callback.bind(this));
+          requests.length === 1 && D.send('TreeList', { nodeId: id });
         },
         click(path) {
           D.send('Edit', { win: 0, pos: 0, text: path });
         },
         valueTip(node, callback) {
+          const token = valueTipToken;
+          valueTipToken += 1;
           const valueTipRequest = {
             handler: callback.bind(this),
-            timeoutId: setTimeout((n) => {
-              wse.valueTip(n.id, { tip: [''] });
-            }, 1000, node),
+            timeoutId: setTimeout(() => {
+              wse.valueTip(token, { tip: [''] });
+            }, 1000),
           };
-          pendingValueTip[node.id] = valueTipRequest;
-          D.ide.getValueTip('wse', node.id, { // ask interpreter
+          pendingValueTip[token] = valueTipRequest;
+          D.ide.getValueTip('wse', token, { // ask interpreter
             win: 0,
             line: node.path,
             pos: 0,
@@ -43,8 +48,11 @@
     }
 
     replyTreeList(x) { // handle response from interpreter
-      const f = this.pending[x.nodeId];
-      if (!f) return;
+      const requests = this.pending[x.nodeId];
+      if (!requests) return;
+      const f = requests.shift();
+      if (requests.length) D.send('TreeList', { nodeId: x.nodeId });
+      else delete this.pending[x.nodeId];
       f((x.nodeIds || []).map((c, i) => ({
         // x.classes uses constants from http://help.dyalog.com/17.0/Content/Language/System%20Functions/nc.htm
         id: c || `leaf_${x.nodeId}_${i}`,
@@ -52,17 +60,16 @@
         expandable: !!c,
         icon: `${x.classes[i] < 0 ? 9.1 : Math.abs(x.classes[i])}`.replace('.', '_'),
       })));
-      delete this.pending[x.nodeId];
     }
 
     refresh() {
       this.bt.refresh();
     }
 
-    valueTip(nodeId, x) { // handle response from interpreter
-      const valueTipRequest = this.pendingValueTip[nodeId];
+    valueTip(token, x) { // handle response from interpreter
+      const valueTipRequest = this.pendingValueTip[token];
       if (!valueTipRequest) return;
-      delete this.pendingValueTip[nodeId];
+      delete this.pendingValueTip[token];
       if (valueTipRequest.timeoutId) {
         clearTimeout(valueTipRequest.timeoutId);
       }

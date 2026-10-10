@@ -276,21 +276,14 @@ D.Ed.prototype = {
   lineNumFmt() { // gutter formatter; inside a script, lines of a tradfn also get a function-relative number
     const ed = this;
     if (!D.prf.lineNums()) return 'off';
-    let ver; let rel;
+    let ver; let cachedModel; let rel;
     return (l) => {
       const model = ed.me && ed.me.getModel();
       if (!ed.isScript || !model) return `[${l - 1}]`;
-      if (ver !== model.getVersionId()) {
+      if (cachedModel !== model || ver !== model.getVersionId()) {
+        cachedModel = model;
         ver = model.getVersionId();
-        rel = [];
-        let k = -1;
-        for (let i = 1, n = model.getLineCount(); i <= n; i++) {
-          const isDel = /^\s*∇/.test(model.getLineContent(i));
-          if (k < 0 && isDel) k = 0;
-          else if (k >= 0) k += 1;
-          rel[i] = k;
-          if (k > 0 && isDel) k = -1;
-        }
+        rel = D.aplTradfnLines(model);
       }
       return rel[l] >= 0 ? `[${l - 1}] [${rel[l]}]` : `[${l - 1}]`;
     };
@@ -509,12 +502,11 @@ D.Ed.prototype = {
   insert(ch) {
     this.isReadOnly || this.me.trigger('editor', 'type', { text: ch });
   },
-  saved(err) {
+  saved(err, explained = false) {
     const ed = this;
     if (err) {
       ed.isClosing = 0;
-      // the interpreter already explained the failure in its own dialog
-      (ed.ide.dialogCount || 0) === ed.dialogCount && $.err('Cannot save changes');
+      !explained && $.err('Cannot save changes');
     } else {
       ed.oText = ed.me.getValue();
       ed.oStop = ed.getStops(); // saved stops are now known to the interpreter
@@ -648,7 +640,8 @@ D.Ed.prototype = {
     const c = me.getPosition();
     const model = me.getModel();
     const text = model.getLineContent(c.lineNumber);
-    const pos = inEmptySpace ? text.length + 1 : D.util.ucLength(text.slice(0, c.column - 1));
+    const convert = inEmptySpace || (this.tc && c.column === 1);
+    const pos = convert ? text.length + 1 : D.util.ucLength(text.slice(0, c.column - 1));
     D.ide.Edit({ win: this.id, pos, text });
   },
   EDA() {
@@ -678,7 +671,6 @@ D.Ed.prototype = {
       ed.isClosing && D.send('CloseWindow', { win: ed.id });
       return;
     }
-    ed.dialogCount = ed.ide.dialogCount || 0;
     D.send('SaveChanges', {
       win: ed.id,
       text: v.split(me.getModel().getEOL()),
@@ -723,7 +715,8 @@ D.Ed.prototype = {
     if (ed.isReadOnly) return;
     const ll = model.getLineCount();
     const o = me.getSelections(); // o:original selections
-    const sels = o.length === 1 && o[0].isEmpty()
+    const whole = o.length === 1 && o[0].isEmpty();
+    const sels = whole
       ? [new monaco.Selection(1, 1, ll, model.getLineContent(ll).length + 1)] : o;
 
     const a = sels.map((sel) => { // a:info about individual selections
@@ -739,6 +732,7 @@ D.Ed.prototype = {
       // c:column index of ⍝; a ⍝ before the selection start can't be padded within the edit range
       const c = u.map((x, i) => {
         const ci = x.indexOf('⍝');
+        if (whole && /^\s*$/.test(l[i].slice(0, ci))) return -1;
         return i === 0 && ci < p.column - 1 ? -1 : ci;
       });
       return {
@@ -770,6 +764,15 @@ D.Ed.prototype = {
   BH() { D.send('ContinueTrace', { win: this.id }); },
   RM() { D.send('Continue', { win: this.id }); },
   MA() { D.send('RestartThreads', {}); },
+  countUnsavedStops() {
+    this.updStops();
+    return this.tc ? 0 : this.getStops().filter((l) => !this.oStop.includes(l)).length;
+  },
+  clearAllStops() {
+    this.stop.clear();
+    this.setStop();
+    this.oStop = [];
+  },
   CBP() { // Clear stops for this object
     const ed = this;
     ed.stop.clear();

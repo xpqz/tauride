@@ -150,11 +150,9 @@
 
   // indent units follow the Auto-indent preferences; (vim calls the first "sw" for "shift width")
   const swPref = () => (D.prf.indent() > 0 ? D.prf.indent() : 4);
-  const swmPref = () => (D.prf.indentMethods() >= 0 ? D.prf.indentMethods() : 2);
+  const swmPref = () => (D.prf.indentMethods() >= 0 ? D.prf.indentMethods() : swPref());
   let sw = swPref();
   let swm = swmPref();
-  D.prf.indent(() => { sw = swPref(); });
-  D.prf.indentMethods(() => { swm = swmPref(); });
 
   const aplTokens = {
     getInitialState: () => new State(1, [{
@@ -544,8 +542,8 @@
                   if (la.isAplan) {
                     addToken(offset, 'identifier.local.aplan');
                   } else {
-                    offset += sm.slice(x.length).match(/^\s*:/)[0].length;
                     addToken(offset, 'meta.label');
+                    offset += sm.slice(x.length).match(/^\s*:/)[0].length;
                   }
                 } else if (dd || (h.vars && h.vars.includes(x))) {
                   [x] = sm.match(RegExp(`(${D.syntax.name}\\.?)+`));
@@ -649,10 +647,9 @@
       h.l += 1;
       lt.tokens = t.tokens.slice();
       h.h = t.endState.clone();
-      // Session lines are entered one at a time, so a bracket still open at the end of
-      // the line can never be closed. Mark it as an error, except a bare trailing
-      // opener, which may begin a multi-line array.
-      const unclosed = h.h.a.filter((e) => e.col != null && !h1.a.includes(e)
+      // Range IDs survive stack-entry cloning; only new openers belong to this line.
+      // A bare trailing opener may begin a multiline array.
+      const unclosed = h.h.a.filter((e) => e.col != null && e.r > h1.rseq
         && !/^\s*(?:⍝.*)?$/.test(line.slice(e.col + 1)));
       unclosed.forEach((e) => {
         const i = lt.tokens.reduce((r, x, j) => (x.startIndex <= e.col ? j : r), 0);
@@ -668,7 +665,10 @@
     },
   };
 
-  const getState = (m, l) => m._tokenization._tokenizationStateStore._beginState[l];
+  const getState = (m, l) => {
+    m.forceTokenization(l + 1);
+    return m._tokenization._tokenizationStateStore._beginState[l];
+  };
   // True when a manual completion request would find nothing to offer, because the word left of
   // the cursor is shorter than the autocompletion threshold. Monaco would then show "No suggestions."
   D.acBelowLimit = (me) => {
@@ -1055,7 +1055,7 @@
   const aplFormat = {
     formatLines(model, range) {
       const from = range.startLineNumber || 1;
-      const to = range.endLineNumber || model._tokens._lineTokens.length;
+      const to = range.endLineNumber || model.getLineCount();
       const edits = [];
       for (let l = from; l <= to; l++) {
         const s = model.getLineContent(l);
@@ -1097,6 +1097,25 @@
     },
   };
   D.Tokenizer = aplTokens;
+  D.aplTradfnLines = (model) => {
+    const rel = [];
+    let state = aplanTokens.getInitialState();
+    let k = -1;
+    for (let i = 1; i <= model.getLineCount(); i++) {
+      const line = model.getLineContent(i);
+      const result = aplTokens.tokenize(line, state);
+      state = result.endState;
+      const col = line.search(/\S/);
+      const isDel = /^\s*∇/.test(line) && result.tokens.some((t) => (
+        t.startIndex === col && t.scopes === 'identifier.tradfn.apl'
+      ));
+      if (k < 0 && isDel) k = 0;
+      else if (k >= 0) k += 1;
+      rel[i] = k;
+      if (k > 0 && isDel) k = -1;
+    }
+    return rel;
+  };
   const acProviders = [];
   D.mop.then(() => {
     const ml = monaco.languages;
@@ -1134,6 +1153,17 @@
     ml.registerDocumentFormattingEditProvider('apl-session', aplFormat);
     ml.registerDocumentRangeFormattingEditProvider('apl-session', aplFormat);
     ml.registerOnTypeFormattingEditProvider('apl-session', aplFormat);
+
+    const updateIndent = () => {
+      sw = swPref();
+      swm = swmPref();
+      // Re-registering invalidates Monaco's cached states in every open model.
+      ml.setTokensProvider('apl', aplTokens);
+      ml.setTokensProvider('aplan', aplanTokens);
+      ml.setTokensProvider('apl-session', aplSessionTokens);
+    };
+    D.prf.indent(updateIndent);
+    D.prf.indentMethods(updateIndent);
 
     const ac = aplCompletions(D.prf.prefixKey());
     acProviders.push(ml.registerCompletionItemProvider('apl', ac));

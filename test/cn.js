@@ -1,20 +1,28 @@
 const test = require('ava');
-const  { tfw } = require('./_utils');
+const { tfw, resolveDyalog } = require('./_utils');
 
 tfw.init({ src: 'cn' });
+
+async function selectValue(c, selector, value) {
+  await c.execute((select, choice) => {
+    if (!Array.from(select.options).some(option => option.value === choice)) throw new Error(`Missing connection option: ${choice}`);
+    select.value = choice;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }, await c.$(selector), value);
+}
+
 
 test(
   'cn-app-starts-ok',
   async (t) => {
     const { app } = t.context;
-    await app.client.waitUntilWindowLoaded();
-    const win = app.browserWindow;
-    t.is(await app.client.getWindowCount(), 3);
-    t.false(await win.isMinimized());
-    t.false(await win.isDevToolsOpened());
-    t.true(await win.isVisible());
-    t.true.skip(await win.isFocused());
-    const { width, height } = await win.getBounds();
+    const windows = await app.getWindowState();
+    const win = windows.find(w => w.label === 'main');
+    t.truthy(win);
+    t.false(win.minimized);
+    t.false(win.devtoolsOpen);
+    t.true(win.visible);
+    const { width, height } = await app.client.getWindowRect();
     t.true(width > 0);
     t.true(height > 0);
   },
@@ -47,22 +55,25 @@ test(
     const { app } = t.context;
     const c = app.client;
 
+    await (await c.$('#cn_neu')).click();
+    await (await c.$('#cn_fav_name')).setValue('myFav');
     const cln = await c.$('#cn_cln');
     await cln.click();
 
     const fav_name = await c.$('#cn_fav_name');
-    const favs = await c.$('#cn_favs .list_sel .name');
+    let favs = await c.$('#cn_favs .list_sel .name');
 
-    t.is(await fav_name.getValue(), '(copy)');
+    t.is(await fav_name.getValue(), 'myFav (copy)');
     await favs.waitForExist();
-    t.is(await favs.getText(), '(copy)');
+    t.is(await favs.getText(), 'myFav (copy)');
     await fav_name.setValue('myCopy');
     t.is(await favs.getText(), 'myCopy');
 
     await cln.click();
-    t.is(await fav_name.getValue(), 'myCopy(copy)');
+    t.is(await fav_name.getValue(), 'myCopy (copy)');
+    favs = await c.$('#cn_favs .list_sel .name');
     await favs.waitForExist();
-    t.is(await favs.getText(), 'myCopy(copy)');
+    t.is(await favs.getText(), 'myCopy (copy)');
   },
 );
 
@@ -77,12 +88,16 @@ test(
     await cn_neu.click();
 
     const cn_type = await c.$('#cn_type');
-    await cn_type.selectByVisibleText('Start');
+    await selectValue(c, '#cn_type', 'start');
     t.is(await cn_type.getValue(), 'start');
 
     const cn_subtype = await c.$('#cn_subtype');
-    await cn_subtype.selectByVisibleText('Local');
+    await selectValue(c, '#cn_subtype', 'raw');
     t.is(await cn_subtype.getValue(), 'raw');
+
+    const executable = resolveDyalog();
+    await selectValue(c, '#cn_exes', '');
+    await (await c.$('#cn_exe')).setValue(executable);
 
     const cn_go = await c.$('#cn_go');
     await cn_go.click();

@@ -1,5 +1,5 @@
 {
-  const pm = ('die execCommand focus insert open processAutocompleteReply prompt saved setTC stateChanged' +
+  const pm = ('clearAllStops die execCommand focus insert open processAutocompleteReply prompt saved setTC stateChanged' +
     ' update zoom ReplyFormatCode SetHighlightLine ValueTip').split(' ');
   D.IPC_Client = function IPCClient(winId) {
     // start IPC client
@@ -22,6 +22,10 @@
       });
       // An editor may have closed by the time a message for it arrives.
       pm.forEach(k => rm.on(k, ([id, ...x]) => { const w = D.ide.wins[id]; w && w[k](...x); }));
+      rm.on('countUnsavedStops', ([id, request]) => {
+        const w = D.ide.wins[id];
+        rm.emit('clearAllStopsReply', [id, request, w ? w.countUnsavedStops() : 0]);
+      });
       rm.on('caption', (c) => { D.ide.caption = c; });
       rm.on('close', ([id]) => {
         D.ide.wins[id].close();
@@ -183,6 +187,14 @@
         D.pwins.push(wp);
         D.IPC_LinkEditor();
       });
+      srv.on('clearAllStopsReply', ([id, request, count]) => {
+        const w = D.ide.wins[id];
+        w && w.finishClearStops && w.finishClearStops(request, count);
+      });
+      srv.on('socket.disconnected', (socket) => {
+        [...D.pwins, ...Object.values(D.ide.wins)]
+          .filter((w) => w.socket === socket).forEach((w) => w.cancelClearStops());
+      });
       srv.on('Edit', data => D.ide.Edit(data));
       srv.on('focusedWin', (id) => {
         const w = D.ide.wins[id];
@@ -236,7 +248,7 @@
       D.IPC_CreateWindow(pe.editorOpts.id);
       return;
     }
-    if (wp.id > 0) wp = Object.assign(new D.IPC_WindowProxy(), wp);
+    if (wp.id > 0) wp = Object.assign(new D.IPC_WindowProxy(), wp, { pendingClearStops: null });
     const w = D.wm.get(wp.bwId);
     // Size and place the window before showing it, so the editor is laid out once.
     if (D.prf.editWinsRememberPos()) w.show();
@@ -267,8 +279,32 @@
   };
   D.IPC_WindowProxy.prototype = {
     emit(f, ...x) { D.ipc.server.emit(this.socket, f, [this.id, ...x]); },
+    countUnsavedStops() {
+      D.clearStopsSequence = (D.clearStopsSequence || 0) + 1;
+      const request = D.clearStopsSequence;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pendingClearStops = null;
+          reject(new Error('An editor did not respond to the clear request'));
+        }, 5000);
+        this.pendingClearStops = { request, resolve, timer };
+        this.emit('countUnsavedStops', request);
+      });
+    },
+    finishClearStops(request, count) {
+      const pending = this.pendingClearStops;
+      if (!pending || pending.request !== request) return;
+      clearTimeout(pending.timer);
+      this.pendingClearStops = null;
+      pending.resolve(count);
+    },
+    cancelClearStops() {
+      const pending = this.pendingClearStops;
+      if (pending) this.finishClearStops(pending.request, 0);
+    },
     hasFocus() { return this === D.ide.focusedWin; },
     close() {
+      this.cancelClearStops();
       if (this === D.pwins[0] && D.prf.editWinsRememberPos()) {
         D.wm.get(this.bwId).contentBounds()
           .then((b) => D.prf.editWins(Object.assign(D.prf.editWins(), b)));
