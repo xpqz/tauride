@@ -33,14 +33,14 @@ D.Ed = function Ed(ide, opts) { // constructor
   const me = monaco.editor.create(ed.dom.querySelector('.ride_win_me'), {
     acceptSuggestionOnCommitCharacter: true,
     acceptSuggestionOnEnter: 'off',
-    autoClosingBrackets: !!D.prf.autoCloseBrackets(),
+    autoClosingBrackets: D.prf.autoCloseBrackets() ? 'always' : 'never',
     automaticLayout: false, // laid out below, a frame after each resize
-    autoIndent: D.prf.indent() >= 0,
+    autoIndent: D.prf.indent() >= 0 ? 'full' : 'none',
     detectIndentation: false,
     indentSize: D.prf.indent() > 0 ? D.prf.indent() : 4,
     tabSize: D.prf.indent() > 0 ? D.prf.indent() : 4,
     insertSpaces: true,
-    'bracketPairColorization.enabled': false,
+    bracketPairColorization: { enabled: false },
     contextmenu: false,
     cursorStyle: D.prf.blockCursor() ? 'block' : 'line',
     cursorBlinking: D.prf.cursorBlinking(),
@@ -56,7 +56,7 @@ D.Ed = function Ed(ide, opts) { // constructor
     language: 'apl',
     lineHeight: fs + 2,
     lineNumbers: ed.lineNumFmt(),
-    matchBrackets: !!D.prf.matchBrackets(),
+    matchBrackets: D.prf.matchBrackets() ? 'always' : 'never',
     minimap: {
       enabled: D.prf.minimapEnabled(),
       renderCharacters: D.prf.minimapRenderCharacters(),
@@ -66,7 +66,7 @@ D.Ed = function Ed(ide, opts) { // constructor
     quickSuggestions: D.prf.autocompletion() === 'classic',
     quickSuggestionsDelay: D.prf.autocompletionDelay(),
     renderLineHighlight: D.prf.renderLineHighlight(),
-    renderIndentGuides: false,
+    guides: { indentation: false },
     scrollBeyondLastLine: false,
     selectionHighlight: D.prf.selectionHighlight(),
     snippetSuggestions: D.prf.snippetSuggestions() ? 'bottom' : 'none',
@@ -75,7 +75,7 @@ D.Ed = function Ed(ide, opts) { // constructor
     showFoldingControls: 'always',
     unicodeHighlight: { ambiguousCharacters: false },
     useTabStops: false,
-    wordBasedSuggestions: false,
+    wordBasedSuggestions: 'off',
     wordSeparators: D.wordSeparators,
     unusualLineTerminators: 'off', // iss646: Prevent message prompt about unusual line endings
   });
@@ -515,7 +515,9 @@ D.Ed.prototype = {
   },
   close() {
     if (D.ide.floating) {
-      this.me.getModel().dispose();
+      const model = this.me.getModel();
+      this.me.dispose();
+      model.dispose();
       delete D.ide.wins[this.id];
       this.container && this.container.close();
       !D.ide.gl.root.contentItems.length && D.wm.current().hide();
@@ -532,14 +534,14 @@ D.Ed.prototype = {
   },
   getDocument() { return this.dom.ownerDocument; },
   refresh() { },
-  autoCloseBrackets(x) { this.me.updateOptions({ autoClosingBrackets: x }); },
+  autoCloseBrackets(x) { this.me.updateOptions({ autoClosingBrackets: x ? 'always' : 'never' }); },
   indent(x) {
-    this.me.updateOptions({ autoIndent: x >= 0 });
+    this.me.updateOptions({ autoIndent: x >= 0 ? 'full' : 'none' });
     const sw = D.prf.indent() > 0 ? D.prf.indent() : 4;
     this.me.updateOptions({ indentSize: sw, tabSize: sw });
   },
   fold(x) { this.me.updateOptions({ folding: this.isCode && !!x }); },
-  matchBrackets(x) { this.me.updateOptions({ matchBrackets: !!x }); },
+  matchBrackets(x) { this.me.updateOptions({ matchBrackets: x ? 'always' : 'never' }); },
   minimapEnabled(x) { this.me.updateOptions({ minimap: { enabled: !!x } }); },
   minimapRenderCharacters(x) { this.me.updateOptions({ minimap: { renderCharacters: !!x } }); },
   minimapShowSlider(x) { this.me.updateOptions({ minimap: { showSlider: x } }); },
@@ -682,7 +684,7 @@ D.Ed.prototype = {
   TL(me) { // toggle localisation
     const name = D.ide.cword(me);
     const model = me.getModel();
-    const getState = (l) => model._tokenization._tokenizationStateStore._beginState[l];
+    const getState = (l) => D.aplState(model, l);
     if (!name) return;
     const l0 = me.getPosition().lineNumber;
     const ta = getState(l0 - 1).a.map((x) => x.t);

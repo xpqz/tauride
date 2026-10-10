@@ -30,9 +30,7 @@ const J = {};
       (J[u] = J[u] || {})[v] = e;
     }
   }
-  D.mop = new Promise((resolve, reject) => {
-    amdRequire(['vs/editor/editor.main'], resolve, reject);
-  });
+  D.mop = Promise.resolve(window.monaco);
   D.zoom2fs = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     16, 17, 18, 19, 20, 22, 24, 26, 28, 32, 36, 42, 48];
   if (typeof nodeRequire !== 'undefined') {

@@ -665,10 +665,26 @@
     },
   };
 
-  const getState = (m, l) => {
-    m.forceTokenization(l + 1);
-    return m._tokenization._tokenizationStateStore._beginState[l];
+  const stateCache = new WeakMap();
+  let stateGeneration = 0;
+  const getState = (model, line) => {
+    const providers = { apl: aplTokens, aplan: aplanTokens, 'apl-session': aplSessionTokens };
+    const provider = providers[model.getLanguageId()] || aplTokens;
+    let cache = stateCache.get(model);
+    if (!cache || cache.version !== model.getVersionId() || cache.generation !== stateGeneration
+      || cache.provider !== provider) {
+      cache = { version: model.getVersionId(), generation: stateGeneration,
+        provider, states: [provider.getInitialState()] };
+      stateCache.set(model, cache);
+    }
+    const target = Math.min(Math.max(line, 0), model.getLineCount());
+    while (cache.states.length <= target) {
+      const i = cache.states.length;
+      cache.states.push(provider.tokenize(model.getLineContent(i), cache.states[i - 1]).endState);
+    }
+    return cache.states[target];
   };
+  D.aplState = getState;
   // True when a manual completion request would find nothing to offer, because the word left of
   // the cursor is shorter than the autocompletion threshold. Monaco would then show "No suggestions."
   D.acBelowLimit = (me) => {
@@ -1019,7 +1035,7 @@
         let i = 0;
 
         (function defineRanges() {
-          const { length } = model._tokens._lineTokens;
+          const length = model.getLineCount();
           for (i; i < length; i++) {
             const a = ((getState(model, i) || {}).a || []).slice().reverse();
             if (!pa) pa = a;
@@ -1157,6 +1173,7 @@
     const updateIndent = () => {
       sw = swPref();
       swm = swmPref();
+      stateGeneration += 1;
       // Re-registering invalidates Monaco's cached states in every open model.
       ml.setTokensProvider('apl', aplTokens);
       ml.setTokensProvider('aplan', aplanTokens);
