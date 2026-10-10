@@ -11,6 +11,8 @@
 }
 #sb_left, #sb_right {
 	display: flex;
+	min-width: 0;
+	white-space: nowrap;
 	div {
 		display: inline-block;
 		padding: 3px 6px 4px;
@@ -24,9 +26,38 @@
 		}
 	}
 }
+#sb_left {
+	flex: 0 1 auto;
+	max-width: 100%;
+}
+#sb_right {
+	flex: 1 1 0;
+	justify-content: flex-end;
+	overflow: hidden;
+	div {
+		flex-shrink: 0;
+	}
+}
 #sb_cp {
 	min-width: 15em;
 }
-#sb_busy {
+#sb_left #sb_busy {
+	display: flex;
+	min-width: 0;
 	padding: 2px 6px 3px;
+	&[hidden] {
+		display: none;
+	}
+}
+#sb_busy_icon {
+	flex-shrink: 0;
+	margin-right: .4em;
+	&[hidden] {
+		display: none;
+	}
+}
+#sb_input_state {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
