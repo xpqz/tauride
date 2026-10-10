@@ -68,6 +68,7 @@
     //  oi      outer indent - the indent of the opening token's line
     //  ii      inner indent - the indent of the block's body; it can be adjusted later
     //  r       range ID, sequential numbering of ranges for folding
+    //  sr      stable Select range ID across branch changes
     // kw       current keyword
     // vars     local names in a tradfn
     // rseq     last range ID
@@ -445,6 +446,7 @@
                       ii: n + sw,
                       r: h.rseq,
                     });
+                    if (kw === 'select') a[a.length - 1].sr = h.rseq;
                     ok = 1;
                     break;
 
@@ -1030,35 +1032,44 @@
       return new Promise((resolve) => {
         const ranges = [];
         const openRanges = [];
-        let pa = null;
+        let pa = [];
         const totLength = model.getLineCount();
         let i = 0;
 
         (function defineRanges() {
           const length = model.getLineCount();
-          for (i; i < length; i++) {
-            const a = ((getState(model, i) || {}).a || []).slice().reverse();
-            if (!pa) pa = a;
-            else if (pa.length < a.length) {
-              openRanges.push({
-                start: i,
-                kind: new monaco.languages.FoldingRangeKind(a[0].t),
-              });
-              pa = a;
-            } else if (pa.length > a.length) {
-              ranges.push({ ...openRanges.pop(), end: i });
-              pa = a;
-            } else if (pa[0].r !== a[0].r) {
-              ranges.push({ ...openRanges.pop(), end: i - 1 });
-              openRanges.push({
-                start: i,
-                kind: new monaco.languages.FoldingRangeKind(a[0].t),
-              });
-              pa = a;
+          for (i; i <= length; i++) {
+            const a = [];
+            ((getState(model, i) || {}).a || []).slice(1).forEach((frame) => {
+              // Select keeps its outer fold while its branch range ID advances.
+              if (frame.sr !== undefined) a.push({ t: frame.t, r: frame.sr, wholeSelect: true });
+              if (frame.sr === undefined || frame.r !== frame.sr) a.push(frame);
+            });
+            let common = 0;
+            while (common < pa.length && common < a.length
+              && pa[common].r === a[common].r) common += 1;
+            const end = a[common] && pa[common] && !pa[common].wholeSelect ? i - 1 : i;
+            while (openRanges.length > common) {
+              const range = openRanges.pop();
+              if (!range.skip && range.start < end) {
+                ranges.push({ start: range.start, end, kind: range.kind });
+              }
             }
+            for (let j = common; j < a.length; j++) {
+              openRanges.push({
+                start: i,
+                kind: new monaco.languages.FoldingRangeKind(a[j].t),
+                skip: openRanges.length > 0 && openRanges[openRanges.length - 1].start === i,
+              });
+            }
+            pa = a;
           }
           if (token.isCancellationRequested || length === totLength) {
-            openRanges.forEach((r) => ranges.push({ ...r, end: totLength }));
+            openRanges.forEach((r) => {
+              if (!r.skip && r.start < totLength) {
+                ranges.push({ start: r.start, end: totLength, kind: r.kind });
+              }
+            });
             resolve(ranges);
             return;
           }
