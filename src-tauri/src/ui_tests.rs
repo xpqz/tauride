@@ -1,6 +1,30 @@
 use enigo::{Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use std::time::Duration;
-use tauri::WebviewWindow;
+use tauri::menu::MenuItemKind;
+use tauri::{AppHandle, Runtime, WebviewWindow};
+
+fn menu_command_id<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> Result<Option<String>, String> {
+    for item in items {
+        let id = item.id().as_ref();
+        if id.ends_with(&format!(":{command}")) { return Ok(Some(id.to_string())); }
+        if let Some(submenu) = item.as_submenu() {
+            if let Some(id) = menu_command_id(submenu.items().map_err(|e| e.to_string())?, command)? {
+                return Ok(Some(id));
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String) -> Result<(), String> {
+    if !["SC", "SA"].contains(&command.as_str()) { return Err("Unsupported test menu command".into()); }
+    let menu = app.menu().ok_or("No application menu")?;
+    let items = menu.items().map_err(|e| e.to_string())?;
+    let id = menu_command_id(items, &command)?.ok_or_else(|| format!("No application menu item for {command}"))?;
+    crate::menu::on_event(&app, &id);
+    Ok(())
+}
 
 pub fn guard_parent(app: tauri::AppHandle) {
     if std::env::var("TAURI_UI_TEST_STDIN").as_deref() != Ok("1") { return; }
