@@ -8,8 +8,14 @@ async function openWindow(c, command) {
   await c.execute((name) => D.commands[name](), command);
   await c.waitUntil(async () => (await c.getWindowHandles()).length > handles.length,
     { timeout: 10000, timeoutMsg: `${command} window did not open` });
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => !handles.includes(handle)));
+  const handle = (await c.getWindowHandles()).find(item => !handles.includes(item));
+  await c.switchToWindow(handle);
   await (await c.$('textarea[readonly]')).waitForExist();
+  await c.waitUntil(async () => c.execute((name) => {
+    const field = document.querySelector('textarea[readonly]');
+    return !!(window.diagnosticText && field && (name !== 'ABT' || field.value.includes('Git commit:')));
+  }, command), { timeout: 10000, timeoutMsg: `${command} diagnostic text did not initialize` });
+  return handle;
 }
 
 async function button(c, label) {
@@ -47,6 +53,16 @@ async function appMenu(c, command) {
   await c.execute((name) => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command', { command: name }), command);
 }
 
+async function focusNativeWindow(c) {
+  const label = await c.execute(() => window.__TAURI_INTERNALS__.metadata.currentWindow.label);
+  await c.waitUntil(async () => c.execute(async (name) => {
+    const target = new window.__TAURI__.webviewWindow.WebviewWindow(name, { skip: true });
+    await target.setFocus();
+    const state = await window.__TAURI_INTERNALS__.invoke('ui_test_window_state', { label: name });
+    return state.focused;
+  }, label), { timeout: 10000, timeoutMsg: `${label} did not receive native focus` });
+}
+
 async function keydown(c, selector, key, shiftKey = false) {
   await c.execute((target, name, shift) => {
     const element = document.querySelector(target);
@@ -65,6 +81,7 @@ async function mainEditorState(c) {
 
 test('About distinguishes Copy from Copy All and supports Find', async (t) => {
   const c = t.context.app.client;
+  const baseline = await c.getWindowHandles();
   await openWindow(c, 'ABT');
   const all = await c.execute(() => document.querySelector('textarea[readonly]').value);
   t.true(all.includes('Git commit:'));
@@ -96,6 +113,8 @@ test('About distinguishes Copy from Copy All and supports Find', async (t) => {
   t.false(/no matches/i.test(await c.execute(() => document.body.innerText)),
     'an empty query is not reported as a failed search');
   await setFieldValue(c, query, 'vErSiOn:');
+  t.true(await c.execute(() => document.activeElement === document.querySelector('input[type=search]')),
+    'typing a query keeps focus in Find');
   await c.waitUntil(async () => (await selection(c)).text.toLowerCase() === 'version:',
     { timeout: 10000, timeoutMsg: 'Find did not select a case-insensitive match' });
   t.regex(await c.execute(() => document.body.innerText), /1\s*(?:of|\/)\s*2/i);
@@ -131,27 +150,27 @@ test('About distinguishes Copy from Copy All and supports Find', async (t) => {
     'clearing a failed query clears its stale result status');
   await keydown(c, 'input[type=search]', 'Escape');
   t.false(await query.isDisplayed(), 'first Escape closes Find');
-  t.true((await c.getWindowHandles()).length > 1, 'About remains open after closing Find');
+  t.is((await c.getWindowHandles()).length, baseline.length + 1, 'About remains open after closing Find');
   await keydown(c, 'textarea[readonly]', 'Escape');
-  await c.waitUntil(async () => (await c.getWindowHandles()).length === 1,
+  await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length,
     { timeout: 10000, timeoutMsg: 'second Escape did not close About' });
 });
 
 test('Log retains an active match and selection as protocol messages arrive', async (t) => {
   const c = t.context.app.client;
   const main = await c.getWindowHandle();
-  await openWindow(c, 'LOG');
+  const log = await openWindow(c, 'LOG');
   await c.switchToWindow(main);
   await c.waitUntil(async () => c.execute(() => D.ide.promptType === 1));
   await c.execute(() => D.ide.exec(['43+43'], 0));
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => handle !== main));
+  await c.switchToWindow(log);
   await c.waitUntil(async () => c.execute(() =>
     document.querySelector('textarea[readonly]').value.includes('43+43')),
   { timeout: 10000, timeoutMsg: 'Protocol message did not reach Log' });
   await c.switchToWindow(main);
   await c.waitUntil(async () => c.execute(() => D.ide.promptType === 1));
   await c.execute(() => D.ide.exec(Array.from({ length: 20 }, (_, i) => `100+${i}`), 0));
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => handle !== main));
+  await c.switchToWindow(log);
   await c.waitUntil(async () => c.execute(() =>
     document.querySelector('textarea[readonly]').value.includes('100+19')),
   { timeout: 20000, timeoutMsg: 'Log fixture did not fill the view' });
@@ -164,7 +183,17 @@ test('Log retains an active match and selection as protocol messages arrive', as
   await expectClipboard(c, all);
 
   await (await button(c, 'Find')).click();
-  await setFieldValue(c, await c.$('input[type=search]'), '43+43');
+  await c.execute(() => { document.querySelector('textarea[readonly]').scrollTop = 0; });
+  const logQuery = await c.$('input[type=search]');
+  await setFieldValue(c, logQuery, '100+19');
+  await c.waitUntil(async () => c.execute(() => {
+    const field = document.querySelector('textarea[readonly]');
+    return field.value.slice(field.selectionStart, field.selectionEnd) === '100+19'
+      && field.scrollTop > 0 && document.activeElement === document.querySelector('input[type=search]');
+  }), { timeout: 10000, timeoutMsg: 'Find did not reveal a distant Log match while retaining query focus' });
+  await setFieldValue(c, logQuery, '43+43');
+  t.true(await c.execute(() => document.activeElement === document.querySelector('input[type=search]')),
+    'typing a Log query keeps focus in Find');
   await c.waitUntil(async () => (await selection(c)).text === '43+43',
     { timeout: 10000, timeoutMsg: 'Log Find did not select the protocol expression' });
   const first = (await selection(c)).start;
@@ -185,7 +214,7 @@ test('Log retains an active match and selection as protocol messages arrive', as
   await c.switchToWindow(main);
   await c.waitUntil(async () => c.execute(() => D.ide.promptType === 1));
   await c.execute(() => D.ide.exec(['43+43'], 0));
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => handle !== main));
+  await c.switchToWindow(log);
   await c.waitUntil(async () => c.execute((length) =>
     document.querySelector('textarea[readonly]').value.length > length, beforeText.length),
   { timeout: 10000, timeoutMsg: 'Matching protocol message did not reach Log' });
@@ -211,7 +240,7 @@ test('Log retains an active match and selection as protocol messages arrive', as
   await c.switchToWindow(main);
   await c.waitUntil(async () => c.execute(() => D.ide.promptType === 1));
   await c.execute(() => D.ide.exec(['47+47'], 0));
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => handle !== main));
+  await c.switchToWindow(log);
   await c.waitUntil(async () => c.execute(() =>
     document.querySelector('textarea[readonly]').value.includes('47+47')),
   { timeout: 10000, timeoutMsg: 'No-match-search protocol message did not reach Log' });
@@ -229,7 +258,7 @@ test('Log retains an active match and selection as protocol messages arrive', as
   await c.switchToWindow(main);
   await c.waitUntil(async () => c.execute(() => D.ide.promptType === 1));
   await c.execute(() => D.ide.exec(['44+44'], 0));
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => handle !== main));
+  await c.switchToWindow(log);
   await c.waitUntil(async () => c.execute(() =>
     document.querySelector('textarea[readonly]').value.includes('44+44')),
   { timeout: 10000, timeoutMsg: 'Manual-selection protocol message did not reach Log' });
@@ -254,7 +283,7 @@ test('Log retains an active match and selection as protocol messages arrive', as
   await c.switchToWindow(main);
   await c.waitUntil(async () => c.execute(() => D.ide.promptType === 1));
   await c.execute(() => D.ide.exec(['46+46'], 0));
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => handle !== main));
+  await c.switchToWindow(log);
   await c.waitUntil(async () => c.execute(() =>
     document.querySelector('textarea[readonly]').value.includes('46+46')),
   { timeout: 10000, timeoutMsg: 'Browsing-position protocol message did not reach Log' });
@@ -267,7 +296,7 @@ test('Log retains an active match and selection as protocol messages arrive', as
   await c.switchToWindow(main);
   await c.waitUntil(async () => c.execute(() => D.ide.promptType === 1));
   await c.execute(() => D.ide.exec(['45+45'], 0));
-  await c.switchToWindow((await c.getWindowHandles()).find(handle => handle !== main));
+  await c.switchToWindow(log);
   await c.waitUntil(async () => c.execute(() =>
     document.querySelector('textarea[readonly]').value.includes('45+45')),
   { timeout: 10000, timeoutMsg: 'Tail-follow protocol message did not reach Log' });
@@ -280,31 +309,52 @@ test('Log retains an active match and selection as protocol messages arrive', as
 if (process.platform === 'darwin') test('native Edit menu targets the active diagnostic window and still reaches the main editor', async (t) => {
   const c = t.context.app.client;
   const main = await c.getWindowHandle();
+  const baseline = await c.getWindowHandles();
   const initialMain = await mainEditorState(c);
   t.false(initialMain.findOpen);
   await openWindow(c, 'ABT');
+  await focusNativeWindow(c);
   await c.execute(() => document.querySelector('textarea[readonly]').focus());
   await appMenu(c, 'SA');
-  t.is((await selection(c)).text, await c.execute(() => document.querySelector('textarea[readonly]').value));
+  await c.waitUntil(async () => c.execute(() => {
+    const field = document.querySelector('textarea[readonly]');
+    return field.selectionStart === 0 && field.selectionEnd === field.value.length;
+  }), { timeout: 10000, timeoutMsg: 'Select All did not reach About' });
   await appMenu(c, 'SC');
   await (await c.$('input[type=search]')).waitForDisplayed();
   await keydown(c, 'input[type=search]', 'Escape');
-  await c.waitUntil(async () => !(await c.$('input[type=search]')).isDisplayed());
+  await c.waitUntil(async () => !await (await c.$('input[type=search]')).isDisplayed());
   await keydown(c, 'textarea[readonly]', 'Escape');
-  await c.waitUntil(async () => (await c.getWindowHandles()).length === 1);
+  await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length);
 
   await c.switchToWindow(main);
   t.deepEqual(await mainEditorState(c), initialMain, 'About menu commands do not change the session editor');
-  await openWindow(c, 'LOG');
+  const backgroundLog = await openWindow(c, 'LOG');
+  const backgroundSelection = await selection(c);
+  t.true(await c.execute(() => document.querySelector('[data-diagnostic=find-bar]').hidden));
+  await c.switchToWindow(main);
+  const activeLog = await openWindow(c, 'LOG');
+  await focusNativeWindow(c);
   await c.execute(() => document.querySelector('textarea[readonly]').focus());
   await appMenu(c, 'SA');
-  t.is((await selection(c)).text, await c.execute(() => document.querySelector('textarea[readonly]').value));
+  await c.waitUntil(async () => c.execute(() => {
+    const field = document.querySelector('textarea[readonly]');
+    return field.value.length > 0 && field.selectionStart === 0 && field.selectionEnd === field.value.length;
+  }), { timeout: 10000, timeoutMsg: 'Select All did not reach the active Log' });
   await appMenu(c, 'SC');
   await (await c.$('input[type=search]')).waitForDisplayed();
+  await c.switchToWindow(backgroundLog);
+  t.deepEqual(await selection(c), backgroundSelection, 'Edit Select All leaves the background Log selection alone');
+  t.true(await c.execute(() => document.querySelector('[data-diagnostic=find-bar]').hidden),
+    'Edit Find leaves the background Log closed');
   await c.execute(() => window.close());
-  await c.waitUntil(async () => (await c.getWindowHandles()).length === 1);
+  await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length + 1);
+  await c.switchToWindow(activeLog);
+  await c.execute(() => window.close());
+  await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length);
 
   await c.switchToWindow(main);
+  await focusNativeWindow(c);
   t.deepEqual(await mainEditorState(c), initialMain, 'Log menu commands do not change the session editor');
   await appMenu(c, 'SC');
   await c.waitUntil(async () => c.execute(() =>

@@ -18,11 +18,20 @@
       </div>
     </div>
     <div id=abt_ta_wr><textarea id=abt_ta readonly wrap=off></textarea></div>
+    <div class=diagnostic_find data-diagnostic=find-bar hidden>
+      <label>Find <input type=search aria-label="Find text"></label>
+      <button data-diagnostic=previous>Previous</button>
+      <button data-diagnostic=next>Next</button>
+      <span data-diagnostic=count role=status aria-live=polite></span>
+    </div>
     <div class=dlg_btns>
-      <button id=abt_copy accesskey=c><u>C</u>opy</button>
+      <button id=abt_copy data-diagnostic=copy accesskey=c><u>C</u>opy</button>
+      <button data-diagnostic=copy-all>Copy All</button>
+      <button data-diagnostic=find>Find</button>
       <button id=abt_close accesskey=l>C<u>l</u>ose</button>
     </div>
   </div>
+  <script src="src/diagnostic.js"></script>
   <script>
     if (typeof require !== 'undefined') {
       document.getElementById('abt_contact').onclick = (x) => {
@@ -33,25 +42,9 @@
         return !0;
       };
     }
-    document.getElementById('abt_close').onclick = () => { window.close() };;
-    let cpy = document.getElementById('abt_copy');
-    cpy.onclick = () => {
-      let ta = document.getElementById('abt_ta');
-      ta.select();
-      document.execCommand('copy');
-      ta.selectionEnd = 0;
-    };
-    cpy.focus();
-    const abt = document.getElementById('abt');
-    abt.tabIndex = 0;
-    abt.onkeydown = (x) => {
-      if (x.key === 'Escape') {
-        window.close();
-        return !1;
-      } else if (x.key === 'Enter') {
-        cpy.click();
-      }
-    };
+    document.getElementById('abt_close').onclick = () => { window.close(); };
+    window.diagnosticText = createDiagnosticText(document.getElementById('abt'), () => window.close());
+    document.getElementById('abt_copy').focus();
   </script>
 </body>
 </html>

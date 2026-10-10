@@ -14,6 +14,7 @@ D.installMenu = function Menu(mx) {
       const h = {
         label: x[''],
         click: x.action,
+        rideCommand: x.cmd,
         accelerator: x.cmd && k[x.cmd] ? k[x.cmd].replace(/-(.)/g, '+$1') : null,
       };
       if (x.group) {

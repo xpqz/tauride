@@ -1,0 +1,18 @@
+.diagnostic_find:not([hidden]) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+}
+.diagnostic_find input { min-width: 80px; max-width: 140px; }
+.diagnostic_find [data-diagnostic=count] { white-space: nowrap; }
+.diagnostic_log { margin: 0; font: 13px monospace; }
+.diagnostic_log #diagnostic_log { display: flex; flex-direction: column; height: 100vh; }
+.diagnostic_log textarea { flex: 1; min-height: 0; width: 100%; box-sizing: border-box; resize: none; font: inherit; }
+.diagnostic_actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; }
+#abt .diagnostic_find { position: absolute; left: 5px; right: 5px; bottom: 65px; }
+#abt.diagnostic-searching #abt_ta_wr { bottom: 125px; }
+#abt .dlg_btns button { margin: 0 4px; }
+
+#abt_ta, .diagnostic_log textarea { line-height: 1.2; }

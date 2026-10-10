@@ -1,7 +1,6 @@
 // About dialog
 {
   let d;
-  let ta; // DOM elements for the dialog and the textarea
 
   D.aboutDetails = function AboutDetails() {
     const v = D.versionInfo || {};
@@ -58,25 +57,16 @@
         },
       }, `file://${__dirname}/about.html`);
       D.abtw = w;
-      w.eval(`document.getElementById('abt_ta').value=${JSON.stringify(details)};`);
+      w.eval(`window.diagnosticText.setText(${JSON.stringify(details)})`);
       w.eval(`document.getElementById('theme_dark').disabled = ${D.theme !== 'dark'}`);
       w.eval(`document.getElementById('theme_light').disabled = ${D.theme !== 'light'};`);
 
-      w.onClosed(() => { delete D.abtw; });
+      w.onClosed(() => { if (D.abtw === w) delete D.abtw; });
     } else {
       if (!d) {
         d = I.abt;
         I.abt_close.onclick = () => { d.hidden = 1; };
-        I.abt_copy.onclick = () => {
-          if (D.el) {
-            D.el.clipboard.writeText(ta.value);
-          } else {
-            ta.select();
-            document.execCommand('copy');
-            ta.selectionEnd = 0;
-          }
-        };
-        I.abt_copy.hidden = !D.el && !document.queryCommandSupported('copy');
+        D.aboutDiagnostic = createDiagnosticText(d, () => { d.hidden = 1; });
         I.abt_contact.onclick = (x) => {
           if (x.target.nodeName === 'A' && /^http/.test(x.target.href)) {
             D.openExternal(x.target.href);
@@ -84,14 +74,10 @@
           }
           return !0;
         };
-        ta = I.abt_ta;
       }
       D.util.dlg(d, { w: 600, h: 450 });
-      ta.value = details;
-      ta.scrollTop = 0;
-      ta.selectionStart = 0;
-      ta.selectionEnd = 0;
-      (!I.abt_copy.hidden ? I.abt_copy : I.abt_close).focus();
+      D.aboutDiagnostic.setText(details);
+      I.abt_ta.focus();
     }
   };
 }

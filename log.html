@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset=utf-8>
+  <title>Protocol Log</title>
+  <link rel=stylesheet href="style/ride-base.css">
+</head>
+<body class=diagnostic_log>
+  <div id=diagnostic_log>
+    <textarea readonly wrap=off aria-label="Protocol log"></textarea>
+    <div class=diagnostic_find data-diagnostic=find-bar hidden>
+      <label>Find <input type=search aria-label="Find text"></label>
+      <button data-diagnostic=previous>Previous</button>
+      <button data-diagnostic=next>Next</button>
+      <span data-diagnostic=count role=status aria-live=polite></span>
+    </div>
+    <div class=diagnostic_actions>
+      <button data-diagnostic=copy>Copy</button>
+      <button data-diagnostic=copy-all>Copy All</button>
+      <button data-diagnostic=find>Find</button>
+    </div>
+  </div>
+  <script src="src/diagnostic.js"></script>
+  <script>window.diagnosticText = createDiagnosticText(document.getElementById('diagnostic_log'));</script>
+</body>
+</html>
