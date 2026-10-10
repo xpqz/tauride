@@ -4,13 +4,18 @@ const { tfw } = require('./_utils');
 tfw.init({ src: 'se', interpreter: true });
 
 async function display(c) {
-  return c.execute(() => ({
-    text: document.getElementById('sb_input_state')?.textContent || '',
-    prompt: D.ide.wins[0].promptType,
-    readOnly: D.ide.wins[0].me.getOption(monaco.editor.EditorOption.readOnly),
-    iconVisible: !!document.getElementById('sb_busy_icon')
-      && getComputedStyle(document.getElementById('sb_busy_icon')).display !== 'none',
-  }));
+  return c.execute(() => {
+    const icon = document.getElementById('sb_busy_icon');
+    const clock = document.querySelector('#sb_busy_icon svg, svg#sb_busy_icon');
+    const rect = clock && clock.getBoundingClientRect();
+    return {
+      text: document.getElementById('sb_input_state')?.textContent || '',
+      prompt: D.ide.wins[0].promptType,
+      readOnly: D.ide.wins[0].me.getOption(monaco.editor.EditorOption.readOnly),
+      iconVisible: !!clock && getComputedStyle(icon).display !== 'none'
+        && getComputedStyle(clock).display !== 'none' && rect.width > 0 && rect.height > 0,
+    };
+  });
 }
 
 async function waitPrompt(c, type) {
@@ -22,6 +27,9 @@ async function execute(c, text) { await c.execute(expression => D.ide.exec([expr
 
 test('input-state-real-interpreter-busy-ready-text-expression-and-multiline', async (t) => {
   const c = t.context.app.client;
+  await c.waitUntil(async () => c.execute(() =>
+    !!document.querySelector('#sb_busy_icon svg, svg#sb_busy_icon')),
+  { timeout: 10000, timeoutMsg: 'FontAwesome did not convert the Busy clock to SVG' });
   t.is((await display(c)).text, 'Ready');
   t.false((await display(c)).readOnly);
   await execute(c, '⎕DL 1');
@@ -29,6 +37,7 @@ test('input-state-real-interpreter-busy-ready-text-expression-and-multiline', as
   t.deepEqual(await display(c), { text: 'Busy', prompt: 0, readOnly: true, iconVisible: true });
   await waitPrompt(c, 1);
   t.is((await display(c)).text, 'Ready');
+  t.false((await display(c)).iconVisible);
   await execute(c, 'auditInputText←⍞');
   await waitPrompt(c, 4);
   t.deepEqual(await display(c), { text: 'Enter text (⍞)', prompt: 4, readOnly: false, iconVisible: false });
