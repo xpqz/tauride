@@ -127,7 +127,6 @@ D.IDE = function IDE(opts = {}) {
     });
     ide.switchWin = (x) => { ide.ipc.emit('switchWin', x); };
   } else {
-    D.prf.title(ide.updTitle.bind(ide));
     ide.updateInputState();
     I.sb_ml.hidden = !1;
     I.sb_io.hidden = !1;
@@ -457,11 +456,16 @@ D.IDE = function IDE(opts = {}) {
   });
   const toggleStats = () => {
     if (ide.floating) return;
+    const statusFields = D.prf.sbar() || /\{TID\}/i.test(D.prf.title());
+    if ((!statusFields || !ide.hasSubscribe) && ide.threadId !== undefined) {
+      ide.threadId = undefined;
+      ide.updTitle();
+    }
     // (un)subscribe to status here
     if (ide.hasSubscribe) {
       // New code for interpreters that support the Subscribe message
       const sbarFields = [
-        ...(D.prf.sbar() ? ['statusfields'] : []),
+        ...(statusFields ? ['statusfields'] : []),
         ...(D.prf.dbg() ? ['stack', 'threads'] : []),
       ];
       const sbarReq = { status: sbarFields }; // Heartbeat not currently used.
@@ -473,6 +477,7 @@ D.IDE = function IDE(opts = {}) {
       statsTid = statsTid || setInterval(ide.getStats, 5000);
     }
   };
+  if (!ide.floating) D.prf.title(() => { toggleStats(); ide.updTitle(); });
   toggleStats();
   const updTopBtm = $.debounce(100, () => {
     // the html menu (browser and Tauri builds, see menu.js) takes 23px;
@@ -573,8 +578,13 @@ D.IDE = function IDE(opts = {}) {
     D.prf.wse() && setTimeout(() => toggleWSE(D.prf.wse()), 500);
     D.prf.dbg() && setTimeout(() => toggleDBG(D.prf.dbg()), 500);
   }
-  // OSX is stealing our focus.  Let's steal it back!  Bug #5
-  D.mac && !ide.floating && setTimeout(() => {
+  // Restore editor focus only while this native window is still active.
+  D.mac && !ide.floating && setTimeout(async () => {
+    if (D.wm) {
+      try {
+        if (!await D.wm.main().isFocused()) return;
+      } catch { return; } // The window may have closed before the timer fires.
+    } else if (!document.hasFocus()) return;
     const focused = ide.focusedWin;
     const w = focused && ide.wins[focused.id] === focused ? focused : ide.getMRUWin();
     w && w.focus();
@@ -955,6 +965,15 @@ D.IDE = function IDE(opts = {}) {
       ide.dbg && ide.dbg.threads.render(x.threads);
     },
     InterpreterStatus(x) {
+      if (ide.dead) return;
+      if (ide.hasSubscribe && (D.prf.sbar() || /\{TID\}/i.test(D.prf.title()))
+        && Object.prototype.hasOwnProperty.call(x, 'TID')) {
+        const threadId = Number.isInteger(x.TID) && x.TID >= 0 ? x.TID : undefined;
+        if (threadId !== ide.threadId) {
+          ide.threadId = threadId;
+          ide.updTitle();
+        }
+      }
       // update status bar fields here
       I.sb_ml.innerText = `⎕ML: ${x.ML}`;
       I.sb_io.innerText = `⎕IO: ${x.IO}`;
@@ -1013,6 +1032,8 @@ D.IDE = function IDE(opts = {}) {
       } else if (x.name === 'Subscribe') {
         // flag to fallback for status updates.
         ide.hasSubscribe = false;
+        ide.threadId = undefined;
+        ide.updTitle();
         I.sb_ml.hidden = true;
         I.sb_io.hidden = true;
         I.sb_trap.hidden = true;
@@ -1075,6 +1096,8 @@ D.IDE.prototype = {
     if (ide.dead) return;
     ide.dead = 1;
     ide.connected = 0;
+    ide.threadId = undefined;
+    if (!ide.floating) ide.updTitle();
     ide.updateInputState();
     ide.clearingStops = false;
     ide.unsavedStops = 0;
@@ -1105,6 +1128,7 @@ D.IDE.prototype = {
       '{VER}': ri.version,
       '{PROFILE}': ide.profile,
       '{PID}': ri.pid,
+      '{TID}': ide.threadId === undefined ? '?' : String(ide.threadId),
       '{CHARS}': ch,
       '{BITS}': bits,
       '{RIDE_PID}': D.el ? D.el.process.pid : '?',

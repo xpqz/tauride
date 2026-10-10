@@ -1146,7 +1146,7 @@
   module.exports = () => {
     D.send = (x, y) => {
       if (D.ide && !D.ide.promptType
-        && !/Interrupt$|TreeList|Reply|FormatCode|GetAutocomplete|SaveChanges|CloseWindow|Exit|SetPW/.test(x)) return;
+        && !/^Subscribe$|Interrupt$|TreeList|Reply|FormatCode|GetAutocomplete|SaveChanges|CloseWindow|Exit|SetPW/.test(x)) return;
       sendEach([JSON.stringify([x, y])]);
     };
     const a = rq('@electron/remote').process.argv;

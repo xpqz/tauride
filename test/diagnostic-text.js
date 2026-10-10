@@ -333,7 +333,8 @@ if (process.platform === 'darwin') test('native Edit menu targets the active dia
   const backgroundSelection = await selection(c);
   t.true(await c.execute(() => document.querySelector('[data-diagnostic=find-bar]').hidden));
   await c.switchToWindow(main);
-  const activeLog = await openWindow(c, 'LOG');
+  await openWindow(c, 'LOG');
+  const activeLabel = await c.execute(() => window.__TAURI_INTERNALS__.metadata.currentWindow.label);
   await focusNativeWindow(c);
   await c.execute(() => document.querySelector('textarea[readonly]').focus());
   await appMenu(c, 'SA');
@@ -347,10 +348,17 @@ if (process.platform === 'darwin') test('native Edit menu targets the active dia
   t.deepEqual(await selection(c), backgroundSelection, 'Edit Select All leaves the background Log selection alone');
   t.true(await c.execute(() => document.querySelector('[data-diagnostic=find-bar]').hidden),
     'Edit Find leaves the background Log closed');
-  await c.execute(() => window.close());
+  const backgroundLabel = await c.execute(() => window.__TAURI_INTERNALS__.metadata.currentWindow.label);
+  await c.switchToWindow(main);
+  await c.execute(async (label) => {
+    const target = new window.__TAURI__.webviewWindow.WebviewWindow(label, { skip: true });
+    await target.close();
+  }, backgroundLabel);
   await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length + 1);
-  await c.switchToWindow(activeLog);
-  await c.execute(() => window.close());
+  await c.execute(async (label) => {
+    const target = new window.__TAURI__.webviewWindow.WebviewWindow(label, { skip: true });
+    await target.close();
+  }, activeLabel);
   await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length);
 
   await c.switchToWindow(main);
