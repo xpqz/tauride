@@ -71,6 +71,7 @@ D.cmds = [
   ['TIP','Show value tip',          []],
   ['TL', 'Toggle localisation',     ['Ctrl+Up']],
   ['TO', 'Toggle fold',             []],
+  ['TTB','Toggle Trace/Edit toolbar',[]],
   ['TVB','Toggle view stops',       []],
   ['TVO','Toggle view outline',     []],
   ['TFR', 'Refresh threads',        []],

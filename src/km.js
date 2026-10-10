@@ -179,6 +179,7 @@
     QIT() { D.quit(); },
     ASW: D.prf.autoStatus.toggle,
     LBR: D.prf.lbar.toggle,
+    TTB: D.prf.showEditorToolbar.toggle,
     SBR: D.prf.sbar.toggle,
     SSW: D.prf.statusWindow.toggle,
     WI() { D.send('WeakInterrupt', {}); },

@@ -603,6 +603,7 @@ D.IDE = function IDE(opts = {}) {
   D.prf.showEditorToolbar((x) => {
     $('.ride_win.edit_trace').toggleClass('no-toolbar', !x);
     updTopBtm();
+    updMenu();
   });
   D.prf.snippetSuggestions((x) => { eachWin((w) => !w.bwId && w.snippetSuggestions(x)); });
   D.prf.zoom(ide.zoom.bind(ide));
@@ -1130,6 +1131,7 @@ D.IDE.prototype = {
   },
   ASW: D.prf.autoStatus.toggle,
   LBR: D.prf.lbar.toggle,
+  TTB: D.prf.showEditorToolbar.toggle,
   SBR: D.prf.sbar.toggle,
   SSW: D.prf.statusWindow.toggle,
   FLT: D.prf.floating.toggle,
