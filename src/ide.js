@@ -18,6 +18,7 @@ D.IDE = function IDE(opts = {}) {
   ide.valueTipToken = 0;
   ide.pending = [];
   ide.promptType = 1;
+  ide.promptReceived = false;
   ide.hasSubscribe = true;
   ide.saveRequests = new Map();
   ide.pasteSources = new Set();
@@ -114,6 +115,7 @@ D.IDE = function IDE(opts = {}) {
   ide.wins = {};
   if (ide.floating) {
     ide.connected = 1;
+    ide.updateInputState();
     this._focusedWin = null;
     ide.ipc.emit('getSyntax');
     Object.defineProperty(ide, 'focusedWin', {
@@ -126,7 +128,7 @@ D.IDE = function IDE(opts = {}) {
     ide.switchWin = (x) => { ide.ipc.emit('switchWin', x); };
   } else {
     D.prf.title(ide.updTitle.bind(ide));
-    I.sb_busy.hidden = true;
+    ide.updateInputState();
     I.sb_ml.hidden = !1;
     I.sb_io.hidden = !1;
     I.sb_trap.hidden = !1;
@@ -603,6 +605,7 @@ D.IDE = function IDE(opts = {}) {
   D.prf.showEditorToolbar((x) => {
     $('.ride_win.edit_trace').toggleClass('no-toolbar', !x);
     updTopBtm();
+    updMenu();
   });
   D.prf.snippetSuggestions((x) => { eachWin((w) => !w.bwId && w.snippetSuggestions(x)); });
   D.prf.zoom(ide.zoom.bind(ide));
@@ -625,6 +628,7 @@ D.IDE = function IDE(opts = {}) {
       D.InitHelp(x.version);
       ide.updTitle();
       ide.connected = 1;
+      ide.updateInputState();
       ide.updPW();
       clearTimeout(D.tmr);
       delete D.tmr;
@@ -661,7 +665,8 @@ D.IDE = function IDE(opts = {}) {
       const t = x.type;
       if (t) ide.inputOperation = null;
       ide.promptType = t;
-      I.sb_busy.hidden = t > 0;
+      ide.promptReceived = true;
+      ide.updateInputState();
       if (t && ide.pending.length) {
         D.send('Execute', { trace: 0, text: `${ide.pending.shift()}\n` });
         ide.wins[0].prompt(t);
@@ -1014,6 +1019,20 @@ D.IDE = function IDE(opts = {}) {
   };
 };
 D.IDE.prototype = {
+  updateInputState() {
+    const ide = this;
+    I.sb_busy.hidden = !!ide.floating;
+    if (ide.floating) return;
+    let text = 'Interpreter unavailable';
+    if (ide.dead) text = 'Disconnected';
+    else if (ide.connected && ide.promptReceived) {
+      text = ['Busy', 'Ready', 'Enter expression (⎕)', 'Multiline input',
+        'Enter text (⍞)', 'Awaiting input'][ide.promptType] || 'Input status unknown';
+    }
+    I.sb_input_state.textContent = text;
+    I.sb_busy.title = text;
+    I.sb_busy_icon.hidden = text !== 'Busy';
+  },
   getValueTip(source, id, request) {
     const ide = this;
     if (this.floating) {
@@ -1047,6 +1066,7 @@ D.IDE.prototype = {
     if (ide.dead) return;
     ide.dead = 1;
     ide.connected = 0;
+    ide.updateInputState();
     ide.clearingStops = false;
     ide.unsavedStops = 0;
     ide.saveRequests.clear();
@@ -1130,6 +1150,7 @@ D.IDE.prototype = {
   },
   ASW: D.prf.autoStatus.toggle,
   LBR: D.prf.lbar.toggle,
+  TTB: D.prf.showEditorToolbar.toggle,
   SBR: D.prf.sbar.toggle,
   SSW: D.prf.statusWindow.toggle,
   FLT: D.prf.floating.toggle,

@@ -1,5 +1,7 @@
 const test = require('ava');
-const { tfw, resolveDyalog } = require('./_utils');
+const fs = require('node:fs');
+const path = require('node:path');
+const { tfw, resolveDyalog, setFieldValue } = require('./_utils');
 
 tfw.init({ src: 'cn' });
 
@@ -32,7 +34,7 @@ test(
 test(
   'cn-fav-new',
   async (t) => {
-    t.plan(3);
+    t.plan(4);
     const { app } = t.context;
     const c = app.client;
     await (await c.$('#cn_neu')).click();
@@ -43,20 +45,22 @@ test(
     t.is(await fav_name.getValue(), '');
     await favs.waitForExist();
     t.is(await favs.getText(), 'unnamed');
-    await fav_name.setValue('myFav');
+    await setFieldValue(c, fav_name, 'myFav');
     t.is(await favs.getText(), 'myFav');
+    t.true(JSON.parse(fs.readFileSync(path.join(app.userData, 'Ride-4.8', 'connections.json'), 'utf8'))
+      .some(connection => connection.name === 'myFav'));
   },
 );
 
 test(
   'cn-fav-clone',
   async (t) => {
-    t.plan(5);
+    t.plan(6);
     const { app } = t.context;
     const c = app.client;
 
     await (await c.$('#cn_neu')).click();
-    await (await c.$('#cn_fav_name')).setValue('myFav');
+    await setFieldValue(c, await c.$('#cn_fav_name'), 'myFav');
     const cln = await c.$('#cn_cln');
     await cln.click();
 
@@ -66,7 +70,7 @@ test(
     t.is(await fav_name.getValue(), 'myFav (copy)');
     await favs.waitForExist();
     t.is(await favs.getText(), 'myFav (copy)');
-    await fav_name.setValue('myCopy');
+    await setFieldValue(c, fav_name, 'myCopy');
     t.is(await favs.getText(), 'myCopy');
 
     await cln.click();
@@ -74,6 +78,8 @@ test(
     favs = await c.$('#cn_favs .list_sel .name');
     await favs.waitForExist();
     t.is(await favs.getText(), 'myCopy (copy)');
+    t.true(JSON.parse(fs.readFileSync(path.join(app.userData, 'Ride-4.8', 'connections.json'), 'utf8'))
+      .some(connection => connection.name === 'myCopy (copy)'));
   },
 );
 
@@ -97,7 +103,7 @@ test(
 
     const executable = resolveDyalog();
     await selectValue(c, '#cn_exes', '');
-    await (await c.$('#cn_exe')).setValue(executable);
+    await setFieldValue(c, await c.$('#cn_exe'), executable);
 
     const cn_go = await c.$('#cn_go');
     await cn_go.click();

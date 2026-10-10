@@ -198,7 +198,9 @@ const Console = console;
       };
       ws.onmessage = (x) => { if (x.data[0] === '[') { const [c, h] = JSON.parse(x.data); D.recv(c, h); } };
       ws.onerror = (x) => { Console.info('ws error:', x); };
-      D.ide2 = new D.IDE();
+      const ide = new D.IDE();
+      D.ide2 = ide;
+      ws.onclose = () => { ide.die(); };
       I.splash.hidden = 1;
     }
     // Tauri on macOS: Cmd-Q quits every session, not just this window's, and

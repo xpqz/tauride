@@ -34,6 +34,7 @@
       TVO: { checkBoxPref: D.prf.fold },
       TVB: { checkBoxPref: D.prf.breakPts },
       LBR: { checkBoxPref: D.prf.lbar },
+      TTB: { checkBoxPref: D.prf.showEditorToolbar },
       SBR: { checkBoxPref: D.prf.sbar },
       SSW: { checkBoxPref: D.prf.statusWindow },
       WRP: { checkBoxPref: D.prf.wrap },

@@ -31,7 +31,7 @@ Electron Ride's (`~/.config/Ride-4.8` on Linux), so the two share them.
 
 ## Tests
 
-`npm test` builds the Tauri app and runs the 15 AVA UI cases against its native
+`npm test` builds the Tauri app and runs the AVA UI suite against its native
 webviews. It requires Node.js 22 or later, the build prerequisites above, and
 Dyalog on PATH. Set `RIDE_TEST_DYALOG` to use a specific interpreter executable.
 
