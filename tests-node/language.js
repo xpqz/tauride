@@ -10,6 +10,7 @@ function loadLanguage(initial = {}) {
   const listeners = {};
   const providers = {};
   const formatters = {};
+  const folding = {};
   const models = [];
   const prf = new Proxy({}, { get: (_, key) => (value) => {
     if (typeof value === 'function') {
@@ -30,6 +31,7 @@ function loadLanguage(initial = {}) {
       models.filter((m) => m.language === id).forEach((m) => m.invalidate());
     },
     registerDocumentFormattingEditProvider: (id, p) => { formatters[id] = p; },
+    registerFoldingRangeProvider: (id, p) => { folding[id] = p; },
     registerCompletionItemProvider: () => ({ dispose() {} }),
   }, { get: (o, k) => o[k] || (() => {}) });
   class Range {
@@ -38,7 +40,9 @@ function loadLanguage(initial = {}) {
     }
   }
   const context = vm.createContext({ D, $: { extend: Object.assign },
-    monaco: { languages, Range }, setTimeout });
+    monaco: { languages: Object.assign(languages, { FoldingRangeKind: class FoldingRangeKind {
+      constructor(value) { this.value = value; }
+    } }), Range }, setTimeout });
   ['syntax_info.js', 'mon_apl.js'].forEach((file) => {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../src', file), 'utf8'), context);
   });
@@ -53,7 +57,7 @@ function loadLanguage(initial = {}) {
     models.push(m);
     return m;
   }
-  return { D, providers, formatters, model };
+  return { D, providers, formatters, folding, model };
 }
 
 function sessionLines(api, lines) {
@@ -158,4 +162,98 @@ test('formatting updates after editing an earlier block opener', () => {
   assert.equal(indentAt(api, m, 3), 6);
   m.setLine(1, 'plain text');
   assert.equal(indentAt(api, m, 3), 3);
+});
+
+async function foldRanges(api, model) {
+  const ranges = await api.folding.apl.provideFoldingRanges(model, {}, { isCancellationRequested: false });
+  return Array.from(ranges, ({ start, end }) => [start, end]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
+
+test('Select folds its whole block and keeps Case, CaseList, and Else branches', async () => {
+  const api = loadLanguage();
+  const model = api.model(['⍝ before', ':Select x', ':Case 1', 'a←1', ':CaseList 2 3',
+    'a←2', ':Else', 'a←0', ':EndSelect', '⍝ after']);
+  assert.deepEqual(await foldRanges(api, model), [[2, 9], [3, 4], [5, 6], [7, 9]]);
+});
+
+test('Select preamble comments belong to one whole-block range', async () => {
+  const api = loadLanguage();
+  const model = api.model([':Select x', '⍝ before first case', ':Case 1',
+    'a←1', ':EndSelect', '⍝ outside']);
+  assert.deepEqual(await foldRanges(api, model), [[1, 5], [3, 5]]);
+});
+
+test('nested and mixed-case Select blocks keep independent outer and branch folds', async () => {
+  const api = loadLanguage();
+  const model = api.model(['⍝ before', ':SeLeCt x', ':cAsE 1', '⍝ inside first branch',
+    ':Select y', ':Case 2', 'a←2', ':EndSelect', 'a←1', ':Else', 'a←0', ':eNdSeLeCt', '⍝ after']);
+  assert.deepEqual(await foldRanges(api, model), [[2, 12], [3, 9], [5, 8], [6, 8], [10, 12]]);
+});
+
+test('Select handles a missing terminator and branches with no body', async () => {
+  const api = loadLanguage();
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', ':Case 1', 'a←1'])),
+    [[1, 3], [2, 3]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', ':Case 1', ':Case 2', 'a←2', ':EndSelect'])),
+    [[1, 5], [3, 5]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', '⍝ inside', ':EndSelect'])), [[1, 3]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x'])), []);
+});
+
+test('Select accepts generic and same-line closers without inventing extra ranges', async () => {
+  const api = loadLanguage();
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', ':Case 1', 'a←1', ':End'])),
+    [[1, 4], [2, 4]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', ':Case 1', ':Select y',
+    ':Case 2', 'a←2', ':EndSelect ⋄ :EndSelect', '⍝ after'])), [[1, 6], [2, 6], [3, 6], [4, 6]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x ⋄ :Case 1', 'a←1', ':EndSelect'])),
+    [[1, 3]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x ⋄ :If flag', 'a←1',
+    ':EndIf', ':EndSelect'])), [[1, 4]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', ':Case 1', 'a←1',
+    ':EndSelect ⋄ :If flag', 'b←1', ':EndIf'])), [[1, 4], [2, 4], [4, 6]]);
+  assert.deepEqual(await foldRanges(api, api.model([':EndSelect', 'a←1'])), []);
+});
+
+test('a new Case header does not inherit folded lines from a closed nested Select', async () => {
+  const api = loadLanguage();
+  const model = api.model([':Select x', ':Case 1', ':Select y', ':Case 4', 'a←4',
+    ':EndSelect ⋄ :Case 2', 'a←2', ':EndSelect', '⍝ after']);
+  assert.deepEqual(await foldRanges(api, model), [[1, 8], [2, 5], [3, 5], [4, 5], [6, 8]]);
+});
+
+test('a final Case header closes the previous branch at EOF without an empty fold', async () => {
+  const api = loadLanguage();
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', ':Case 1', 'a←1', ':Case 2'])),
+    [[1, 4], [2, 3]]);
+  assert.deepEqual(await foldRanges(api, api.model([':Select x', ':Case 1', ':Select y',
+    ':Case 4', 'a←4', ':EndSelect ⋄ :Case 2'])), [[1, 6], [2, 5], [3, 5], [4, 5]]);
+});
+
+test('folding updates after editing a cached Select model and keeps If and Trap branches', async () => {
+  const api = loadLanguage();
+  const model = api.model([':Select x', ':Case 1', 'a←1', ':EndSelect']);
+  assert.deepEqual(await foldRanges(api, model), [[1, 4], [2, 4]]);
+  model.setLine(1, 'plain←1');
+  assert.deepEqual(await foldRanges(api, model), []);
+  model.setLine(1, ':Select x');
+  assert.deepEqual(await foldRanges(api, model), [[1, 4], [2, 4]]);
+  assert.deepEqual(await foldRanges(api, api.model([':If x', 'a←1', ':Else', 'a←2', ':EndIf',
+    ':Trap 0', 'a←1', ':Case 1', 'a←2', ':EndTrap'])), [[1, 2], [3, 5], [6, 7], [8, 10]]);
+});
+
+test('nested If and Trap branches do not split the enclosing Select', async () => {
+  const api = loadLanguage();
+  const model = api.model([':Select x', ':Case 1', ':If flag', 'a←1', ':Else', 'a←0',
+    ':EndIf', ':Trap 0', 'b←1', ':Case 2', 'b←0', ':EndTrap', ':EndSelect']);
+  assert.deepEqual(await foldRanges(api, model), [[1, 13], [2, 13], [3, 4], [5, 7],
+    [8, 9], [10, 12]]);
+});
+
+test('same-line nested If keywords keep one fold start and clamp replaced branches', async () => {
+  const api = loadLanguage();
+  assert.deepEqual(await foldRanges(api, api.model([':If a ⋄ :If b', 'x←1', ':EndIf',
+    'y←2', ':EndIf', 'after←1'])), [[1, 5]]);
+  assert.deepEqual(await foldRanges(api, api.model([':If a', ':If b', 'x←1',
+    ':EndIf ⋄ :Else', 'y←2', ':EndIf', 'after←1'])), [[1, 3], [2, 3], [4, 6]]);
 });

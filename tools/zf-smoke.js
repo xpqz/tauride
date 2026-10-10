@@ -55,6 +55,30 @@ const server = http.createServer((req, res) => {
       await worker.getProxy();
       document.body.setAttribute('data-monaco-worker', 'ready');
     } finally { worker.dispose(); }
+
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;width:700px;height:300px';
+    document.body.append(host);
+    const model = monaco.editor.createModel(':Select x\\n⍝ preamble\\n:Case 1\\na←1\\n:EndSelect', 'apl');
+    const editor = monaco.editor.create(host, { model, folding: true });
+    try {
+      const folding = await editor.getContribution('editor.contrib.folding').getFoldingModel();
+      const regions = folding.regions;
+      const ranges = Array.from({ length: regions.length }, (_, i) =>
+        [regions.getStartLineNumber(i), regions.getEndLineNumber(i)]);
+      if (JSON.stringify(ranges) !== JSON.stringify([[1, 5], [3, 5]])) {
+        throw new Error('Select outer and Case folding ranges were not both available');
+      }
+      editor.setPosition({ lineNumber: 3, column: 1 });
+      await editor.getAction('editor.fold').run();
+      editor.setPosition({ lineNumber: 1, column: 1 });
+      await editor.getAction('editor.fold').run();
+      await editor.getAction('editor.unfold').run();
+      if (regions.isCollapsed(0) || !regions.isCollapsed(1)) {
+        throw new Error('Unfolding Select discarded the collapsed Case');
+      }
+      document.body.setAttribute('data-monaco-select-fold', 'ready');
+    } finally { editor.dispose(); model.dispose(); host.remove(); }
   });
 </script>
 </body>`);
@@ -72,6 +96,7 @@ const checks = {
   'session caption': /<span class="lm_title">Session<\/span>/,
   'html menu': /<div class="menu"/,
   'Monaco worker': /data-monaco-worker="ready"/,
+  'Select folding': /data-monaco-select-fold="ready"/,
 };
 
 // Chrome prints the DOM once the virtual time budget is spent but then stays
