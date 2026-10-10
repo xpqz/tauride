@@ -26,7 +26,14 @@
         const w = D.ide.wins[id];
         rm.emit('clearAllStopsReply', [id, request, w ? w.countUnsavedStops() : 0]);
       });
-      rm.on('caption', (c) => { D.ide.caption = c; });
+      rm.on('caption', (c) => {
+        const ide = D.ide;
+        ide.caption = c;
+        const focused = ide.focusedWin;
+        const w = focused && ide.wins[focused.id] === focused && focused.container
+          ? focused : ide.getMRUWin();
+        w && w.container && w.updateTitle();
+      });
       rm.on('close', ([id]) => {
         D.ide.wins[id].close();
         rm.emit('unblock', 0);
