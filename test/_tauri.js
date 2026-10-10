@@ -34,6 +34,7 @@ function isolatedEnv(userData, port, options = {}, inherited = process.env) {
   Object.assign(env, {
     XDG_CONFIG_HOME: userData,
     APPDATA: userData,
+    LOG_FILE: path.join(userData, 'dyalog*.dlf'),
     TAURI_WEBDRIVER_PORT: String(port),
     TAURI_UI_TEST_STDIN: '1',
   });

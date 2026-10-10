@@ -7,15 +7,19 @@ const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { TauriApplication, isolatedEnv, waitForStatus, binaryPath } = require('../test/_tauri');
 
-test('test app environment isolates preferences and removes inherited startup scripts and connections', () => {
-  const env = isolatedEnv('/tmp/test-profile', 4567, {}, {
-    PATH: '/usr/bin', HOME: '/home/user', RIDE_CONNECT: 'production:4502',
-    RIDE_JS: '/home/user/start.js', RIDE_PREFS: '/home/user/prefs.json', RIDE_SPAWN: 'old',
-  });
-  assert.deepEqual(env, {
-    PATH: '/usr/bin', HOME: '/home/user', XDG_CONFIG_HOME: '/tmp/test-profile',
-    APPDATA: '/tmp/test-profile', TAURI_WEBDRIVER_PORT: '4567', TAURI_UI_TEST_STDIN: '1',
-  });
+test('test app environment isolates preferences and interpreter logs without changing HOME', () => {
+  for (const inheritedLog of [undefined, '/home/user/.dyalog/default.dlf']) {
+    const env = isolatedEnv('/tmp/test-profile', 4567, {}, {
+      PATH: '/usr/bin', HOME: '/home/user', RIDE_CONNECT: 'production:4502',
+      RIDE_JS: '/home/user/start.js', RIDE_PREFS: '/home/user/prefs.json', RIDE_SPAWN: 'old',
+      ...(inheritedLog ? { LOG_FILE: inheritedLog } : {}),
+    });
+    assert.deepEqual(env, {
+      PATH: '/usr/bin', HOME: '/home/user', XDG_CONFIG_HOME: '/tmp/test-profile',
+      APPDATA: '/tmp/test-profile', LOG_FILE: path.join('/tmp/test-profile', 'dyalog*.dlf'),
+      TAURI_WEBDRIVER_PORT: '4567', TAURI_UI_TEST_STDIN: '1',
+    });
+  }
 });
 
 test('binary selection honors explicit and Cargo target paths', () => {
