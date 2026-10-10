@@ -37,7 +37,10 @@ class TFW {
       t.context.userData = t.context.app.userData;
     });
     test.afterEach.always(async (t) => {
-      if (t.context.app) await t.context.app.stop();
+      if (t.context.app) {
+        if (!t.passed) await t.context.app.captureFailure();
+        await t.context.app.stop();
+      }
     });
   }
 }
