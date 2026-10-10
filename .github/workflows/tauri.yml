@@ -43,7 +43,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev patchelf xvfb xclip libxkbcommon-dev gdb
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev patchelf xvfb xclip libxkbcommon-dev dbus-daemon
 
       - uses: actions/setup-node@v5
         with:
@@ -65,8 +65,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           RIDE_TEST_BINARY: src-tauri/target/ui-tests/debug/tauride
-          RIDE_TEST_DEBUG_STARTUP: '1'
-        run: xvfb-run --auto-servernum npm run test:connection
+        run: xvfb-run --auto-servernum dbus-run-session -- npm run test:connection
 
       # Runs beforeBuildCommand (npm run css && node tauri/stage.js) first.
       # tauri.bundle.conf.json turns bundling on for CI only.

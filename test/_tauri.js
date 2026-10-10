@@ -122,16 +122,6 @@ class TauriApplication {
       }
       return this;
     } catch (error) {
-      if (process.platform === 'linux' && process.env.RIDE_TEST_DEBUG_STARTUP === '1' && this.isRunning()) {
-        try {
-          const trace = await promisify(execFile)('sudo', ['-n', 'gdb', '-batch',
-            '-ex', 'set pagination off', '-ex', 'thread apply all bt', '-p', String(this.child.pid)],
-          { timeout: 15000, maxBuffer: 256 * 1024 });
-          this.output += `\nStartup backtrace:\n${trace.stdout}\n${trace.stderr}`;
-        } catch (traceError) {
-          this.output += `\nStartup backtrace failed: ${traceError.message}\n${traceError.stdout || ''}\n${traceError.stderr || ''}`;
-        }
-      }
       await this.stop();
       error.message += `\n${this.output}`;
       throw error;
