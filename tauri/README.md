@@ -21,7 +21,7 @@ development files.
 
 Both first run `npm run css` and `node tauri/stage.js`, which copies the
 files the pages load into `_/tauri-dist` (the Electron build's `mk` filter,
-with only the `node_modules` trees the pages use) and generates
+with the bundled Monaco editor and only the `node_modules` trees the pages use) and generates
 `tauri-modules.js` (see below). Ride's environment variables work as before:
 `RIDE_SPAWN=/usr/bin/dyalog`, `RIDE_CONNECT=host:port`, `RIDE_LOG`,
 `RIDE_JS`, `RIDE_EDITOR`, `RIDE_CONF`, `RIDE_PREFS`.
@@ -77,8 +77,8 @@ Use a separate target directory from ordinary builds. AVA arguments pass through
 
 `node mk zf` writes `_/zf`: the frontend laid out as Dyalog's `RIDEapp`
 directory (`index.html` and the other pages at the root, `src/`, `lib/`,
-`style/`, `_/version.js`, and under `node_modules/` only the jquery, toastr
-and monaco-editor builds the pages load), zipped as
+`style/`, `_/version.js`, `_/monaco/` (the editor, stylesheet and workers),
+and under `node_modules/` only jquery and toastr), zipped as
 `_/tauride-zf-<version>.zip`, which unpacks as `RIDEapp/`. A Dyalog
 interpreter started with `RIDE_INIT=HTTP:*:<port>` serves that directory
 from `[DYALOG]/RIDEapp` to a web browser, and the page connects back to the

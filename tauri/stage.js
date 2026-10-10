@@ -13,10 +13,9 @@ const out = path.join(root, '_', 'tauri-dist');
 const entries = [
   'index.html', 'about.html', 'dialog.html', 'status.html', 'empty.html',
   'D.png', 'favicon.ico', 'favicon.png',
-  'src', 'lib', 'style', '_/version.js',
+  'src', 'lib', 'style', '_/version.js', '_/monaco',
   'node_modules/jquery/dist',
   'node_modules/toastr/build',
-  'node_modules/monaco-editor/min',
   // Buffer for the webview (tauri/shim.js loads it as a CommonJS module).
   'node_modules/buffer',
   'node_modules/base64-js',

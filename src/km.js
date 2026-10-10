@@ -382,6 +382,9 @@
   };
   D.mapKeys = (ed) => {
     const { me } = ed;
+    // Monaco's dynamic keybinding service is shared by all editors.
+    const addCommand = (key, run, when) => me.addCommand(key, run,
+      `editorId == ${me.getId()}${when ? ` && (${when})` : ''}`);
     const kc = monaco.KeyCode;
     const km = monaco.KeyMod;
     const ctrlcmd = {
@@ -414,24 +417,24 @@
         } else if (cmd === 'LL' || cmd === 'RL') {
           cond = '!suggestWidgetVisible && !findInputFocussed';
         } else if (nkc === kc.Escape) cond = '!suggestWidgetVisible && !editorHasMultipleSelections && !findWidgetVisible && !inSnippetMode';
-        me.addCommand(nkc, () => D.commands[cmd](me), cond);
+        addCommand(nkc, () => D.commands[cmd](me), cond);
       });
     }
     addCmd(D.keyMap.dyalogDefault);
     addCmd(D.keyMap.dyalog);
-    me.addCommand(
+    addCommand(
       kc.Tab,
       () => ed.indentOrComplete(me),
       '!suggestWidgetVisible && !editorHasMultipleSelections && !findWidgetVisible && !inSnippetMode && !editorTabMovesFocus',
     );
-    me.addCommand(
+    addCommand(
       kc.RightArrow,
       () => me.trigger('editor', 'acceptSelectedSuggestion'),
       'suggestWidgetVisible',
     );
-    me.addCommand(kc.DownArrow, () => ed.DC(me), '!suggestWidgetVisible && !findInputFocussed');
-    me.addCommand(kc.UpArrow, () => ed.UC(me), '!suggestWidgetVisible && !findInputFocussed');
-    me.addCommand(kc.RightArrow, () => ed.RC(me), '!suggestWidgetVisible && !findInputFocussed');
+    addCommand(kc.DownArrow, () => ed.DC(me), '!suggestWidgetVisible && !findInputFocussed');
+    addCommand(kc.UpArrow, () => ed.UC(me), '!suggestWidgetVisible && !findInputFocussed');
+    addCommand(kc.RightArrow, () => ed.RC(me), '!suggestWidgetVisible && !findInputFocussed');
 
     me.addAction({
       id: 'dyalog-skip-to-line',
@@ -452,11 +455,13 @@
       run: (e) => ed.FX(e),
     });
   };
-  D.remDefaultMap = (me) => {
-    const kbs = me._standaloneKeybindingService;
-    kbs.addDynamicKeybinding('-editor.action.insertCursorAtEndOfEachLineSelected', null, () => {});
-    kbs.addDynamicKeybinding('-editor.action.blockComment', null, () => {});
-    kbs.addDynamicKeybinding('-editor.action.formatDocument', null, () => {});
+  D.remDefaultMap = () => {
+    if (D.defaultMapRemoved) return;
+    D.defaultMapRemoved = monaco.editor.addKeybindingRules([
+      { command: '-editor.action.insertCursorAtEndOfEachLineSelected', keybinding: 0 },
+      { command: '-editor.action.blockComment', keybinding: 0 },
+      { command: '-editor.action.formatDocument', keybinding: 0 },
+    ]);
   };
   const l = {
     Unknown: 'unknown',

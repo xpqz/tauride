@@ -279,10 +279,9 @@ D.IDE = function IDE(opts = {}) {
       const ae = document.activeElement;
       const fi = fw._findInput;
       const fr = fw._replaceInput.inputBox;
-      if (ae === fi.inputBox.input || ae === fr) { // find or replace fields focused?
+      if (ae === fi.inputBox.inputElement || ae === fr.inputElement) { // find or replace fields focused?
         D.util.insert(ae, s);
-        if (fi.inputBox.input === ae) fi._onInput.fire();
-        else if (fr === ae) fw._state.change({ replaceString: fr.value }, false);
+        ae.dispatchEvent(new Event('input', { bubbles: true }));
       } else { // something else has focus, insert into window
         w.insert(s);
       }
@@ -575,7 +574,11 @@ D.IDE = function IDE(opts = {}) {
     D.prf.dbg() && setTimeout(() => toggleDBG(D.prf.dbg()), 500);
   }
   // OSX is stealing our focus.  Let's steal it back!  Bug #5
-  D.mac && !ide.floating && setTimeout(() => { ide.wins[0].focus(); }, 500);
+  D.mac && !ide.floating && setTimeout(() => {
+    const focused = ide.focusedWin;
+    const w = focused && ide.wins[focused.id] === focused ? focused : ide.getMRUWin();
+    w && w.focus();
+  }, 500);
   D.prf.lineNums((x) => {
     eachWin((w) => w.setLN && w.setLN(x));
     updMenu();
@@ -774,7 +777,11 @@ D.IDE = function IDE(opts = {}) {
         w.close();
         w.id = -1;
       } else if (w) {
-        w.me.getModel().dispose();
+        // Blur while connected so Monaco clears focus before GoldenLayout removes its DOM.
+        document.activeElement.blur();
+        const model = w.me.getModel();
+        w.me.dispose();
+        model.dispose();
         w.container && w.container.close();
       }
       delete ide.wins[x.win]; ide.focusMRUWin();
@@ -824,6 +831,8 @@ D.IDE = function IDE(opts = {}) {
         done = 1;
       } else if (D.wm) D.wm.main().focus();
       if (done) return;
+      // Clear Monaco focus before creating an editor and reparenting the focused DOM.
+      document.activeElement.blur();
       const ed = new D.Ed(ide, editorOpts);
       ed.focusTS = +new Date();
       ide.wins[w] = ed;

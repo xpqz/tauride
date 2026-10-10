@@ -41,6 +41,7 @@ async fn focused(window: &WebviewWindow) -> Result<bool, String> {
 }
 
 async fn focus(window: &WebviewWindow) -> Result<(), String> {
+    if focused(window).await? { return Ok(()); }
     window.set_focus().map_err(input_error)?;
     for _ in 0..40 {
         if focused(window).await? { return Ok(()); }
@@ -55,6 +56,18 @@ fn native_input() -> Result<Enigo, String> {
         release_keys_when_dropped: true,
         ..Settings::default()
     }).map_err(input_error)
+}
+
+#[cfg(target_os = "macos")]
+async fn on_main_thread<T: Send + 'static>(
+    window: &WebviewWindow,
+    action: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let (send, receive) = tokio::sync::oneshot::channel();
+    window.run_on_main_thread(move || {
+        let _ = send.send(action());
+    }).map_err(input_error)?;
+    receive.await.map_err(input_error)?
 }
 
 fn special_key(value: char) -> Option<(Key, bool)> {
@@ -76,6 +89,13 @@ fn special_key(value: char) -> Option<(Key, bool)> {
 pub async fn ui_test_keys(window: WebviewWindow, keys: Vec<String>) -> Result<(), String> {
     let _lock = INPUT.lock().await;
     focus(&window).await?;
+    #[cfg(target_os = "macos")]
+    return on_main_thread(&window, move || send_keys(keys)).await;
+    #[cfg(not(target_os = "macos"))]
+    send_keys(keys)
+}
+
+fn send_keys(keys: Vec<String>) -> Result<(), String> {
     // Enigo releases held modifiers on Drop, including after an input error.
     let mut input = native_input()?;
     let mut modifiers = Vec::new();
@@ -108,15 +128,52 @@ pub async fn ui_test_move_to(window: WebviewWindow, x: f64, y: f64) -> Result<()
     if !x.is_finite() || !y.is_finite() { return Err("Pointer coordinates must be finite".into()); }
     let _lock = INPUT.lock().await;
     focus(&window).await?;
-    let scale = window.scale_factor().map_err(input_error)?;
-    let origin = window.inner_position().map_err(input_error)?;
-    let size = window.inner_size().map_err(input_error)?;
-    if x < 0.0 || y < 0.0 || x * scale >= f64::from(size.width) || y * scale >= f64::from(size.height) {
-        return Err("Pointer target is outside the webview".into());
+    #[cfg(target_os = "macos")]
+    {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        window.with_webview(move |webview| {
+            let result = (|| {
+                use objc2_app_kit::{NSScreen, NSView};
+                use objc2_foundation::NSPoint;
+                let marker = objc2::MainThreadMarker::new().expect("Tauri main thread");
+                // Tauri supplies the live WKWebView on its main thread; use its own origin.
+                let content = unsafe { &*(webview.inner().cast::<NSView>()) };
+                let native = content.window().ok_or_else(|| input_error("webview has no window"))?;
+                let bounds = content.bounds();
+                let insets = content.safeAreaInsets();
+                let width = bounds.size.width - insets.left - insets.right;
+                let height = bounds.size.height - insets.top - insets.bottom;
+                if x < 0.0 || y < 0.0 || x >= width || y >= height {
+                    return Err("Pointer target is outside the webview".into());
+                }
+                // WebKit's CSS viewport starts inside the native view's safe area.
+                let local_x = bounds.origin.x + insets.left + x;
+                let top_y = insets.top + y;
+                let local_y = if content.isFlipped() { bounds.origin.y + top_y }
+                    else { bounds.origin.y + bounds.size.height - top_y };
+                let point = content.convertPoint_toView(NSPoint::new(local_x, local_y), None);
+                let screen = native.convertPointToScreen(point);
+                // AppKit has a bottom-left origin; CoreGraphics uses the primary screen's top-left.
+                let screens = NSScreen::screens(marker);
+                if screens.count() == 0 { return Err(input_error("desktop has no screens")); }
+                let primary = screens.objectAtIndex(0).frame();
+                let screen_y = primary.origin.y + primary.size.height - screen.y;
+                native_input()?.move_mouse(screen.x.round() as i32, screen_y.round() as i32, Coordinate::Abs).map_err(input_error)
+            })();
+            let _ = send.send(result);
+        }).map_err(input_error)?;
+        return receive.await.map_err(input_error)?;
     }
-    // CoreGraphics uses screen points; X11 and Windows use physical pixels.
-    let unit = if cfg!(target_os = "macos") { 1.0 / scale } else { 1.0 };
-    let screen_x = (f64::from(origin.x) + x * scale) * unit;
-    let screen_y = (f64::from(origin.y) + y * scale) * unit;
-    native_input()?.move_mouse(screen_x.round() as i32, screen_y.round() as i32, Coordinate::Abs).map_err(input_error)
+    #[cfg(not(target_os = "macos"))]
+    {
+        let scale = window.scale_factor().map_err(input_error)?;
+        let origin = window.inner_position().map_err(input_error)?;
+        let size = window.inner_size().map_err(input_error)?;
+        if x < 0.0 || y < 0.0 || x * scale >= f64::from(size.width) || y * scale >= f64::from(size.height) {
+            return Err("Pointer target is outside the webview".into());
+        }
+        let screen_x = f64::from(origin.x) + x * scale;
+        let screen_y = f64::from(origin.y) + y * scale;
+        native_input()?.move_mouse(screen_x.round() as i32, screen_y.round() as i32, Coordinate::Abs).map_err(input_error)
+    }
 }

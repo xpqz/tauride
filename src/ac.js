@@ -68,9 +68,8 @@
 
   D.ac = (me) => {
     me.tabComplete = 0;
-    const ta = me.getDomNode().getElementsByTagName('textarea')[0];
-    ta.addEventListener('compositionstart', () => { me.isComposing = 1; });
-    ta.addEventListener('compositionend', () => {
+    me.onDidCompositionStart(() => { me.isComposing = 1; });
+    me.onDidCompositionEnd(() => {
       me.isComposing = 0;
       cce && bqChangeHandlerMe(me, cce);
       cce = null;
@@ -138,7 +137,6 @@
           e.preventDefault();
           const t = s.slice(0, p - 1) + D.bq[be.key] + s.slice(p);
           fi.setValue(t);
-          fi._onInput.fire();
           tgt.selectionStart = p;
           tgt.selectionEnd = p;
         }

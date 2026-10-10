@@ -40,7 +40,9 @@ test(
     const lb_tip_desc = await c.$('#lb_tip_desc');
     await lb_tip_body.waitForDisplayed();
     t.true(await lb_tip_body.isDisplayed({ withinViewport: true }));
-    t.is(await lb_tip_desc.getText(), 'JOT DIAERESIS (⍤)');
+    await c.waitUntil(async () => (await lb_tip_desc.getText()).toUpperCase() === 'JOT DIAERESIS (⍤)',
+      { timeout: 10000, timeoutMsg: 'Jot Diaeresis tooltip did not appear' });
+    t.is((await lb_tip_desc.getText()).toUpperCase(), 'JOT DIAERESIS (⍤)');
     
     const lb_tip = await c.$('#lb_tip');
     await moveTo(c, lb_tip);

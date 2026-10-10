@@ -5,13 +5,13 @@ const { sessionLastLines, tfw, keys, readClipboard } = require('./_utils');
 tfw.init({ src: 'ed', interpreter: true });
 
 async function waitForEditor(c) {
-  await c.waitUntil(async () => c.execute(() => Object.values(D.ide.wins).some(w => w !== D.ide.wins[0] && w.me && w.me.getModel() && w.me.getLayoutInfo().width > 0 && w.me.hasTextFocus())), {
+  await c.waitUntil(async () => c.execute(() => Object.values(D.ide.wins).some(w => w !== D.ide.wins[0] && !w.firstOpen && w.me && w.me.getModel() && w.me.getLayoutInfo().width > 0 && w.me.hasTextFocus() && w.dom.contains(document.activeElement) && D.ide.focusedWin === w)), {
     timeout: 10000, timeoutMsg: 'Editor did not become ready',
   });
 }
 
 async function waitForPrompt(c) {
-  await c.waitUntil(async () => c.execute(() => D.ide.wins[0].promptType === 1), { timeout: 10000 });
+  await c.waitUntil(async () => c.execute(() => D.ide.wins[0].promptType === 1 && D.ide.wins[0].me.hasTextFocus() && D.ide.wins[0].dom.contains(document.activeElement)), { timeout: 10000 });
 }
 
 async function executeExpression(c, expression) {
@@ -27,10 +27,15 @@ async function executeExpression(c, expression) {
 
 async function copiedText(c, expected, suffix = false) {
   let text;
-  await c.waitUntil(async () => {
-    text = await readClipboard();
-    return suffix ? text.endsWith(expected) : text === expected;
-  }, { timeout: 10000, timeoutMsg: 'Native clipboard did not receive the copied text' });
+  try {
+    await c.waitUntil(async () => {
+      text = await readClipboard();
+      return suffix ? text.endsWith(expected) : text === expected;
+    }, { timeout: 10000, timeoutMsg: 'Native clipboard did not receive the copied text' });
+  } catch (error) {
+    error.message += `; expected${suffix ? ' suffix' : ''} ${JSON.stringify(expected)}, actual ${JSON.stringify(text)}`;
+    throw error;
+  }
   return text;
 }
 
@@ -51,7 +56,7 @@ test(
     });
     const [mac, win] = (await c.execute(() => [D.mac, D.win]));
     const eol = win ? '\r\n' : '\n';
-    const cc = mac ? Key.Meta : Key.Control;
+    const cc = mac ? Key.Command : Key.Control;
 
     await keys(c, ')ED <]');
     await keys(c, ' ls', Key.Enter);
@@ -91,12 +96,19 @@ test(
 
     await edit_trace.waitForExist();
     await waitForEditor(c);
+    const reopenedLines = await c.execute(() => Object.values(D.ide.wins)
+      .find(w => w.name === 'f' && w.me).me.getModel().getLinesContent());
+    t.deepEqual(reopenedLines.map(line => line.trimStart()), ['f', '2']);
+    const reopenedText = reopenedLines.join(eol);
+    const clipboardSentinel = 'before reopened f copy';
+    await c.execute(value => navigator.clipboard.writeText(value), clipboardSentinel);
+    await copiedText(c, clipboardSentinel);
 
     await keys(c, cc, 'a');
     await keys(c, cc, 'c');
     await keys(c, Key.Escape);
-    text = await copiedText(c, ` f${eol} 2`);
-    t.is(text, ` f${eol} 2`);
+    text = await copiedText(c, reopenedText);
+    t.is(text, reopenedText);
   },
 );
 
@@ -111,7 +123,7 @@ test(
       D.prf.pfkeys(pf);
       return D.mac;
     }));
-    const cc = mac ? Key.Meta : Key.Control;
+    const cc = mac ? Key.Command : Key.Control;
     let text;
 
     await keys(c, ')ED f', Key.Enter);
@@ -130,14 +142,22 @@ test(
     await edit_trace.waitForExist({ reverse: true });
     await waitForPrompt(c);
     await c.execute(() => { D.prf.floating(1) });
-    const whs = await c.getWindowHandles();
+    const main = await c.getWindowHandle();
     await keys(c, ')ED g', Key.Enter);
-    await c.waitUntil(async () => (await c.getWindowHandles()).some(h => !whs.includes(h)), { timeout: 10000, timeoutMsg: 'Floating editor window did not open' });
-    const [wh] = (await c.getWindowHandles()).filter(x => !whs.includes(x));
-    await c.switchToWindow(wh);
+    // Find g in the reused pool webview; the newest handle is its empty replacement.
     await c.waitUntil(async () => {
-      return await c.execute(() => Object.values(D.ide.wins).some(w => w.meIsReady && w !== D.ide.wins[0]))
-    }, { timeout: 10000 });
+      for (const handle of await c.getWindowHandles()) {
+        if (handle === main) continue;
+        await c.switchToWindow(handle);
+        const ready = await c.execute(() => typeof D !== 'undefined' && D.ide
+          && Object.values(D.ide.wins).some(w => w !== D.ide.wins[0]
+            && w.name === 'g' && w.me && w.me.getModel()
+            && w.me.getModel().getLineContent(1).trim() === 'g'));
+        if (ready) return true;
+      }
+      return false;
+    }, { timeout: 10000, timeoutMsg: 'Floating g editor did not initialize' });
+    await waitForEditor(c);
     await keys(c, Key.Enter, 'cd', Key.F2);
     await keys(c, cc, 'a');
     await keys(c, cc, 'c');

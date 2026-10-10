@@ -46,7 +46,20 @@ const server = http.createServer((req, res) => {
     return;
   }
   res.writeHead(200, { 'Content-Type': types[path.extname(f)] || 'application/octet-stream' });
-  fs.createReadStream(f).pipe(res);
+  if (p === '/') {
+    const html = fs.readFileSync(f, 'utf8').replace('</body>', `
+<script>
+  D.mop.then(async () => {
+    const worker = monaco.editor.createWebWorker({ worker: MonacoEnvironment.getWorker('', 'editor') });
+    try {
+      await worker.getProxy();
+      document.body.setAttribute('data-monaco-worker', 'ready');
+    } finally { worker.dispose(); }
+  });
+</script>
+</body>`);
+    res.end(html);
+  } else fs.createReadStream(f).pipe(res);
 });
 
 // Chrome logs every console level as INFO, so an uncaught exception is
@@ -58,6 +71,7 @@ const isError = (l) => /Uncaught|:ERROR:CONSOLE/.test(l);
 const checks = {
   'session caption': /<span class="lm_title">Session<\/span>/,
   'html menu': /<div class="menu"/,
+  'Monaco worker': /data-monaco-worker="ready"/,
 };
 
 // Chrome prints the DOM once the virtual time budget is spent but then stays

@@ -832,8 +832,7 @@
 <span id="apl_font" style="font-family: apl;">Ride</span> 
 
 <script>
-  // Monaco uses a custom amd loader that over-rides node's require.
-  // Keep a reference to node's require so we can restore it after executing the amd loader file.
+  // Browser libraries need their browser globals rather than Electron CommonJS.
   if(typeof require !== 'undefined') { var nodeRequire = require; delete require; }
   if(typeof module !== 'undefined') { var mod = module; delete module; }
   if(typeof exports !== 'undefined') { var exp = exports; delete exports; }
@@ -855,23 +854,12 @@
     if(typeof exp !== 'undefined') { exports = exp; delete exp; }
   </script>
   
-<script src="node_modules/monaco-editor/min/vs/loader.js"></script>
+<link rel="stylesheet" href="_/monaco/monaco.css">
+<script src="_/monaco/monaco.js"></script>
 <script>
-  // Save Monaco's amd require and restore Node's require
-  var amdRequire = require;
-  if(typeof nodeRequire !== 'undefined') require = nodeRequire;
-</script>
-<script>
-  let dir = typeof __dirname !== 'undefined' ? `${__dirname}/` : '';
-  amdRequire.config({
-    baseUrl: dir + 'node_modules/monaco-editor/min'
-  });
-    
   self.module = undefined;
   self.process && (self.process.browser = true);
 </script>
-
-
 
 <!--Ride UI-->
 <script src=_/version.js      ></script>

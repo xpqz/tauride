@@ -445,9 +445,9 @@
       const fs = D.zoom2fs[D.prf.zoom() + 10];
       me = monaco.editor.create(q.me, {
         acceptSuggestionOnEnter: 'off',
-        autoClosingBrackets: true,
+        autoClosingBrackets: 'always',
         automaticLayout: true,
-        autoIndent: true,
+        autoIndent: 'full',
         contextmenu: false,
         cursorStyle: D.prf.blockCursor() ? 'block' : 'line',
         cursorBlinking: D.prf.cursorBlinking(),
@@ -458,12 +458,12 @@
         lineHeight: fs + 2,
         lineNumbers: (x) => `[${x - 1}]`,
         minimap: { enabled: false },
-        matchBrackets: true,
+        matchBrackets: 'always',
         mouseWheelZoom: false,
-        renderIndentGuides: false,
+        guides: { indentation: false },
         unicodeHighlight: { ambiguousCharacters: false },
         useTabStops: false,
-        wordBasedSuggestions: false,
+        wordBasedSuggestions: 'off',
         value: '{R}←{X}tradfn(Y Z);local\n'
           + 'dfn←{ ⍝ comment\n'
           + '  0 ¯1.2e¯3j¯.45 \'string\' ⍬\n'

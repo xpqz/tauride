@@ -43,18 +43,15 @@ function loadLanguage(initial = {}) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../src', file), 'utf8'), context);
   });
   function model(lines, language = 'apl') {
-    const m = { language, getLineContent: (n) => lines[n - 1],
-      getLineCount: () => lines.length, _tokens: { _lineTokens: lines },
-      invalidate() { this._tokenization = { _tokenizationStateStore: { _beginState: [] } }; },
-      forceTokenization(n) {
-        const states = this._tokenization._tokenizationStateStore._beginState;
-        let state = providers[language].getInitialState();
-        for (let i = 0; i < n; i++) {
-          states[i] = state;
-          state = providers[language].tokenize(lines[i], state).endState;
-        }
-      } };
-    m.invalidate(); m.forceTokenization(lines.length); models.push(m); return m;
+    let version = 1;
+    const m = { language, getLanguageId: () => language,
+      getVersionId: () => version,
+      getLineContent: (n) => lines[n - 1],
+      getLineCount: () => lines.length,
+      setLine(n, text) { lines[n - 1] = text; version += 1; },
+      invalidate() {} };
+    models.push(m);
+    return m;
   }
   return { D, providers, formatters, model };
 }
@@ -148,11 +145,17 @@ test('script tradfn numbering recognizes a delimiter on the first line', () => {
     [0, 1, 2]);
 });
 
-test('formatting initializes token states for a fresh untokenized model', () => {
+test('formatting initializes token states for a fresh model', () => {
   const api = loadLanguage();
-  const m = api.model(classLines);
-  m.invalidate();
-  m._tokens._lineTokens = [];
+  const m = api.model(classLines.slice());
   assert.equal(indentAt(api, m, 2), 3);
   assert.equal(indentAt(api, m, 3), 6);
+});
+
+test('formatting updates after editing an earlier block opener', () => {
+  const api = loadLanguage();
+  const m = api.model(classLines.slice());
+  assert.equal(indentAt(api, m, 3), 6);
+  m.setLine(1, 'plain text');
+  assert.equal(indentAt(api, m, 3), 3);
 });

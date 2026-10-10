@@ -4,7 +4,7 @@ const { tfw } = require('./_utils');
 tfw.init({ src: 'se', interpreter: true });
 
 async function openWindow(c, id, tracer, floating = false) {
-  const previous = floating ? await c.getWindowHandles() : [];
+  const main = floating ? await c.getWindowHandle() : undefined;
   await c.execute((token, debuggerWindow) => {
     D.ide.handlers.OpenWindow({ token, debugger: debuggerWindow, name: `toolbar${token}`,
       text: [`r←toolbar${token}`, 'r←1'], entityType: 1, currentRow: 0,
@@ -12,10 +12,24 @@ async function openWindow(c, id, tracer, floating = false) {
   }, id, tracer);
   let handle;
   if (floating) {
-    await c.waitUntil(async () => (await c.getWindowHandles()).some(h => !previous.includes(h)),
-      { timeout: 10000, timeoutMsg: 'Floating toolbar test window did not open' });
-    handle = (await c.getWindowHandles()).find(h => !previous.includes(h));
-    await c.switchToWindow(handle);
+    // Find the token in its reused pool webview; the newest handle is an empty replacement.
+    await c.waitUntil(async () => {
+      for (const candidate of await c.getWindowHandles()) {
+        if (candidate === main) continue;
+        await c.switchToWindow(candidate);
+        const ready = await c.execute((token) => {
+          if (typeof D === 'undefined' || !D.ide) return false;
+          const ed = D.ide.wins[token];
+          return !!(ed && ed.me && ed.me.getModel()
+            && ed.me.getModel().getLineCount() === 2);
+        }, id);
+        if (ready) {
+          handle = candidate;
+          return true;
+        }
+      }
+      return false;
+    }, { timeout: 10000, timeoutMsg: 'Floating toolbar test editor did not initialize' });
   }
   await c.waitUntil(async () => c.execute((token) => {
     const ed = D.ide.wins[token];
