@@ -46,6 +46,18 @@
   updBQ(); D.prf.prefixMaps(updBQ); D.prf.kbdLocale(updBQ);
   const openURI = (uri) => { D.openExternal(encodeURI(uri)); };
 
+  const diagnosticCommand = (name) => {
+    if (!D.el) {
+      if (typeof I !== 'undefined' && I.abt && !I.abt.hidden && I.abt.contains(document.activeElement) && D.aboutDiagnostic) { D.aboutDiagnostic[name](); return true; }
+      return false;
+    }
+    if (window.__RIDE__) return false;
+    const focused = D.el.BrowserWindow.getFocusedWindow();
+    if (!focused || !/\/(about|log)\.html$/.test(focused.webContents.getURL())) return false;
+    focused.webContents.executeJavaScript(`window.diagnosticText.${name}()`);
+    return true;
+  };
+
   D.keyMap.dyalogDefault = { };
 
   $.extend(D.commands, {
@@ -65,6 +77,7 @@
       }
     },
     SA(me) {
+      if (diagnosticCommand('selectAll')) return;
       if (me) me.setSelection(me.getModel().getFullModelRange());
       else document.execCommand('SelectAll');
     },
@@ -269,26 +282,26 @@
           contextIsolation: true,
           nodeIntegration: false,
         },
-      }, `file://${__dirname}/empty.html`);
+      }, `file://${__dirname}/log.html`);
       const cn = nodeRequire(`${__dirname}/src/cn`);
       D.logw = w;
-      w.eval('var d = document, h=d.documentElement, b=d.body, e=d.createElement("div");'
-                                    + 'b.style.fontFamily="monospace";b.style.overflow="scroll";'
-                                    + 'e.style.whiteSpace="pre";!!b.appendChild(e);');
       const f = (x) => {
         const t = JSON.stringify(`${x}\n`);
-        w.eval(`e.textContent += ${t}; h.scrollTop = h.scrollHeight`);
+        w.eval(`window.diagnosticText.append(${t})`);
       };
       f(cn.getLog().filter((x) => x).join('\n'));
       cn.addLogListener(f);
-      w.onClosed(() => { delete D.logw; cn.rmLogListener(f); });
+      w.onClosed(() => { if (D.logw === w) delete D.logw; cn.rmLogListener(f); });
     },
     TIP() {
       const w = D.ide.focusedWin;
       const u = w.me.getPosition();
       w.vt.show({ line: u.lineNumber, ch: Math.max(0, u.column - 1) }, 1);
     },
-    SC(me) { me.trigger('editor', 'actions.find'); },
+    SC(me) {
+      if (diagnosticCommand('find')) return;
+      me.trigger('editor', 'actions.find');
+    },
     RP(me) { me.trigger('editor', 'editor.action.startFindReplaceAction'); },
     PV(me) { me.trigger('editor', 'editor.action.previousMatchFindAction'); },
     NX(me) { me.trigger('editor', 'editor.action.nextMatchFindAction'); },

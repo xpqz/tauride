@@ -490,8 +490,16 @@
     </div>
   </div>
   <div id=abt_ta_wr><textarea id=abt_ta readonly wrap=off></textarea></div>
+  <div class=diagnostic_find data-diagnostic=find-bar hidden>
+    <label>Find <input type=search aria-label="Find text"></label>
+    <button data-diagnostic=previous>Previous</button>
+    <button data-diagnostic=next>Next</button>
+    <span data-diagnostic=count role=status aria-live=polite></span>
+  </div>
   <div class=dlg_btns>
-    <button id=abt_copy><u>C</u>opy</button>
+    <button id=abt_copy data-diagnostic=copy><u>C</u>opy</button>
+    <button data-diagnostic=copy-all>Copy All</button>
+    <button data-diagnostic=find>Find</button>
     <button id=abt_close>C<u>l</u>ose</button>
   </div>
 </div>
@@ -885,6 +893,7 @@
 <script src=src/kbds.js       ></script>
 <script src=src/hlp.js        ></script>
 <script src=src/util.js       ></script>
+<script src=src/diagnostic.js></script>
 <script src=src/abt.js        ></script>
 <script src=src/prf.js        ></script>
 <script src=src/cmds.js       ></script>

@@ -32,7 +32,7 @@
     // its HTML to a temp file) goes through the ridefile:// scheme, which
     // WebView2 serves as http://ridefile.localhost.
     const fileScheme = window.__RIDE__.platform === 'windows' ? 'http://ridefile.localhost' : 'ridefile://localhost';
-    const appPage = /^\/?(index|dialog|status|about|empty)\.html([?#].*)?$/;
+    const appPage = /^\/?(index|dialog|status|about|log|empty)\.html([?#].*)?$/;
     const appUrl = (u) => {
       const str = String(u);
       if (/^file:\/\//.test(str)) {
@@ -284,7 +284,17 @@
         const bw = new D.el.BrowserWindow({ ...o, parent: o.parent && o.parent.native });
         D.elm.enable(bw.webContents);
         if (o.title) bw.setTitle(o.title);
-        bw.loadURL(typeof url === 'function' ? url(bw.id) : url);
+        const target = typeof url === 'function' ? url(bw.id) : url;
+        if (/\/(about|log)\.html$/.test(target)) {
+          bw.webContents.on('context-menu', (event, params) => {
+            D.el.Menu.buildFromTemplate([
+              { role: 'copy', enabled: !!params.selectionText },
+              { label: 'Copy All', click: () => bw.webContents.executeJavaScript('window.diagnosticText.copyAll()') },
+              { label: 'Find', click: () => bw.webContents.executeJavaScript('window.diagnosticText.find()') },
+            ]).popup({ window: bw });
+          });
+        }
+        bw.loadURL(target);
         return new Win(bw);
       },
       displayBounds: (r) => Promise.resolve(D.el.screen.getDisplayMatching(r).bounds),

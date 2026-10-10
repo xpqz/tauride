@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
 const out = path.join(root, '_', 'tauri-dist');
 
 const entries = [
-  'index.html', 'about.html', 'dialog.html', 'status.html', 'empty.html',
+  'index.html', 'about.html', 'dialog.html', 'status.html', 'log.html', 'empty.html',
   'D.png', 'favicon.ico', 'favicon.png',
   'src', 'lib', 'style', '_/version.js',
   'node_modules/jquery/dist',
@@ -68,7 +68,7 @@ cjs.forEach((rel) => {
     + `${fs.readFileSync(path.join(root, rel), 'utf8')}\n};\n`;
 });
 fs.writeFileSync(path.join(out, 'tauri-modules.js'), reg);
-['index.html', 'dialog.html', 'status.html', 'about.html', 'empty.html'].forEach((page) => {
+['index.html', 'dialog.html', 'status.html', 'about.html', 'log.html', 'empty.html'].forEach((page) => {
   const f = path.join(out, page);
   const html = fs.readFileSync(f, 'utf8').replace(/node_modules\//g, 'vendor/');
   const i = html.indexOf('<script');

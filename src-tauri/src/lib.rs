@@ -242,6 +242,8 @@ pub fn run() {
             ui_tests::ui_test_keys,
             #[cfg(feature = "ui-tests")]
             ui_tests::ui_test_move_to,
+            #[cfg(feature = "ui-tests")]
+            ui_tests::ui_test_menu_command,
             log,
             open_url,
             win::win_op,
