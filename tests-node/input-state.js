@@ -90,7 +90,7 @@ test('floating editors do not present an unsynchronized session input state', ()
 });
 
 
-test('closing an old browser connection disconnects its own IDE without affecting a newer connection', () => {
+test('browser socket closure calls die on its captured IDE', () => {
   const init = fs.readFileSync(path.join(root, 'src/init.js'), 'utf8');
   const start = init.indexOf('      const ws = new WebSocket');
   const end = init.indexOf('\n    }\n    // Tauri', start);
