@@ -7,9 +7,17 @@
 }
 .diagnostic_find input { min-width: 80px; max-width: 140px; }
 .diagnostic_find [data-diagnostic=count] { white-space: nowrap; }
+.diagnostic_text { position: relative; overflow: hidden; }
+.diagnostic_match {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(255, 191, 0, 0.4);
+  box-shadow: inset 0 0 0 1px #ffbf00;
+}
 .diagnostic_log { margin: 0; font: 13px monospace; }
 .diagnostic_log #diagnostic_log { display: flex; flex-direction: column; height: 100vh; }
-.diagnostic_log textarea { flex: 1; min-height: 0; width: 100%; box-sizing: border-box; resize: none; font: inherit; }
+.diagnostic_log .diagnostic_text { flex: 1; min-height: 0; }
+.diagnostic_log textarea { display: block; width: 100%; height: 100%; box-sizing: border-box; resize: none; font: inherit; }
 .diagnostic_actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; }
 #abt .diagnostic_find { position: absolute; left: 5px; right: 5px; bottom: 65px; }
 #abt.diagnostic-searching #abt_ta_wr { bottom: 125px; }
