@@ -239,6 +239,7 @@
       });
       srv.on('zoom', (z) => D.ide.zoom(z));
       srv.on('ABT', () => D.commands.ABT());
+      srv.on('CVH', () => D.ide.CVH());
       srv.on('LOG', () => D.commands.LOG());
       srv.on('NEW', () => D.commands.NEW());
       srv.on('OWS', () => D.commands.OWS());

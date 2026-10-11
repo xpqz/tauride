@@ -115,6 +115,7 @@ D.prf = {};
     + '\n  Show Workspace Explorer  =WSE'
     + '\n  Show Debug               =DBG'
     + '\n  Line Wrapping in Session =WRP'
+    + '\n  Clear Visible History    =CVH'
     + '\n  -                             {!browser}'
     + '\n  Show Status Window       =SSW'
     + '\n  Auto Status              =ASW'

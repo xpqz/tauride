@@ -1191,6 +1191,10 @@ D.IDE.prototype = {
   TVB: D.prf.breakPts.toggle,
   LN: D.prf.lineNums.toggle,
   TVO: D.prf.fold.toggle,
+  CVH() {
+    if (this.floating) this.ipc.emit('CVH');
+    else this.wins[0].CVH();
+  },
   UND() { this.focusedWin.me.trigger('D', 'undo'); },
   RDO() { this.focusedWin.me.trigger('D', 'redo'); },
   Edit(data) {

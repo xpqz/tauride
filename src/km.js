@@ -81,6 +81,7 @@
       if (me) me.setSelection(me.getModel().getFullModelRange());
       else document.execCommand('SelectAll');
     },
+    CVH() { D.ide.CVH(); },
     RDO(me) { me.trigger('D', 'redo'); },
     UND(me) { me.trigger('D', 'undo'); },
     PRF() { D.prf_ui(); },
