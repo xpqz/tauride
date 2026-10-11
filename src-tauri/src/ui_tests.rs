@@ -3,37 +3,58 @@ use std::time::Duration;
 use tauri::menu::MenuItemKind;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
-fn menu_command_id<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> Result<Option<String>, String> {
+fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> Result<Option<MenuItemKind<R>>, String> {
+    let label = match command {
+        "CVH" => "Clear Visible History",
+        "TTB" => "Show Trace/Edit Toolbar",
+        "AGO" => "Observe Session",
+        "AGC" => "Allow Control",
+        _ => "",
+    };
     for item in items {
-        let id = item.id().as_ref();
-        if id.ends_with(&format!(":{command}")) { return Ok(Some(id.to_string())); }
-        if command == "CVH" {
-            if let Some(menu_item) = item.as_menuitem() {
-                if menu_item.text().map_err(|e| e.to_string())? == "Clear Visible History" {
-                    return Ok(Some(id.to_string()));
-                }
-            }
+        let text = if let Some(menu_item) = item.as_menuitem() {
+            Some(menu_item.text().map_err(|e| e.to_string())?)
+        } else if let Some(menu_item) = item.as_check_menuitem() {
+            Some(menu_item.text().map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        if item.id().as_ref().ends_with(&format!(":{command}")) || (!label.is_empty() && text.as_deref() == Some(label)) {
+            return Ok(Some(item));
         }
         if let Some(submenu) = item.as_submenu() {
-            if let Some(id) = menu_command_id(submenu.items().map_err(|e| e.to_string())?, command)? {
-                return Ok(Some(id));
+            if let Some(found) = menu_command_item(submenu.items().map_err(|e| e.to_string())?, command)? {
+                return Ok(Some(found));
             }
         }
     }
     Ok(None)
 }
 
-fn installed_menu_command_id<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<String, String> {
-    if !["SC", "SA", "CVH"].contains(&command) { return Err("Unsupported test menu command".into()); }
+fn installed_menu_command_item<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<MenuItemKind<R>, String> {
+    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC"].contains(&command) { return Err("Unsupported test menu command".into()); }
     let menu = app.menu().ok_or("No application menu")?;
     let items = menu.items().map_err(|e| e.to_string())?;
-    menu_command_id(items, command)?.ok_or_else(|| format!("No application menu item for {command}"))
+    menu_command_item(items, command)?.ok_or_else(|| format!("No application menu item for {command}"))
 }
 
 #[tauri::command]
-pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String, dispatch: Option<bool>) -> Result<String, String> {
-    let id = installed_menu_command_id(&app, &command)?;
-    if dispatch.unwrap_or(true) { crate::menu::on_event(&app, &id); }
+pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String, dispatch: Option<bool>, expected_checked: Option<bool>) -> Result<String, String> {
+    let item = installed_menu_command_item(&app, &command)?;
+    let id = item.id().as_ref().to_string();
+    let checked = item.as_check_menuitem()
+        .map(|menu_item| menu_item.is_checked().map_err(|e| e.to_string())).transpose()?;
+    if let Some(expected) = expected_checked {
+        if checked != Some(expected) {
+            return Err(format!("Installed menu {command} checked state is {checked:?}, expected {expected}"));
+        }
+    }
+    if dispatch.unwrap_or(true) {
+        if let (Some(before), Some(checkbox)) = (checked, item.as_check_menuitem()) {
+            checkbox.set_checked(!before).map_err(|e| e.to_string())?;
+        }
+        crate::menu::on_event(&app, &id);
+    }
     Ok(id)
 }
 

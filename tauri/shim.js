@@ -733,6 +733,9 @@
       sessionWindow.listen('ride-clear-visible-history', () => {
         if (window.D && D.ide) D.ide.CVH();
       });
+      sessionWindow.listen('ride-session-menu', ({ payload: command }) => {
+        if (window.D && D.ide && D.commands && D.commands[command]) D.commands[command]();
+      });
     });
   }
   const menuReady = () => {
@@ -767,7 +770,7 @@
   const menuItems = (items, prefix, clicks = menuClicks, app = false) => items
     .filter((it) => it.visible !== false)
     .map((it, i) => {
-      const id = `${prefix}:${i}${app && ['SC', 'SA', 'CVH'].includes(it.rideCommand) ? `:${it.rideCommand}` : ''}`;
+      const id = `${prefix}:${i}${app && ['SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB'].includes(it.rideCommand) ? `:${it.rideCommand}` : ''}`;
       const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
       if (!sub && it.type !== 'separator') {
         clicks.set(id, () => {

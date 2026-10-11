@@ -525,6 +525,10 @@ D.IDE = function IDE(opts = {}) {
   });
   D.prf.menu(updMenu);
   D.prf.keys(updMenu);
+  if (window.__RIDE__) {
+    D.prf.agent(updMenu);
+    D.prf.agentControl(updMenu);
+  }
   !ide.floating && setTimeout(updMenu, 100);
   D.prf.autoPW((x) => { x && ide.updPW(1); });
   D.prf.autoCloseBrackets((x) => { eachWin((w) => { !w.bwId && w.autoCloseBrackets(!!x); }); });

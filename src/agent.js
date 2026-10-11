@@ -150,7 +150,7 @@ if (window.__RIDE__) {
         return token;
       },
       confirmNeeded: () => on(pref('agentConfirm')),
-      confirm: (request) => D.agent.confirm(request),
+      confirm: (request, signal) => D.agent.confirm(request, signal),
       onAgentEcho: (seq, text) => D.agent.onAgentEcho && D.agent.onAgentEcho(seq, text),
     };
 
@@ -199,8 +199,9 @@ if (window.__RIDE__) {
     // HTML, since the agent chose them. The toast is sticky and its own timer
     // ends it with a deny, in step with the core's deadline, so a toast never
     // outlives the request it asks about.
-    const confirm = (m) => new Promise((resolve) => {
+    const confirm = (m, signal) => new Promise((resolve) => {
       if (!on(pref('agentConfirm'))) { resolve(true); return; }
+      if (signal.aborted) { resolve(false); return; }
       let done = false;
       let $toast;
       let timer;
@@ -208,9 +209,12 @@ if (window.__RIDE__) {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        signal.removeEventListener('abort', cancel);
         resolve(yes);
         $toast && toastr.clear($toast, { force: true });
       };
+      const cancel = () => answer(false);
+      signal.addEventListener('abort', cancel, { once: true });
       const fields = Object.keys(m).filter((k) => !['id', 'req', 'timeout'].includes(k))
         .map((k) => `${k}: ${typeof m[k] === 'string' ? m[k] : JSON.stringify(m[k])}`).join('\n');
       const $msg = $('<div class=agent-confirm>')
