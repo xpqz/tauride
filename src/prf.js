@@ -7,6 +7,9 @@
 'use strict'
 D.prf = {};
 [ // name                 default (type is determined from default value; setter enforces type and handles encoding)
+  ['agent',              0], // agent pairing (Tauri, tauri/agent-pairing.md): open the port for observation
+  ['agentControl',       0], // let the agent execute, edit, save and drive the tracer; implies observation
+  ['agentConfirm',       0], // ask Run / Deny before each control request except an interrupt
   ['autoStart',          0], // Auto-start default configuration when Ride starts
   ['autoCloseBrackets',  1], //whether to insert {}[]() in pairs
   ['autocompletion',     'classic'],
@@ -145,6 +148,9 @@ D.prf = {};
     + '\n  Pause all Threads        =PAT'
     + '\n  Unpause all threads      =UAT'
     + '\n  Continue all threads     =MA'
+    + '\n&Agent                          {tauri}'
+    + '\n  Observe Session          =AGO'
+    + '\n  Allow Control            =AGC'
     + '\n&Help'
     + '\n  Getting &Started         =https://dyalog.com/getting-started.htm'
     + '\n  -'
@@ -164,11 +170,11 @@ D.prf = {};
     + '\n# Syntax:'
     + '\n#   &x   access key, alt+x'
     + '\n#   =CMD command code; some are special:'
-    + '\n#          LBR TTB WRP WSE render as checkboxes'
+    + '\n#          LBR TTB WRP WSE AGO AGC render as checkboxes'
     + '\n#   =http://example.com/  open a URL'
     + '\n#   {}   conditional display, a boolean expression'
     + '\n#          operators: && || ! ( )'
-    + '\n#          variables: local browser mac win' // Add 'local' variable to check if interpreter is being run locally.
+    + '\n#          variables: local browser mac win tauri' // Add 'local' variable to check if interpreter is being run locally.
     + '\n#   -    separator (when alone)'
     + '\n#   #    comment'
     + '\n'

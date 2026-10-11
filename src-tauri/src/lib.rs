@@ -1,9 +1,11 @@
+mod agent;
 mod dialog;
 mod menu;
 mod net;
 mod proc;
 mod ssh;
 mod sync;
+mod transcript;
 mod win;
 mod winstate;
 #[cfg(feature = "ui-tests")]
@@ -235,6 +237,8 @@ pub fn run() {
         .manage(net::Net::default())
         .manage(proc::Procs::default())
         .manage(ssh::Ssh::default())
+        .manage(agent::Agent::default())
+        .manage(transcript::Transcript::default())
         .invoke_handler(tauri::generate_handler![
             #[cfg(feature = "ui-tests")]
             ui_test_window_state,
@@ -262,6 +266,11 @@ pub fn run() {
             ssh::ssh_forward_out,
             ssh::ssh_forward_in,
             ssh::ssh_end,
+            agent::agent_listen,
+            agent::agent_close,
+            agent::agent_send,
+            transcript::transcript_append,
+            transcript::transcript_status,
             winstate::save_win,
             menu::popup_menu,
             menu::set_app_menu,
@@ -301,6 +310,7 @@ pub fn run() {
         .run(|_app, _event| {
             if let tauri::RunEvent::Exit = _event {
                 proc::kill_all(_app);
+                agent::cleanup_all(_app);
             }
             // Clicking the Dock icon with no session window open starts one.
             #[cfg(target_os = "macos")]

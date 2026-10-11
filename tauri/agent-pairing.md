@@ -1,6 +1,6 @@
 # Pair programming with an agent in Tauride
 
-Design note. Nothing here is implemented.
+Design note. What is built is in Status at the end.
 
 ## Goal
 
@@ -43,7 +43,7 @@ Three sources are available for "the session log"; they are not the same.
 | Source | Has inputs | Live | Use |
 |---|---|---|---|
 | Interpreter `GetLog` / `ReplyGetLog` | no: input lines come back as empty strings (xpqz/tauride#33) | on request | not used |
-| The session window's own buffer (`src/se.js`), filled live from `EchoInput`, `AppendSessionOutput`, `HadError` | yes | yes | the live transcript, and the backfill when the agent attaches |
+| The session window's own buffer (`src/se.js`), filled live from the input echo, `AppendSessionOutput`, `HadError` | yes | yes | the live transcript, and the backfill when the agent attaches |
 | `hist.txt` in the user data dir, written by `se.histWrite` | inputs only | written on exit | history across restarts |
 
 The tap writes a **transcript**: one JSON line per event, appended to a file
@@ -61,8 +61,10 @@ streamed to a connected agent. Events:
   `SetHighlightLine`: editor and tracer text, which line is current.
 - `stack`: `ReplyGetSIStack`.
 "The person's typing" means entered lines, which is what `input` carries:
-`EchoInput` arrives once a line has been submitted, so the agent sees each
-complete line in order with the output that followed it, and nothing of the
+the echo of a submitted line (`EchoInput`, or the `AppendSessionOutput` of
+type 14 that interpreters such as Dyalog 21.0 send instead) arrives once the
+line has been entered, so the agent sees each complete line in order with
+the output that followed it, and nothing of the
 editing that preceded Enter. Keystrokes in progress are not part of this
 design; if they are ever wanted, they are a separate `draft` subscription
 from Monaco's content-change events, never mixed into the transcript.
@@ -170,3 +172,189 @@ written.
 - One agent per session. The socket accepts one connection per session and
   refuses a second with `busy` until the first disconnects. Sessions are
   independent, so two sessions can each have an agent.
+
+## Phase 1: wire format
+
+Fixed here so the Rust side, the frontend tap and the CLI are written
+against one description.
+
+**Switching on.** `RIDE_AGENT=1` opens the port for observation only;
+`RIDE_AGENT=control` also allows `execute`, `answer` and `interrupt`. The
+same two levels exist as preferences `agent` (`0`, `1`, `control`) read at
+session start; the environment wins. The status bar shows `agent: observing`
+/ `agent: control` and ` (connected)` while a client is attached.
+
+**Socket.** One Unix domain socket per session window:
+`<userData>/agent/<label>.sock` (`main.sock` for the first session,
+`w<id>.sock` for the others), directory mode 0700, socket 0600, removed
+when the session window closes. One connection at a time; a second
+connection is answered with `{"err":{"code":"busy"}}` and closed. Windows
+is not in phase 1 (`agent_listen` returns an error there).
+
+**Frames.** Newline-delimited JSON, UTF-8, one object per line, both ways.
+
+Client to Tauride, `id` chosen by the client:
+
+| `req` | fields | notes |
+|---|---|---|
+| `status` | | caption, prompt type, level (`observe`/`control`), interpreter version, transcript path, `seq` of the latest event |
+| `execute` | `text`, `timeout` (ms, default 30000) | refused unless level is `control` and the prompt type is 1 |
+| `answer` | `text`, `timeout` | as `execute`, but only at prompt types 2 and 4 |
+| `interrupt` | `strength`: `weak` \| `strong` | control only |
+| `tail` | `n` (default 100) | the last `n` transcript events |
+| `since` | `seq` | every event after `seq` |
+
+Tauride to client: `{"id": n, "ok": {...}}` or
+`{"id": n, "err": {"code": c, "message": m, ...}}`, and unsolicited
+`{"ev": {...}}` for every new transcript event while connected (so `tail`
+and `since` are for backfill). Error codes: `refused` (level too low),
+`prompt` (wrong prompt type; carries `prompt`), `busy` (a request is already
+in flight, or a second connection), `timeout` (carries the `partial` result
+collected so far), `closed` (session disconnected from the interpreter),
+`bad_request`.
+
+**`execute` / `answer` result.** `{"echo": text, "lines": [{"kind":
+"output" | "error", "type": t, "text": s}, ...], "error": dmx | null,
+"prompt": p, "truncated": bool, "seq": [first, last]}`. The line goes
+through `D.ide.exec`; the result is the transcript slice from its echo
+(`EchoInput`, or the type-14 `AppendSessionOutput` that Dyalog 21.0 sends
+instead) to the next `SetPromptType` that leaves 0, capped at 200 lines
+or 64 KB with `truncated: true` (the rest is in the transcript). One request
+in flight per session; the human's own input in the meantime is reported as
+`input` events, not mixed into the result.
+
+**Transcript.** `<userData>/sessions/<label>-<appid>.jsonl`, one event per
+line, appended as events happen while the level is at least `observe`:
+
+```
+{"seq": 17, "t": "2026-10-09T10:21:03.412Z", "kind": "input",  "origin": "human", "prompt": 1, "text": "⍳5"}
+{"seq": 18, "t": "...", "kind": "output", "origin": "human", "type": 1, "text": "1 2 3 4 5"}
+{"seq": 19, "t": "...", "kind": "prompt", "prompt": 1}
+{"seq": 20, "t": "...", "kind": "error",  "origin": "agent", "dmx": {...}}
+{"seq": 21, "t": "...", "kind": "window", "event": "open" | "update" | "close" | "save" | "highlight", "token": 7, "name": "foo", "debugger": true, ...}
+```
+
+`origin` on `output` and `error` is the origin of the line being executed
+when they arrived (best effort, as the design says). `kind: window` events
+carry the message's own fields; `save` ones add `origin`. `stack` events
+carry `ReplyGetSIStack`.
+
+**Hooks.** The tap wraps `D.recv` and `D.send` once `D.ide` exists and
+re-wraps if either is reassigned (both are reassigned on connect). It is
+loaded only under `window.__RIDE__`; the Electron build never sees it.
+
+**CLI / MCP adapter.** `tools/tauride-mcp` (Node, no dependencies):
+`tauride-mcp [--session main | --socket path] status | exec <text> |
+answer <text> | interrupt [weak|strong] | tail [n] | watch | mcp`.
+`watch` prints events as they arrive; `mcp` serves MCP over stdio
+(newline-delimited JSON-RPC: `initialize`, `tools/list`, `tools/call`,
+`ping`) with the tools `execute`, `answer`, `interrupt`, `tail`, `status`.
+The socket path defaults to `~/.config/Ride-4.8/agent/<session>.sock` and
+can be set with `TAURIDE_SOCKET`.
+
+## Phases 2 and 3: wire format additions
+
+Same framing as phase 1. Levels: `observe` requests work whenever the port
+is open; `control` requests need control. `interrupt` is never gated by the
+confirm mode below, so the person can always ask the agent to stop a loop.
+
+**Switching on, revised.** Two boolean preferences replace the three-valued
+`agent`: `agent` (observe) and `agentControl` (control, implies observe),
+both default off, changeable while running from the menu (Agent ▸ Observe
+session, Agent ▸ Allow control; command codes `AGO`, `AGC`) and from the
+Preferences dialog. The tap follows them live: turning observe off closes
+the port and drops the client. `RIDE_AGENT=1` / `RIDE_AGENT=control` set
+them for the process at startup. A third preference `agentConfirm` (default
+off) makes every control request except `interrupt` show a non-modal toast
+with the request text and Run / Deny; no answer within 60 s is a deny,
+reported to the agent as `denied`.
+
+**Requests added.**
+
+| `req` | level | fields | returns |
+|---|---|---|---|
+| `windows` | observe | | `[{token, name, kind: "editor" \| "tracer", text, currentLine, stops, trace, monitor, saved}]` from `D.ide.wins` (the session excluded) |
+| `window_text` | observe | `token` | the same object for one window, or `not_found` |
+| `edit` | control | `name` | opens an editor through the protocol's `Edit` message; returns `{token}` once its `OpenWindow` arrives |
+| `save` | control | `token`, `text`, `stops` (optional) | the editor's own save path; `{token, saved: true}` on a clean `ReplySaveChanges`, else `err save` with the interpreter's message |
+| `stops` | control | `token`, `lines` | sets the stop lines in that window as a margin click would (`SetLineAttributes` for tracers, saved with the editor otherwise); returns `{stops}` |
+| `trace` | control | `token`, `action` | one of `step_into`, `step_over`, `continue`, `continue_trace`, `back`, `forward`, `cutback`, `restart`, `edit`; runs the matching Ride command on that window; returns the next `{highlight}` for it, or `{closed: true}`, or `{prompt}` if the session prompt changed first, within `timeout` |
+| `stack` | observe | | the `ReplyGetSIStack` payload |
+| `value` | observe | `name` | the `ValueTip` text for that name in the current frame (names only; expressions are `bad_request`) |
+| `wait` | observe | `since` (seq, default the latest), `kinds`, `origin`, `prefix`, `timeout` | long-poll: the first event after `since` that matches, else `err timeout`; this is how an agent waits for the next `⍝ Claude:` line without polling |
+
+**Events added.** `kind: "agent"` with `event: connected | disconnected |
+level`, so the transcript shows when an agent was attached and at which
+level. `window` events gain `event: "save"` with `origin`, and `event:
+"stops"`.
+
+**Transcript writer.** The tap batches events and hands them to Rust
+(`transcript_append(path, lines)`), which appends from a task off the UI
+thread. A file is rotated at 32 MB to `<name>.1` (one generation kept). The
+tap keeps the last 1000 events in memory for `tail` and `since`; older
+events are only in the file. `status` reports the path and size.
+
+**Agent lines in the session.** Input echoed for an agent-originated line
+gets a gutter marker and a muted background (Monaco decoration, class
+`agent-line`), so the session itself shows who typed what.
+
+**Windows transport.** Where there is no Unix socket, `agent_listen` binds
+`127.0.0.1` on a free port and writes `<userData>/agent/<label>.port`
+containing `127.0.0.1:<port> <token>` (a random 32-byte hex token; the file
+is private to the user). The client's first frame must be
+`{"auth": "<token>"}`; anything else closes the connection with `err
+unauthorized`. The CLI reads the `.port` file when there is no `.sock`, and
+`TAURIDE_SOCKET` accepts `tcp://127.0.0.1:<port>?token=<token>`.
+
+**Testing.** `tests-node/agent_core.js` (`node --test`) covers the pure parts of
+the tap, kept in `src/agent_core.js`: frame parsing and validation, request
+routing, the execute correlation, truncation, the ring and `since`, the
+`wait` matching. `tools/tauride-mcp/e2e.js` launches a built Tauride with a
+private config directory and a spawned interpreter and runs every request
+over the socket, as a release check. CLI and MCP keep
+`tools/tauride-mcp/test.js`.
+
+**MCP tools.** `execute`, `answer`, `interrupt`, `tail`, `status` as before,
+plus `windows`, `window_text`, `edit`, `save`, `stops`, `trace`, `stack`,
+`value` and `wait_for_input` (= `wait` with `origin: human`, optional
+`prefix`, default timeout 300 s).
+
+## Status
+
+Phases 1 to 3 are implemented as the two wire-format sections above
+describe, including the Windows transport (loopback TCP with a `.port` file
+and a token, `src-tauri/src/agent.rs`; the CLI reads the `.port` file and
+accepts `tcp://`). The Windows side was built and tested on Windows with
+Dyalog 21.0: status, execute, an APL error, tail, `busy` on a second
+connection, wrong, missing and silent auth (`unauthorized`), and the
+observe level refusing control requests.
+
+Verified on macOS against Dyalog 21.0.54424 from this worktree's build:
+
+- `npm run test:unit`: 29/29. `node --test
+  tools/tauride-mcp/test.js`: 24/24.
+- `npm run css`, `node tauri/stage.js` and `cargo build` clean, no warnings.
+- `tools/tauride-mcp/e2e.js`: 38/38 against a launched Tauride with a private
+  config directory. Covered: `status`; `execute` (a result, an APL error
+  with its DMX, truncation at 200 lines, opening a `⎕` prompt, refusal at a
+  `⎕` prompt with `err prompt`, a timeout carrying the partial result);
+  `answer`; `interrupt` (weak, prompt back); `tail` and `since`; a second
+  connection refused `busy`; `windows` after `)ed`, `window_text`,
+  `not_found` for a stale token; `save` with and without stops and the saved
+  function running; stops suspending the function and the tracer shown by
+  `windows`; `stack`; `value` of a global and in the suspended frame, an
+  expression `bad_request`; `trace` `step_over` and `continue` (editor
+  closed, output arrives); `edit`; `wait` resolving and timing out; the CLI
+  through `XDG_CONFIG_HOME`; a second launch with `RIDE_AGENT=1` at
+  `observe`, where `execute` and `interrupt` are `refused` and `tail` works.
+- Observed by hand in the same run: agent directory 0700 and socket 0600;
+  socket removed and directory empty after the app exits; the transcript
+  parses with contiguous `seq` and carries `agent`
+  connected/disconnected/level, `input` with `origin: agent`, `error` with
+  the `HadError` payload, `window` open/highlight/close/save/stops and a
+  `stack` event; no JS or Rust errors logged.
+
+Not verified: Linux and Windows, the confirm toast end to end (the deny
+timeout is not tested; the unit tests only check which requests ask),
+transcript rotation at
+32 MB, and the MCP adapter under Claude Code itself beyond its stdio tests.

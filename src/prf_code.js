@@ -20,6 +20,8 @@
         q.phs.disabled = !q.ph.checked;
         q.ph.checked && q.phs.select();
       };
+      // The agent pairing port (tauri/agent-pairing.md) exists in Tauride only.
+      q.agent.hidden = !window.__RIDE__;
     },
     load() {
       const p = D.prf;
@@ -46,6 +48,9 @@
       q.ssm.checked = !!p.showSessionMargin();
       q.sqp.checked = !!p.sqp();
       q.ss.checked = !!p.snippetSuggestions();
+      q.ago.checked = !!p.agent();
+      q.agc.checked = !!p.agentControl();
+      q.agk.checked = !!p.agentConfirm();
       q.ac.onchange();
       q.mme.onchange();
     },
@@ -75,6 +80,9 @@
       p.squiggleTips       (q.sqt.checked);
       p.sqp                (q.sqp.checked);
       p.snippetSuggestions (q.ss.checked);
+      p.agent              (q.ago.checked);
+      p.agentControl       (q.agc.checked);
+      p.agentConfirm       (q.agk.checked);
     },
     validate() {
       const isInt = (x, minX) => +x === (+x | 0) && +x >= minX;

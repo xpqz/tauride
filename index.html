@@ -292,6 +292,7 @@
     <div id=sb_sis title="State Indicator" hidden>⎕SI: </div>
     <div id=sb_io title="Index Origin" hidden>⎕IO: </div>
     <div id=sb_ml title="Migration Level" hidden>⎕ML: </div>
+    <div id=sb_agent title="Agent pairing" hidden></div>
     <div id=sb_cp></div>
   </div>
 </div>
@@ -644,6 +645,13 @@
       <p><input id=code_ssm type=checkbox><label for=code_ssm>Show session <u>m</u>argin</label></p>
       <p><input id=code_sqp type=checkbox><label for=code_sqp>Show <u>q</u>uit prompt</label></p>
       <p><input id=code_coq type=checkbox><label for=code_coq>Connect on quit</label></p>
+      <div id=code_agent hidden>
+        <hr>
+        <h2>Agent</h2>
+        <p><input id=code_ago type=checkbox><label for=code_ago>Observe session</label></p>
+        <p><input id=code_agc type=checkbox><label for=code_agc>Allow control</label></p>
+        <p><input id=code_agk type=checkbox><label for=code_agk>Confirm each action</label></p>
+      </div>
       <hr>
       <h2>Cursor</h2>
       <p><input id=code_bc type=checkbox><label for=code_bc><u>B</u>lock cursor</label></p>
@@ -906,6 +914,7 @@
 <script src=src/km.js         ></script>
 <script src=src/ide.js        ></script>
 <script src=src/ipc.js        ></script>
+<script src=src/agent.js      ></script>
 <script src=src/mon_apl.js    ></script>
 <script src=src/init.js       ></script>
 
