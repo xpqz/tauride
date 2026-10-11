@@ -1,3 +1,4 @@
+const { Key } = require('webdriverio');
 const test = require('ava');
 const { tfw, readClipboard, setFieldValue } = require('./_utils');
 
@@ -70,6 +71,17 @@ async function keydown(c, selector, key, shiftKey = false) {
   }, selector, key, shiftKey);
 }
 
+async function escapeAbout(c, main) {
+  const label = await c.execute(() => {
+    document.querySelector('textarea[readonly]').focus();
+    return window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+  });
+  await c.switchToWindow(main);
+  await c.execute((targetLabel, escape) => window.__TAURI_INTERNALS__.invoke('ui_test_keys', {
+    keys: [escape], targetLabel,
+  }), label, Key.Escape);
+}
+
 async function mainEditorState(c) {
   return c.execute(() => {
     const editor = D.ide.wins[0].me;
@@ -81,6 +93,7 @@ async function mainEditorState(c) {
 
 test('About distinguishes Copy from Copy All and supports Find', async (t) => {
   const c = t.context.app.client;
+  const main = await c.getWindowHandle();
   const baseline = await c.getWindowHandles();
   await openWindow(c, 'ABT');
   const all = await c.execute(() => document.querySelector('textarea[readonly]').value);
@@ -151,7 +164,7 @@ test('About distinguishes Copy from Copy All and supports Find', async (t) => {
   await keydown(c, 'input[type=search]', 'Escape');
   t.false(await query.isDisplayed(), 'first Escape closes Find');
   t.is((await c.getWindowHandles()).length, baseline.length + 1, 'About remains open after closing Find');
-  await keydown(c, 'textarea[readonly]', 'Escape');
+  await escapeAbout(c, main);
   await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length,
     { timeout: 10000, timeoutMsg: 'second Escape did not close About' });
 });
@@ -324,7 +337,7 @@ if (process.platform === 'darwin') test('native Edit menu targets the active dia
   await (await c.$('input[type=search]')).waitForDisplayed();
   await keydown(c, 'input[type=search]', 'Escape');
   await c.waitUntil(async () => !await (await c.$('input[type=search]')).isDisplayed());
-  await keydown(c, 'textarea[readonly]', 'Escape');
+  await escapeAbout(c, main);
   await c.waitUntil(async () => (await c.getWindowHandles()).length === baseline.length);
 
   await c.switchToWindow(main);
