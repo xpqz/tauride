@@ -713,6 +713,17 @@
   const appClicks = new Map(); // the application menu's, which popups must not clear
   let menuSeq = 0;
   let menuEvents = null;
+  if (new URLSearchParams(window.location.search).get('type') === 'prf') {
+    tev().listen('ride-preferences-select-all', () => {
+      const active = document.activeElement;
+      if (active instanceof HTMLTextAreaElement
+        || (active instanceof HTMLInputElement && /^(text|search|url|tel|email|password)$/.test(active.type))) {
+        active.select();
+      } else {
+        document.execCommand('SelectAll');
+      }
+    });
+  }
   const menuReady = () => {
     if (!menuEvents) {
       menuEvents = tev().listen('ride-menu', ({ payload: id }) => {

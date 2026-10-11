@@ -122,11 +122,17 @@ pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
     if id.starts_with("app:") {
         if let Some(command) = ["SC", "SA"].into_iter().find(|command| id.ends_with(&format!(":{command}"))) {
             for window in app.webview_windows().into_values() {
-                if window.is_focused().unwrap_or(false)
-                    && window.url().map(|url| matches!(url.path(), "/about.html" | "/log.html")).unwrap_or(false)
-                {
-                    let _ = window.emit_to(window.label(), "ride-diagnostic-menu", command);
-                    return;
+                if window.is_focused().unwrap_or(false) {
+                    if let Ok(url) = window.url() {
+                        if matches!(url.path(), "/about.html" | "/log.html") {
+                            let _ = window.emit_to(window.label(), "ride-diagnostic-menu", command);
+                            return;
+                        }
+                        if command == "SA" && url.query_pairs().any(|(key, value)| key == "type" && value == "prf") {
+                            let _ = window.emit_to(window.label(), "ride-preferences-select-all", ());
+                            return;
+                        }
+                    }
                 }
             }
         }
