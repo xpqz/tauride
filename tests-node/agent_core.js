@@ -741,6 +741,182 @@ test('a request waiting for confirmation holds the slot', async (t) => {
   assert.equal(last(io).err.code, 'refused');
 });
 
+test('disconnect cancels an unstarted confirmation and cannot hand it to a replacement client', async (t) => {
+  const pending = [];
+  t.after(() => pending.forEach((p) => p.resolve(false)));
+  const { io, c } = setup(t, 'control', {
+    confirm: (m, signal) => new Promise((resolve) => { pending.push({ id: m.id, signal, resolve }); }),
+  });
+  io.confirmNeeded = () => true;
+  const old = req(c, { id: 1, req: 'execute', text: 'old' });
+  await sleep(0);
+  assert.equal(pending.length, 1);
+  c.socket(false);
+  assert.equal(pending[0].signal.aborted, true, 'the old toast is cancelled on disconnect');
+  c.socket(true);
+  io.frames.length = 0;
+  const fresh = req(c, { id: 1, req: 'execute', text: 'fresh' });
+  await sleep(0);
+  assert.equal(pending.length, 2, 'the new client may ask for a fresh confirmation');
+  pending[0].resolve(true); // a stale Run click must be harmless even if delivered
+  await old;
+  assert.deepEqual(io.calls, []);
+  assert.deepEqual(replies(io), [], 'the old request cannot reply on the new socket');
+  await req(c, { id: 3, req: 'execute', text: 'other' });
+  assert.equal(last(io).err.code, 'busy', 'the old completion did not release the new slot');
+  pending[1].resolve(true);
+  await fresh;
+  assert.deepEqual(io.calls, [['exec', 'fresh']]);
+  run(c, 'fresh', ['new result']);
+  assert.equal(replies(io).at(-1).id, 1);
+});
+
+test('revoking and restoring control cannot authorize an old Run', async (t) => {
+  const pending = [];
+  t.after(() => pending.forEach((p) => p.resolve(false)));
+  const { io, c } = setup(t, 'control', {
+    confirmNeeded: () => true,
+    confirm: (m, signal) => new Promise((resolve) => { pending.push({ id: m.id, signal, resolve }); }),
+  });
+  const old = req(c, { id: 1, req: 'execute', text: 'old' });
+  await sleep(0);
+  c.setLevel('observe');
+  assert.equal(pending[0].signal.aborted, true, 'revocation clears the old toast');
+  c.setLevel('control');
+  const fresh = req(c, { id: 1, req: 'execute', text: 'fresh' });
+  await sleep(0);
+  assert.equal(pending.length, 2, 'regrant requires a new confirmation');
+  const beforeOldRun = replies(io).length;
+  pending[0].resolve(true);
+  await old;
+  assert.deepEqual(io.calls, []);
+  assert.equal(replies(io).length, beforeOldRun, 'old Run cannot reply to the fresh same-ID request');
+  await req(c, { id: 3, req: 'execute', text: 'other' });
+  assert.equal(last(io).err.code, 'busy', 'old Run did not release the new confirmation');
+  pending[1].resolve(true);
+  await fresh;
+  assert.deepEqual(io.calls, [['exec', 'fresh']]);
+  run(c, 'fresh', ['new result']);
+  assert.equal(replies(io).at(-1).id, 1);
+});
+
+test('old Deny and rejected confirmation cannot release a successor confirmation', async (t) => {
+  for (const outcome of ['deny', 'rejection']) {
+    const pending = [];
+    t.after(() => pending.forEach((p) => p.resolve(false)));
+    const { io, c } = setup(t, 'control', {
+      confirmNeeded: () => true,
+      confirm: (m, signal) => new Promise((resolve, reject) => { pending.push({ id: m.id, signal, resolve, reject }); }),
+    });
+    const old = req(c, { id: 1, req: 'execute', text: 'old' });
+    await sleep(0);
+    c.socket(false);
+    c.socket(true);
+    io.frames.length = 0;
+    const fresh = req(c, { id: 1, req: 'execute', text: 'fresh' });
+    await sleep(0);
+    assert.equal(pending.length, 2);
+    if (outcome === 'deny') pending[0].resolve(false);
+    else pending[0].reject(new Error('toast expired'));
+    await old;
+    assert.deepEqual(replies(io), [], `${outcome} from the old client reached the new client`);
+    await req(c, { id: 3, req: 'execute', text: 'other' });
+    assert.equal(last(io).err.code, 'busy', `${outcome} released the successor's slot`);
+    pending[1].resolve(false);
+    await fresh;
+    assert.equal(last(io).id, 1);
+    assert.equal(last(io).err.code, 'denied');
+    assert.deepEqual(io.calls, []);
+  }
+});
+
+test('a fresh confirmation still runs, denies, and handles rejection normally', async (t) => {
+  const answers = [];
+  t.after(() => answers.forEach((p) => p.resolve(false)));
+  const { io, c } = setup(t, 'control', {
+    confirmNeeded: () => true,
+    confirm: (m, signal) => new Promise((resolve, reject) => { answers.push({ id: m.id, signal, resolve, reject }); }),
+  });
+  const runRequest = req(c, { id: 1, req: 'execute', text: '1' });
+  await sleep(0);
+  answers[0].resolve(true);
+  await runRequest;
+  assert.deepEqual(io.calls, [['exec', '1']]);
+  run(c, '1', ['1']);
+  const denied = req(c, { id: 2, req: 'execute', text: '2' });
+  await sleep(0);
+  answers[1].resolve(false);
+  await denied;
+  assert.equal(last(io).err.code, 'denied');
+  const expired = req(c, { id: 3, req: 'execute', text: '3' });
+  await sleep(0);
+  answers[2].reject(new Error('toast expired'));
+  await expired;
+  assert.equal(last(io).err.code, 'denied');
+  assert.deepEqual(io.calls, [['exec', '1']]);
+});
+
+test('an immediate disconnect never creates the confirmation toast', async (t) => {
+  const asked = [];
+  const { io, c } = setup(t, 'control', {
+    confirmNeeded: () => true,
+    confirm: (m) => { asked.push(m); return true; },
+  });
+  const old = req(c, { id: 1, req: 'execute', text: 'old' });
+  c.socket(false); // before the io.confirm microtask
+  c.socket(true);
+  await old;
+  assert.deepEqual(asked, []);
+  assert.deepEqual(io.calls, []);
+  assert.deepEqual(replies(io), []);
+});
+
+for (const transition of ['reconnect', 'regrant']) {
+  test(`confirmation-disabled settle wait cannot dispatch after ${transition}`, async (t) => {
+    const { io, c } = setup(t, 'control', { confirmNeeded: () => false });
+    io.ideState.quiescent = false;
+    let oldFinished = false;
+    const old = req(c, { id: 1, req: 'execute', text: 'old' }).then(() => { oldFinished = true; });
+    await sleep(0);
+    if (transition === 'reconnect') {
+      c.socket(false);
+      c.socket(true);
+    } else {
+      c.setLevel('observe');
+      c.setLevel('control');
+    }
+    io.frames.length = 0;
+    io.ideState.quiescent = true;
+    await sleep(0);
+    assert.equal(oldFinished, true, 'cancellation resolves the obsolete settle wait');
+    assert.deepEqual(io.calls, [], 'the old request never dispatches');
+    const fresh = req(c, { id: 1, req: 'execute', text: 'fresh' });
+    await fresh;
+    assert.deepEqual(io.calls, [['exec', 'fresh']]);
+    run(c, 'fresh', ['new result']);
+    assert.equal(replies(io).at(-1).id, 1);
+    await old;
+  });
+}
+
+test('the core confirmation deadline denies and cancels its toast', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  const pending = [];
+  const { io, c } = setup(t, 'control', {
+    confirmNeeded: () => true,
+    confirm: (m, signal) => new Promise((resolve) => { pending.push({ signal, resolve }); }),
+  });
+  t.after(() => pending.forEach((p) => p.resolve(false)));
+  const request = req(c, { id: 1, req: 'execute', text: 'never' });
+  await Promise.resolve();
+  assert.equal(pending.length, 1);
+  t.mock.timers.tick(core.CONFIRM_MS);
+  await request;
+  assert.equal(last(io).err.code, 'denied');
+  assert.equal(pending[0].signal.aborted, true, 'the expired toast is removed');
+  assert.deepEqual(io.calls, []);
+});
+
 test('connecting, disconnecting and the level are events; an agent echo is reported', async (t) => {
   const echoed = [];
   const io = fake({ onAgentEcho: (seq, text) => echoed.push([seq, text]) });
