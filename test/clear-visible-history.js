@@ -1,5 +1,6 @@
 const test = require('ava');
 const { tfw } = require('./_utils');
+const nativeTest = process.platform === 'darwin' ? test : test.skip;
 
 tfw.init({ src: 'se', interpreter: true });
 
@@ -65,6 +66,16 @@ async function clearNotices(c) {
   });
   await c.waitUntil(async () => c.execute(() => !document.querySelector('#toast-container .toast-message')),
     { timeout: 10000, timeoutMsg: 'Previous notice did not clear' });
+}
+
+async function focusNativeWindow(c) {
+  const label = await c.execute(() => window.__TAURI_INTERNALS__.metadata.currentWindow.label);
+  await c.waitUntil(async () => c.execute(async (name) => {
+    const target = new window.__TAURI__.webviewWindow.WebviewWindow(name, { skip: true });
+    await target.setFocus();
+    const state = await window.__TAURI_INTERNALS__.invoke('ui_test_window_state', { label: name });
+    return state.focused;
+  }, label), { timeout: 10000, timeoutMsg: `${label} did not receive native focus` });
 }
 
 test('clear preserves an unsent multirow draft, recall, workspace and interpreter log', async (t) => {
@@ -313,7 +324,9 @@ test('clear invoked from a floating tracer leaves that editor and its focus alon
     const state = await window.__TAURI_INTERNALS__.invoke('ui_test_window_state', { label });
     return state.focused && D.ide.wins[86001].me.hasTextFocus();
   }), { timeout: 10000, timeoutMsg: 'Floating tracer did not receive native text focus' });
-  await c.execute(() => D.commands.CVH(D.ide.wins[86001].me));
+  await c.execute((nativeMenu) => nativeMenu
+    ? window.__TAURI_INTERNALS__.invoke('ui_test_menu_command', { command: 'CVH' })
+    : D.commands.CVH(D.ide.wins[86001].me), process.platform === 'darwin');
   await c.switchToWindow(main);
   await c.waitUntil(async () => (await session(c)).text === '      ',
     { timeout: 10000, timeoutMsg: 'Floating Clear Visible History did not clear the session' });
@@ -325,4 +338,53 @@ test('clear invoked from a floating tracer leaves that editor and its focus alon
     return { text: ed.me.getModel().getValue(), focused: D.ide.focusedWin === ed,
       textFocus: ed.me.hasTextFocus(), nativeFocus: state.focused, tracer: !!ed.tc };
   }), { text: editorText, focused: true, textFocus: true, nativeFocus: true, tracer: true });
+});
+
+nativeTest('native View clear targets the focused session, not the last session to install a menu', async (t) => {
+  const c = t.context.app.client;
+  const first = await c.getWindowHandle();
+  await runLine(c, "⎕←'first-history-86'", 'first-history-86');
+  await c.execute(() => D.ide.wins[0].loadLine('      first-draft-86'));
+  const firstBefore = await session(c);
+  const secondId = await c.execute(() => D.wm.newSession({ RIDE_SPAWN: D.lastSpawnedExe }));
+  t.truthy(secondId, 'a second session opened');
+  const second = `w${secondId}`;
+  await c.switchToWindow(second);
+  await c.waitUntil(async () => c.execute(() => !!(D.ide && D.ide.wins[0]
+    && D.ide.wins[0].promptType === 1 && D.ide.wins[0].me.getModel())),
+  { timeout: 30000, timeoutMsg: 'Second Dyalog session did not become ready' });
+  await runLine(c, "⎕←'second-history-86'", 'second-history-86');
+  await c.execute(() => {
+    D.ide.wins[0].loadLine('      second-draft-86');
+    D.installMenu(D.parseMenuDSL(D.prf.menu()));
+  });
+  const secondBefore = await session(c);
+  await c.waitUntil(async () => {
+    try {
+      const id = await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
+        { command: 'CVH', dispatch: false }));
+      return id.startsWith(`app:${second}:`);
+    } catch (_) { return false; }
+  }, { timeout: 10000, timeoutMsg: 'Second session did not install the View menu' });
+
+  await c.switchToWindow(first);
+  await focusNativeWindow(c);
+  await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command', { command: 'CVH' }));
+  await c.waitUntil(async () => (await session(c)).text === '      first-draft-86',
+    { timeout: 10000, timeoutMsg: 'Native View clear did not target the focused first session' });
+  t.true(firstBefore.text.includes('first-history-86'));
+  const clearedFirst = await session(c);
+  await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)),
+    { timeout: 10000, timeoutMsg: 'First session Preferences did not connect' });
+  await c.execute(() => D.commands.PRF());
+  const preferences = await c.execute(() => D.prf_bw.win.label);
+  await c.switchToWindow(preferences);
+  await c.waitUntil(async () => c.execute(() => !I.prf_dlg.hidden),
+    { timeout: 10000, timeoutMsg: 'First session Preferences did not open' });
+  await focusNativeWindow(c);
+  await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command', { command: 'CVH' }));
+  await c.switchToWindow(first);
+  t.deepEqual(await session(c), clearedFirst, 'Preferences focus does not clear the first session');
+  await c.switchToWindow(second);
+  t.deepEqual(await session(c), secondBefore, 'background session keeps its history and draft');
 });
