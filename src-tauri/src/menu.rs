@@ -123,7 +123,7 @@ pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
         for window in app.webview_windows().into_values() {
             if window.is_focused().unwrap_or(false) {
                 if let Ok(url) = window.url() {
-                    let session_page = matches!(url.path(), "/" | "/index.html")
+                    let session_page = matches!(url.path(), "" | "/" | "/index.html")
                         && url.query_pairs().find(|(key, _)| key == "type")
                             .map(|(_, value)| value == "editor").unwrap_or(true);
                     if session_page {
