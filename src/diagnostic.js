@@ -10,6 +10,13 @@
     const count = root.querySelector('[data-diagnostic=count]');
     const nextButton = root.querySelector('[data-diagnostic=next]');
     const previousButton = root.querySelector('[data-diagnostic=previous]');
+    const marker = document.createElement('div');
+    marker.className = 'diagnostic_match';
+    marker.setAttribute('data-diagnostic-current-match', '');
+    marker.setAttribute('aria-hidden', 'true');
+    marker.hidden = true;
+    field.parentElement.append(marker);
+    const context = document.createElement('canvas').getContext('2d');
     const matches = [];
     let current = -1;
 
@@ -25,25 +32,48 @@
         matches.push({ start: match.index, end: match.index + match[0].length });
       }
     };
-    const reveal = (match) => {
+    const matchPosition = (match) => {
       const style = getComputedStyle(field);
       const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
       const before = field.value.slice(0, match.start);
       const line = before.split('\n').length - 1;
-      const top = (parseFloat(style.paddingTop) || 0) + line * lineHeight;
-      if (top < field.scrollTop) field.scrollTop = top;
-      else if (top + lineHeight > field.scrollTop + field.clientHeight) {
-        field.scrollTop = top + lineHeight - field.clientHeight;
-      }
       const column = before.slice(before.lastIndexOf('\n') + 1);
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
       context.font = style.font || `${style.fontSize} ${style.fontFamily}`;
-      const left = (parseFloat(style.paddingLeft) || 0) + context.measureText(column).width;
-      const width = context.measureText(field.value.slice(match.start, match.end).split('\n')[0]).width;
-      if (left < field.scrollLeft) field.scrollLeft = left;
-      else if (left + width > field.scrollLeft + field.clientWidth) {
-        field.scrollLeft = left + width - field.clientWidth;
+      return {
+        top: (parseFloat(style.paddingTop) || 0) + line * lineHeight,
+        left: (parseFloat(style.paddingLeft) || 0) + context.measureText(column).width,
+        width: context.measureText(field.value.slice(match.start, match.end)).width,
+        height: lineHeight,
+      };
+    };
+    const updateMarker = () => {
+      const match = matches[current];
+      if (findBar.hidden || !match) { marker.hidden = true; return; }
+      const p = matchPosition(match);
+      const left = field.offsetLeft + field.clientLeft;
+      const top = field.offsetTop + field.clientTop;
+      const x = left + p.left - field.scrollLeft;
+      const y = top + p.top - field.scrollTop;
+      const x0 = Math.max(left, x);
+      const y0 = Math.max(top, y);
+      const x1 = Math.min(left + field.clientWidth, x + p.width);
+      const y1 = Math.min(top + field.clientHeight, y + p.height);
+      if (x1 <= x0 || y1 <= y0) { marker.hidden = true; return; }
+      marker.style.left = `${x0}px`;
+      marker.style.top = `${y0}px`;
+      marker.style.width = `${x1 - x0}px`;
+      marker.style.height = `${y1 - y0}px`;
+      marker.hidden = false;
+    };
+    const reveal = (match) => {
+      const p = matchPosition(match);
+      if (p.top < field.scrollTop) field.scrollTop = p.top;
+      else if (p.top + p.height > field.scrollTop + field.clientHeight) {
+        field.scrollTop = p.top + p.height - field.clientHeight;
+      }
+      if (p.left < field.scrollLeft) field.scrollLeft = p.left;
+      else if (p.left + p.width > field.scrollLeft + field.clientWidth) {
+        field.scrollLeft = p.left + p.width - field.clientWidth;
       }
     };
     const selectMatch = (index) => {
@@ -52,6 +82,7 @@
       field.setSelectionRange(matches[current].start, matches[current].end);
       reveal(matches[current]);
       query.focus();
+      updateMarker();
       updateCopy();
       updateCount();
     };
@@ -62,12 +93,13 @@
       if (matches.length) selectMatch(0);
       else {
         field.setSelectionRange(field.selectionEnd, field.selectionEnd);
+        updateMarker();
         updateCopy();
         updateCount();
       }
     };
-    const find = () => { findBar.hidden = false; root.classList.add('diagnostic-searching'); query.focus(); query.select(); };
-    const hideFind = () => { findBar.hidden = true; root.classList.remove('diagnostic-searching'); field.focus(); };
+    const find = () => { findBar.hidden = false; root.classList.add('diagnostic-searching'); query.focus(); query.select(); updateMarker(); };
+    const hideFind = () => { findBar.hidden = true; root.classList.remove('diagnostic-searching'); marker.hidden = true; field.focus(); };
     const copy = (all) => {
       const start = field.selectionStart;
       const end = field.selectionEnd;
@@ -99,6 +131,7 @@
       }
       field.scrollTop = follow ? field.scrollHeight : top;
       field.scrollLeft = left;
+      updateMarker();
       updateCopy();
     };
 
@@ -117,6 +150,9 @@
     field.addEventListener('select', updateCopy);
     field.addEventListener('keyup', updateCopy);
     field.addEventListener('mouseup', updateCopy);
+    field.addEventListener('scroll', updateMarker);
+    window.addEventListener('resize', updateMarker);
+    if (window.ResizeObserver) new ResizeObserver(updateMarker).observe(field);
     root.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -151,6 +187,7 @@
         current = -1;
         count.textContent = '';
         findBar.hidden = true;
+        marker.hidden = true;
         root.classList.remove('diagnostic-searching');
         updateCopy();
         field.focus();
