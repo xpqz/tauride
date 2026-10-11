@@ -56,7 +56,15 @@ async function clearHistory(c) {
 }
 
 async function clearNotices(c) {
-  await c.execute(() => toastr.remove());
+  await c.execute(() => {
+    const duration = toastr.options.hideDuration;
+    toastr.options.hideDuration = 0;
+    toastr.clear();
+    if (duration === undefined) delete toastr.options.hideDuration;
+    else toastr.options.hideDuration = duration;
+  });
+  await c.waitUntil(async () => c.execute(() => !document.querySelector('#toast-container .toast-message')),
+    { timeout: 10000, timeoutMsg: 'Previous notice did not clear' });
 }
 
 test('clear preserves an unsent multirow draft, recall, workspace and interpreter log', async (t) => {
