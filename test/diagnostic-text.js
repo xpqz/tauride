@@ -34,6 +34,55 @@ async function selection(c) {
   });
 }
 
+async function changedMatchPixels(c, beforePng, afterPng, wanted) {
+  return c.execute(async (beforeBase64, afterBase64, text) => {
+    const decode = (base64) => new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = `data:image/png;base64,${base64}`;
+    });
+    const [before, after] = await Promise.all([decode(beforeBase64), decode(afterBase64)]);
+    const field = document.querySelector('#abt_ta');
+    const style = getComputedStyle(field);
+    const start = field.value.indexOf(text);
+    if (start < 0) throw new Error(`About text does not contain ${text}`);
+    const preceding = field.value.slice(0, start);
+    const line = preceding.split('\n').length - 1;
+    const column = preceding.slice(preceding.lastIndexOf('\n') + 1);
+    const measure = document.createElement('canvas').getContext('2d');
+    measure.font = style.font;
+    const rect = field.getBoundingClientRect();
+    const x = rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
+      + measure.measureText(column).width - field.scrollLeft;
+    const y = rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)
+      + line * parseFloat(style.lineHeight) - field.scrollTop;
+    const scaleX = before.width / window.innerWidth;
+    const scaleY = scaleX;
+    const left = Math.max(0, Math.floor((x - 2) * scaleX));
+    const top = Math.max(0, Math.floor((y - 2) * scaleY));
+    const width = Math.min(before.width - left, Math.ceil((measure.measureText(text).width + 4) * scaleX));
+    const height = Math.min(before.height - top, Math.ceil((parseFloat(style.lineHeight) + 4) * scaleY));
+    const pixels = (image) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      return context.getImageData(left, top, width, height).data;
+    };
+    const oldPixels = pixels(before);
+    const newPixels = pixels(after);
+    let changed = 0;
+    for (let i = 0; i < oldPixels.length; i += 4) {
+      if (Math.max(...[0, 1, 2].map(channel => Math.abs(oldPixels[i + channel] - newPixels[i + channel]))) >= 20) {
+        changed++;
+      }
+    }
+    return { changed, width, height };
+  }, beforePng, afterPng, wanted);
+}
+
 async function selectText(c, value) {
   await c.execute((wanted) => {
     const field = document.querySelector('textarea[readonly]');
@@ -91,6 +140,41 @@ async function mainEditorState(c) {
   });
 }
 
+test('About Find count is readable in both themes', async (t) => {
+  const c = t.context.app.client;
+  await openWindow(c, 'ABT');
+  await (await button(c, 'Find')).click();
+  await setFieldValue(c, await c.$('input[type=search]'), 'Version:');
+  await c.waitUntil(async () => /1\s*(?:of|\/)\s*2/i.test(await c.execute(() => document.body.innerText)),
+    { timeout: 10000, timeoutMsg: 'About Find did not report its match count' });
+  const countContrast = await c.execute(() => {
+    const count = document.querySelector('[data-diagnostic=count]');
+    const channels = (color) => (color.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+    const luminance = (color) => {
+      const rgb = channels(color).map(value => value / 255)
+        .map(value => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+      return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+    };
+    const contrast = () => {
+      let background = count;
+      while (background && getComputedStyle(background).backgroundColor.match(/rgba?\(0, 0, 0, 0\)/)) {
+        background = background.parentElement;
+      }
+      const foreground = luminance(getComputedStyle(count).color);
+      const behind = luminance(background ? getComputedStyle(background).backgroundColor : 'rgb(255, 255, 255)');
+      return (Math.max(foreground, behind) + 0.05) / (Math.min(foreground, behind) + 0.05);
+    };
+    document.getElementById('theme_dark').disabled = true;
+    document.getElementById('theme_light').disabled = false;
+    const light = contrast();
+    document.getElementById('theme_dark').disabled = false;
+    document.getElementById('theme_light').disabled = true;
+    return { light, dark: contrast() };
+  });
+  t.true(countContrast.light >= 4.5, 'the match count is readable in the light theme');
+  t.true(countContrast.dark >= 4.5, 'the match count is readable in the dark theme');
+});
+
 test('About distinguishes Copy from Copy All and supports Find', async (t) => {
   const c = t.context.app.client;
   const main = await c.getWindowHandle();
@@ -125,12 +209,18 @@ test('About distinguishes Copy from Copy All and supports Find', async (t) => {
   t.is(await query.getValue(), '', 'Find starts with an empty query');
   t.false(/no matches/i.test(await c.execute(() => document.body.innerText)),
     'an empty query is not reported as a failed search');
+  const unmarkedText = await c.takeScreenshot();
   await setFieldValue(c, query, 'vErSiOn:');
   t.true(await c.execute(() => document.activeElement === document.querySelector('input[type=search]')),
     'typing a query keeps focus in Find');
   await c.waitUntil(async () => (await selection(c)).text.toLowerCase() === 'version:',
     { timeout: 10000, timeoutMsg: 'Find did not select a case-insensitive match' });
   t.regex(await c.execute(() => document.body.innerText), /1\s*(?:of|\/)\s*2/i);
+  t.is(await c.execute(() => document.querySelector('#abt_ta').scrollTop), 0,
+    'the first About match stays at the top of the text viewport');
+  const visibleChange = await changedMatchPixels(c, unmarkedText, await c.takeScreenshot(), 'Version:');
+  t.true(visibleChange.changed >= 20,
+    `Find must paint the current match while the query has focus; ${JSON.stringify(visibleChange)}`);
   const first = (await selection(c)).start;
   await (await button(c, 'Next')).click();
   const second = (await selection(c)).start;
