@@ -369,11 +369,20 @@ nativeTest('native View clear targets the focused session, not the last session 
 
   await c.switchToWindow(first);
   await focusNativeWindow(c);
-  await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command', { command: 'CVH' }));
+  const dispatchedId = await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
+    { command: 'CVH' }));
+  t.true(dispatchedId.startsWith(`app:${second}:`), 'the second session still owned the installed menu');
   await c.waitUntil(async () => (await session(c)).text === '      first-draft-86',
     { timeout: 10000, timeoutMsg: 'Native View clear did not target the focused first session' });
   t.true(firstBefore.text.includes('first-history-86'));
-  const clearedFirst = await session(c);
+  await c.execute(() => {
+    const se = D.ide.wins[0];
+    se.QT(se.me);
+  });
+  await runLine(c, "⎕←'first-before-preferences-86'", 'first-before-preferences-86');
+  await c.execute(() => D.ide.wins[0].loadLine('      first-draft-86'));
+  const beforePreferences = await session(c);
+  t.true(beforePreferences.text.includes('first-before-preferences-86'));
   await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)),
     { timeout: 10000, timeoutMsg: 'First session Preferences did not connect' });
   await c.execute(() => D.commands.PRF());
@@ -384,7 +393,7 @@ nativeTest('native View clear targets the focused session, not the last session 
   await focusNativeWindow(c);
   await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command', { command: 'CVH' }));
   await c.switchToWindow(first);
-  t.deepEqual(await session(c), clearedFirst, 'Preferences focus does not clear the first session');
+  t.deepEqual(await session(c), beforePreferences, 'Preferences focus does not clear the first session');
   await c.switchToWindow(second);
   t.deepEqual(await session(c), secondBefore, 'background session keeps its history and draft');
 });
