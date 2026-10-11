@@ -106,7 +106,7 @@
   // edit(name), save(token, lines, stops) -> whether SaveChanges went out,
   // stops(token, lines) -> the window's stops, trace(token, action),
   // stack(), value(name) -> the GetValueTip token; confirmNeeded(),
-  // confirm(request) -> Promise<boolean>; onAgentEcho(seq, text); now().
+  // confirm(request, signal) -> Promise<boolean>; onAgentEcho(seq, text); now().
   const create = (io) => {
     const now = io.now || (() => new Date().toISOString());
     const ring = [];
@@ -117,6 +117,8 @@
     let last = { origin: 'human', prompt: 1 }; // the line most recently executed
     let acting = false; // while an action the agent asked for runs: its sends are the agent's
     let inflight = null; // the control request being confirmed or carried out: one at a time
+    let connectionEpoch = 0;
+    const pendingActions = new Set();
     const waiters = []; // correlations awaiting a protocol message or an event
     let batch = []; // transcript lines not yet handed over
     let flushTimer = null;
@@ -124,6 +126,7 @@
     const send = (frame) => { connected && io.send(frame); };
     const reply = (id, body) => { send({ id: id === undefined ? null : id, ...body }); };
     const failure = (code, message, more) => ({ err: { code, message, ...more } });
+    const release = (owner) => { if (inflight === owner) inflight = null; };
 
     const flush = () => {
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -251,7 +254,8 @@
       const result = () => ({
         echo: f.echo, lines: f.lines, error: f.error, prompt: f.prompt, truncated: f.truncated, seq: [f.first, f.last],
       });
-      inflight = { req: m.req, id: m.id };
+      const owner = { req: m.req, id: m.id };
+      inflight = owner;
       // The result is the transcript slice from the line's echo to the prompt
       // that follows it. ⍞ input is not echoed, so an answer's slice starts at
       // the send. The echo carries the session's input indent, so the text
@@ -276,13 +280,13 @@
         } else if (r.kind === 'prompt' && r.prompt !== 0) {
           f.prompt = r.prompt;
           f.last = r.seq;
-          inflight = null;
+          release(owner);
           ok(result());
           return true;
         }
         return false;
       }, () => {
-        inflight = null;
+        release(owner);
         f.prompt = prompt;
         fail('timeout', `no prompt within ${timeout} ms`, { partial: result() });
       });
@@ -332,7 +336,8 @@
         if (blocked(fail, true, true)) return;
         const name = m.name.replace(/\n$/, '').trim();
         const timeout = ms(m);
-        inflight = { req: 'edit', id: m.id };
+        const owner = { req: 'edit', id: m.id };
+        inflight = owner;
         // A name already open comes back as GotoWindow or UpdateWindow
         // rather than a new OpenWindow.
         expect(timeout, (kind, x, y) => {
@@ -341,10 +346,10 @@
           if (x === 'OpenWindow' || x === 'UpdateWindow') token = y.token;
           else if (x === 'GotoWindow') token = y.win;
           if (token === undefined) return false;
-          inflight = null;
+          release(owner);
           ok({ token });
           return true;
-        }, () => { inflight = null; fail('timeout', `no window within ${timeout} ms`); });
+        }, () => { release(owner); fail('timeout', `no window within ${timeout} ms`); });
         act(() => io.edit(name));
       },
       save(m, ok, fail) {
@@ -354,20 +359,21 @@
         if (blocked(fail, true, false)) return;
         const lines = typeof m.text === 'string' ? m.text.replace(/\n$/, '').split('\n') : m.text;
         const timeout = ms(m);
-        inflight = { req: 'save', id: m.id };
+        const owner = { req: 'save', id: m.id };
+        inflight = owner;
         const waiter = expect(timeout, (kind, x, y) => {
           if (kind !== 'recv' || x !== 'ReplySaveChanges' || y.win !== m.token) return false;
-          inflight = null;
+          release(owner);
           // The interpreter explains a refusal in its own dialog; the reply
           // carries only the number.
           if (y.err) fail('save', `the interpreter refused the change (err ${y.err})`, { token: m.token, err: y.err });
           else ok({ token: m.token, saved: true });
           return true;
-        }, () => { inflight = null; fail('timeout', `no ReplySaveChanges within ${timeout} ms`); });
+        }, () => { release(owner); fail('timeout', `no ReplySaveChanges within ${timeout} ms`); });
         // The editor sends nothing when neither text nor stops changed.
         if (!act(() => io.save(m.token, lines, m.stops))) {
           remove(waiter);
-          inflight = null;
+          release(owner);
           ok({ token: m.token, saved: true });
         }
       },
@@ -388,7 +394,8 @@
         if (w.kind !== 'tracer') { fail('bad_request', 'the window is an editor, not a tracer'); return; }
         if (blocked(fail, true, true)) return;
         const timeout = ms(m);
-        inflight = { req: 'trace', id: m.id };
+        const owner = { req: 'trace', id: m.id };
+        inflight = owner;
         expect(timeout, (kind, x, y) => {
           if (kind !== 'recv') return false;
           let r;
@@ -404,10 +411,10 @@
           // only a prompt that returns without one is the result.
           else if (x === 'SetPromptType' && y.type !== 0) r = { prompt: y.type };
           if (!r) return false;
-          inflight = null;
+          release(owner);
           ok(r);
           return true;
-        }, () => { inflight = null; fail('timeout', `no highlight, close or prompt within ${timeout} ms`); });
+        }, () => { release(owner); fail('timeout', `no highlight, close or prompt within ${timeout} ms`); });
         act(() => io.trace(m.token, m.action));
       },
       stack(m, ok, fail) {
@@ -445,11 +452,21 @@
       },
     };
 
-    const confirm = (m) => new Promise((resolve) => {
-      const t = setTimeout(() => resolve(false), CONFIRM_MS);
-      Promise.resolve().then(() => io.confirm(m)).then(
-        (r) => { clearTimeout(t); resolve(!!r); },
-        () => { clearTimeout(t); resolve(false); },
+    const confirm = (m, controller) => new Promise((resolve) => {
+      const { signal } = controller;
+      let done = false;
+      const finish = (allowed) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        resolve(allowed);
+      };
+      const onAbort = () => finish(false);
+      const timer = setTimeout(() => controller.abort(), CONFIRM_MS);
+      signal.addEventListener('abort', onAbort, { once: true });
+      Promise.resolve().then(() => (signal.aborted ? false : io.confirm(m, signal))).then(
+        (r) => finish(!!r), () => finish(false),
       );
     });
     // ide.js handles the interpreter's messages from a queue that it runs
@@ -459,25 +476,39 @@
     // reads or drives D.ide waits for the queue to drain, within its timeout:
     // the interpreter is ready, the session is only catching up. The poll is
     // a waiter, so a disconnect drops it along with the request.
-    const settle = (deadline) => new Promise((resolve) => {
+    const settle = (deadline, signal) => new Promise((resolve) => {
       const w = { feed: () => false };
+      const finish = (ready) => {
+        remove(w);
+        signal.removeEventListener('abort', onAbort);
+        resolve(ready);
+      };
+      const onAbort = () => finish(false);
       const poll = () => {
         const i = io.ide();
         if (!i || i.quiescent) {
-          remove(w);
-          resolve(true);
+          finish(true);
         } else if (Date.now() >= deadline) {
-          remove(w);
-          resolve(false);
+          finish(false);
         } else w.timer = setTimeout(poll, SETTLE_MS);
       };
       waiters.push(w);
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) { finish(false); return; }
       poll();
     });
     const handle = async (m) => {
       const { id, req } = m;
-      const ok = (r) => { reply(id, { ok: r }); return true; };
-      const fail = (code, message, more) => { reply(id, failure(code, message, more)); return true; };
+      const epoch = connectionEpoch;
+      let answered = false;
+      const ownedReply = (body) => {
+        if (answered || !connected || connectionEpoch !== epoch) return false;
+        answered = true;
+        reply(id, body);
+        return true;
+      };
+      const ok = (r) => ownedReply({ ok: r });
+      const fail = (code, message, more) => ownedReply(failure(code, message, more));
       // Rust checks a Windows client's token before passing frames on.
       if (req === undefined && 'auth' in m) return;
       const spec = REQUESTS[req];
@@ -485,31 +516,55 @@
       if (spec.level === 'control' && level !== 'control') { fail('refused', `${req} needs control (Agent ▸ Allow control, or RIDE_AGENT=control)`); return; }
       const why = invalid(m);
       if (why) { fail('bad_request', why); return; }
-      if (spec.confirm && io.confirmNeeded && io.confirmNeeded()) {
-        if (inflight) { fail('busy', 'a request is in flight'); return; }
-        inflight = { req, id, confirming: true };
-        const allowed = await confirm(m);
-        inflight = null;
-        if (!connected) return;
-        if (level !== 'control') { fail('refused', `${req} needs control`); return; }
-        if (!allowed) { fail('denied', 'the person denied the request'); return; }
-      }
+      let owner = null;
+      let controller = null;
+      let cancelled = false;
+      const cancel = (reason) => {
+        if (cancelled) return;
+        cancelled = true;
+        if (controller) controller.abort();
+        release(owner);
+        pendingActions.delete(pending);
+        if (reason === 'refused') fail('refused', `${req} needs control`);
+      };
+      const pending = { control: spec.level === 'control', cancel };
       let fields = m;
-      if (spec.settle) {
-        // A control request holds the slot while it waits, so a second one is
-        // busy rather than interleaved.
+      try {
         if (spec.confirm) {
           if (inflight) { fail('busy', 'a request is in flight'); return; }
-          inflight = { req, id, settling: true };
+          owner = { req, id };
+          inflight = owner;
+          controller = new AbortController();
+          pendingActions.add(pending);
+          if (io.confirmNeeded && io.confirmNeeded()) {
+            const allowed = await confirm(m, controller);
+            if (cancelled) return;
+            if (!allowed) {
+              pendingActions.delete(pending);
+              release(owner);
+              fail('denied', 'the person denied the request');
+              return;
+            }
+          }
         }
-        const timeout = ms(m);
-        const deadline = Date.now() + timeout;
-        const settled = await settle(deadline);
-        if (spec.confirm) inflight = null;
-        if (spec.level === 'control' && level !== 'control') { fail('refused', `${req} needs control`); return; }
-        if (!settled) { fail('timeout', `the session was still handling the interpreter's messages after ${timeout} ms`); return; }
-        // The handler's own wait gets what is left of the timeout.
-        fields = { ...m, timeout: Math.max(1, deadline - Date.now()) };
+        if (spec.settle) {
+          if (!controller) controller = new AbortController();
+          if (!spec.confirm) pendingActions.add(pending);
+          const timeout = ms(m);
+          const deadline = Date.now() + timeout;
+          const settled = await settle(deadline, controller.signal);
+          if (cancelled) return;
+          pendingActions.delete(pending);
+          release(owner);
+          if (!connected || connectionEpoch !== epoch) return;
+          if (spec.level === 'control' && level !== 'control') { fail('refused', `${req} needs control`); return; }
+          if (!settled) { fail('timeout', `the session was still handling the interpreter's messages after ${timeout} ms`); return; }
+          // The handler's own wait gets what is left of the timeout.
+          fields = { ...m, timeout: Math.max(1, deadline - Date.now()) };
+        }
+      } catch (e) {
+        if (pendingActions.has(pending)) cancel('closed');
+        throw e;
       }
       await handlers[req](fields, ok, fail);
     };
@@ -523,19 +578,30 @@
         reply(null, failure('bad_request', 'a frame is a JSON object'));
         return Promise.resolve();
       }
-      return handle(m).catch((e) => reply(m.id, failure('bad_request', `${e}`)));
+      const epoch = connectionEpoch;
+      return handle(m).catch((e) => {
+        if (connected && connectionEpoch === epoch) reply(m.id, failure('bad_request', `${e}`));
+      });
     };
 
     const socket = (on) => {
       if (on === connected) return;
       connected = on;
+      connectionEpoch += 1;
       // Replies to what was pending have nowhere to go.
-      if (!on) { waiters.slice().forEach(remove); inflight = null; }
+      if (!on) {
+        [...pendingActions].forEach((p) => p.cancel('closed'));
+        waiters.slice().forEach(remove);
+        inflight = null;
+      }
       event({ kind: 'agent', event: on ? 'connected' : 'disconnected' });
     };
     const setLevel = (l) => {
       if (![null, 'observe', 'control'].includes(l)) throw new Error(`agent level ${JSON.stringify(l)}`);
       if (l === level) return level;
+      if (level === 'control' && l !== 'control') {
+        [...pendingActions].filter((p) => p.control).forEach((p) => p.cancel('refused'));
+      }
       if (l) {
         level = l;
         event({ kind: 'agent', event: 'level', level: l });

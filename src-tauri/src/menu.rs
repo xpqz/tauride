@@ -3,7 +3,7 @@
 //! id; the shim runs the item's click handler or Electron role.
 
 use serde::Deserialize;
-use tauri::menu::{CheckMenuItemBuilder, IsMenuItem, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder};
+use tauri::menu::{CheckMenuItemBuilder, IsMenuItem, Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, Submenu, SubmenuBuilder};
 use tauri::{Emitter, Manager, Runtime, WebviewWindow};
 
 #[derive(Deserialize)]
@@ -117,8 +117,41 @@ pub fn set_app_menu<R: Runtime>(app: tauri::AppHandle<R>, items: Vec<Item>) -> R
     Ok(())
 }
 
+fn restore_checkbox<R: Runtime>(items: Vec<MenuItemKind<R>>, id: &str) -> tauri::Result<bool> {
+    for item in items {
+        if item.id().as_ref() == id {
+            if let Some(checkbox) = item.as_check_menuitem() {
+                checkbox.set_checked(!checkbox.is_checked()?)?;
+            }
+            return Ok(true);
+        }
+        if let Some(submenu) = item.as_submenu() {
+            if restore_checkbox(submenu.items()?, id)? { return Ok(true); }
+        }
+    }
+    Ok(false)
+}
+
 /// App-wide menu event handler: forwards popup-menu clicks to the webviews.
 pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
+    if id.starts_with("app:") {
+        if let Some(command) = ["AGC", "AGO", "TTB"].into_iter().find(|command| id.ends_with(&format!(":{command}"))) {
+            let focused = app.webview_windows().into_values().find(|window| window.is_focused().unwrap_or(false));
+            let eligible = focused.as_ref().and_then(|window| window.url().ok()).map(|url| {
+                matches!(url.path(), "" | "/" | "/index.html")
+                    && url.query_pairs().find(|(key, _)| key == "type")
+                        .map(|(_, value)| value == "editor").unwrap_or(true)
+            }).unwrap_or(false);
+            if eligible {
+                if let Some(window) = focused {
+                    let _ = window.emit_to(window.label(), "ride-session-menu", command);
+                }
+            } else if let Some(menu) = app.menu() {
+                if let Ok(items) = menu.items() { let _ = restore_checkbox(items, id); }
+            }
+            return;
+        }
+    }
     if id.starts_with("app:") && id.ends_with(":CVH") {
         for window in app.webview_windows().into_values() {
             if window.is_focused().unwrap_or(false) {

@@ -143,6 +143,13 @@ their own session window and close with it. Quitting ends a session; the
 app exits when its last session window closes. Window titles follow the
 page's `document.title` (the session caption).
 
+On macOS, Observe Session, Allow Control and Show Trace/Edit Toolbar act on
+whichever session or floating editor/tracer has native focus. Floating windows
+propagate the preference to their owning session through the existing IPC path.
+These commands carry their command code in the native menu item ID and are sent
+to the focused webview, even if another session last installed the application
+menu. Helper windows do not change session preferences.
+
 Windows: `src/wm.js` gives Ride's code one small window API (create, find,
 show/hide/focus/close, size, title, run a script, print, devtools) with two
 implementations: Electron's `BrowserWindow`, and Tauri's JS window API
@@ -210,7 +217,12 @@ agent execute, answer prompts, interrupt, edit, save and trace. The same two
 switches, plus *Confirm each action*, are checkboxes under Agent on the
 General tab of Preferences. `RIDE_AGENT=1` (observe) or `RIDE_AGENT=control`
 in the environment sets the level when Tauride starts; after that the menu
-drives it, and turning observe off closes the socket and drops the agent.
+drives it. Turning both switches off closes the socket and drops the agent.
+
+With *Confirm each action* enabled, disconnecting the agent or revoking control
+cancels actions still awaiting confirmation or IDE readiness and dismisses their
+toasts. Reconnecting or restoring control requires a fresh request. Actions
+already sent to the interpreter continue normally.
 
 **Status bar.** While the level is at least observe the status bar shows
 `agent: observing` or `agent: control`, with ` (connected)` appended while a

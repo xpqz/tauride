@@ -262,12 +262,20 @@ confirm mode below, so the person can always ask the agent to stop a loop.
 `agent`: `agent` (observe) and `agentControl` (control, implies observe),
 both default off, changeable while running from the menu (Agent ▸ Observe
 session, Agent ▸ Allow control; command codes `AGO`, `AGC`) and from the
-Preferences dialog. The tap follows them live: turning observe off closes
+Preferences dialog. The tap follows them live: turning both switches off closes
 the port and drops the client. `RIDE_AGENT=1` / `RIDE_AGENT=control` set
 them for the process at startup. A third preference `agentConfirm` (default
 off) makes every control request except `interrupt` show a non-modal toast
 with the request text and Run / Deny; no answer within 60 s is a deny,
 reported to the agent as `denied`.
+
+Disconnecting cancels unstarted requests and removes their confirmation toasts.
+Revoking control does the same for pending control requests, replying `refused`
+while that client remains connected. Reconnecting or restoring control cannot
+revive them; a new request needs its own approval. Late confirmation answers,
+timeouts and asynchronous replies belong to the original request and connection,
+so they cannot answer or release a newer request, even if its ID is reused.
+Already-dispatched interpreter actions are not interrupted by revocation.
 
 **Requests added.**
 

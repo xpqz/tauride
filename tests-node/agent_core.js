@@ -917,6 +917,71 @@ test('the core confirmation deadline denies and cancels its toast', async (t) =>
   assert.deepEqual(io.calls, []);
 });
 
+test('a delayed status reply and error stay with their original connection', async (t) => {
+  const pending = [];
+  const { io, c } = setup(t, 'observe', {
+    transcriptStatus: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+  });
+  const old = req(c, { id: 1, req: 'status' });
+  await sleep(0);
+  c.socket(false);
+  c.socket(true);
+  io.frames.length = 0;
+  const fresh = req(c, { id: 1, req: 'status' });
+  await sleep(0);
+  pending[0].resolve({ size: 10, rotated: false });
+  await old;
+  assert.deepEqual(replies(io), [], 'old status did not answer the new client');
+  pending[1].resolve({ size: 20, rotated: false });
+  await fresh;
+  assert.equal(last(io).ok.size, 20);
+
+  const rejected = req(c, { id: 2, req: 'status' });
+  await sleep(0);
+  c.socket(false);
+  c.socket(true);
+  io.frames.length = 0;
+  pending[2].reject(new Error('old transcript failed'));
+  await rejected;
+  assert.deepEqual(replies(io), [], 'old frame error did not answer the new client');
+});
+
+test('revoking control leaves an already dispatched execute running', async (t) => {
+  const { io, c } = setup(t);
+  await req(c, { id: 1, req: 'execute', text: '1' });
+  assert.deepEqual(io.calls, [['exec', '1']]);
+  c.setLevel('observe');
+  run(c, '1', ['1']);
+  assert.equal(last(io).id, 1);
+  assert.equal(last(io).ok.lines[0].text, '1');
+  assert.equal(io.calls.length, 1);
+});
+
+test('a pre-dispatch callback error releases the control slot', async (t) => {
+  for (const stage of ['confirmation', 'settle']) {
+    let throwing = true;
+    const { io, c } = setup(t, 'control', {
+      confirmNeeded: () => {
+        if (stage === 'confirmation' && throwing) throw new Error('confirmation unavailable');
+        return false;
+      },
+    });
+    if (stage === 'settle') {
+      io.ide = () => {
+        if (throwing) throw new Error('IDE unavailable');
+        return io.ideState;
+      };
+    }
+    await req(c, { id: 1, req: 'execute', text: 'old' });
+    assert.equal(last(io).err.code, 'bad_request');
+    throwing = false;
+    await req(c, { id: 2, req: 'execute', text: 'fresh' });
+    assert.deepEqual(io.calls, [['exec', 'fresh']], stage);
+    run(c, 'fresh', ['new result']);
+    assert.equal(last(io).id, 2);
+  }
+});
+
 test('connecting, disconnecting and the level are events; an agent echo is reported', async (t) => {
   const echoed = [];
   const io = fake({ onAgentEcho: (seq, text) => echoed.push([seq, text]) });
