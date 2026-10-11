@@ -121,3 +121,44 @@ nativeTest('physical Cmd+A replaces the focused Preferences Title text', async (
   await c.switchToWindow(main);
   t.deepEqual(await mainEditorState(c), originalMain, 'Cmd+A leaves the session alone');
 });
+
+nativeTest('Select All in one session leaves another session’s Preferences selection alone', async (t) => {
+  const c = t.context.app.client;
+  const { main: backgroundMain, label: background } = await openPreferences(c);
+  await showTab(c, 'title');
+  await c.execute(() => {
+    const field = document.querySelector('#title_inp');
+    field.value = 'background title';
+    field.focus();
+    field.setSelectionRange(3, 3);
+  });
+  const backgroundField = await selectedField(c, '#title_inp');
+  await c.switchToWindow(backgroundMain);
+  const backgroundEditor = await mainEditorState(c);
+
+  const secondId = await c.execute(() => D.wm.newSession({ RIDE_SPAWN: D.lastSpawnedExe }));
+  t.truthy(secondId, 'second session opened');
+  await c.switchToWindow(`w${secondId}`);
+  await c.waitUntil(async () => c.execute(() => !!(D.ide && D.ide.wins[0] && D.prf_bw && D.prf_bw.socket)),
+    { timeout: 30000, timeoutMsg: 'Second session did not connect' });
+  const { main: foregroundMain } = await openPreferences(c);
+  await showTab(c, 'title');
+  await c.execute(() => {
+    const field = document.querySelector('#title_inp');
+    field.value = 'foreground title';
+    field.focus();
+    field.setSelectionRange(3, 3);
+  });
+  await focusNativeWindow(c);
+  await invokeSelectAll(c);
+  await assertFieldSelected(t, c, '#title_inp');
+
+  await c.switchToWindow(background);
+  const after = await selectedField(c, '#title_inp');
+  t.deepEqual([after.value, after.start, after.end],
+    [backgroundField.value, backgroundField.start, backgroundField.end],
+    'background Preferences keeps its text and partial selection');
+  await c.switchToWindow(backgroundMain);
+  t.deepEqual(await mainEditorState(c), backgroundEditor, 'background session editor is unchanged');
+  await c.switchToWindow(foregroundMain);
+});
