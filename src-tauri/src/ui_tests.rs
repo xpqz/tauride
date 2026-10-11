@@ -1,7 +1,7 @@
 use enigo::{Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use std::time::Duration;
 use tauri::menu::MenuItemKind;
-use tauri::{AppHandle, Runtime, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 fn menu_command_id<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> Result<Option<String>, String> {
     for item in items {
@@ -110,11 +110,14 @@ fn special_key(value: char) -> Option<(Key, bool)> {
 }
 
 #[tauri::command]
-pub async fn ui_test_keys(window: WebviewWindow, keys: Vec<String>) -> Result<(), String> {
+pub async fn ui_test_keys(app: AppHandle, window: WebviewWindow, keys: Vec<String>, target_label: Option<String>) -> Result<(), String> {
     let _lock = INPUT.lock().await;
-    focus(&window).await?;
+    let target = if let Some(label) = target_label {
+        app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?
+    } else { window };
+    focus(&target).await?;
     #[cfg(target_os = "macos")]
-    return on_main_thread(&window, move || send_keys(keys)).await;
+    return on_main_thread(&target, move || send_keys(keys)).await;
     #[cfg(not(target_os = "macos"))]
     send_keys(keys)
 }
