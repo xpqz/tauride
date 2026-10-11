@@ -7,6 +7,13 @@ fn menu_command_id<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> Re
     for item in items {
         let id = item.id().as_ref();
         if id.ends_with(&format!(":{command}")) { return Ok(Some(id.to_string())); }
+        if command == "CVH" {
+            if let Some(menu_item) = item.as_menuitem() {
+                if menu_item.text().map_err(|e| e.to_string())? == "Clear Visible History" {
+                    return Ok(Some(id.to_string()));
+                }
+            }
+        }
         if let Some(submenu) = item.as_submenu() {
             if let Some(id) = menu_command_id(submenu.items().map_err(|e| e.to_string())?, command)? {
                 return Ok(Some(id));
@@ -16,14 +23,18 @@ fn menu_command_id<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> Re
     Ok(None)
 }
 
-#[tauri::command]
-pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String) -> Result<(), String> {
-    if !["SC", "SA"].contains(&command.as_str()) { return Err("Unsupported test menu command".into()); }
+fn installed_menu_command_id<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<String, String> {
+    if !["SC", "SA", "CVH"].contains(&command) { return Err("Unsupported test menu command".into()); }
     let menu = app.menu().ok_or("No application menu")?;
     let items = menu.items().map_err(|e| e.to_string())?;
-    let id = menu_command_id(items, &command)?.ok_or_else(|| format!("No application menu item for {command}"))?;
-    crate::menu::on_event(&app, &id);
-    Ok(())
+    menu_command_id(items, command)?.ok_or_else(|| format!("No application menu item for {command}"))
+}
+
+#[tauri::command]
+pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String, dispatch: Option<bool>) -> Result<String, String> {
+    let id = installed_menu_command_id(&app, &command)?;
+    if dispatch.unwrap_or(true) { crate::menu::on_event(&app, &id); }
+    Ok(id)
 }
 
 pub fn guard_parent(app: tauri::AppHandle) {

@@ -20,6 +20,7 @@ D.cmds = [
   ['CBP','Clear stops for active object',[]],
   ['CLS','Close window',            D.mac?['Cmd+W']:[]],
   ['CNC','Connect',                 []],
+  ['CVH','Clear Visible History',   []],
   ['DK', 'Delete lines',            []],
   ['DHI','Dyalog Help Index',       []],
   ['DMN','Next line in demo',       []],

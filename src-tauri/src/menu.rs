@@ -119,6 +119,22 @@ pub fn set_app_menu<R: Runtime>(app: tauri::AppHandle<R>, items: Vec<Item>) -> R
 
 /// App-wide menu event handler: forwards popup-menu clicks to the webviews.
 pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
+    if id.starts_with("app:") && id.ends_with(":CVH") {
+        for window in app.webview_windows().into_values() {
+            if window.is_focused().unwrap_or(false) {
+                if let Ok(url) = window.url() {
+                    let session_page = matches!(url.path(), "" | "/" | "/index.html")
+                        && url.query_pairs().find(|(key, _)| key == "type")
+                            .map(|(_, value)| value == "editor").unwrap_or(true);
+                    if session_page {
+                        let _ = window.emit_to(window.label(), "ride-clear-visible-history", ());
+                    }
+                }
+                break;
+            }
+        }
+        return;
+    }
     if id.starts_with("app:") {
         if let Some(command) = ["SC", "SA"].into_iter().find(|command| id.ends_with(&format!(":{command}"))) {
             for window in app.webview_windows().into_values() {

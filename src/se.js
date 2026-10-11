@@ -505,10 +505,12 @@ D.Se.prototype = {
   },
   setLineGroup(offset, group) {
     const se = this;
+    if (!se.lines.length) return;
     // offset needs to account for extra, non-terminated line when in multi line mode
     const o = (se.promptType === 3 && se.lines.at(-1).text.at(-1) !== '\n') ? offset + 1 : offset;
     if (o > 0) {
       const li = se.lines.length - o;
+      if (li < 0 || li >= se.lines.length) return;
       const oldGroup = se.lines[li].group;
       const block = se.multiLineBlocks[group] || {};
       const oldBlock = se.multiLineBlocks[oldGroup] || {};
@@ -789,6 +791,70 @@ D.Se.prototype = {
         delete se.dirty[l];
       }
     }
+    se.setDecorations();
+  },
+  CVH() {
+    const se = this;
+    const { me } = se;
+    const model = me.getModel();
+    const last = model.getLineCount();
+    const dirty = Object.keys(se.dirty).map(Number);
+    const decline = (message) => { toastr.info(message); };
+    if (!se.ide.connected) { decline('Reconnect before clearing visible history.'); return; }
+    if (![0, 1].includes(se.promptType)) {
+      decline('Finish the current input before clearing visible history.'); return;
+    }
+
+    let first = last;
+    let text;
+    let lines = [];
+    const retainedDirty = {};
+    if (se.promptType === 1) {
+      if (se.lines.length && !se.lines.at(-1).text.endsWith('\n')) {
+        decline('Wait for the current output line to finish before clearing visible history.'); return;
+      }
+      while (first > 1 && se.dirty[first] === 0) first -= 1;
+      if (dirty.some((line) => line < first)) {
+        decline('Finish or cancel edits to earlier session lines before clearing visible history.'); return;
+      }
+      if (se.dirty[first] === 0 || (se.dirty[first] != null && !/^\s*$/.test(se.dirty[first]))
+        || (se.dirty[first] == null && !/^\s*$/.test(model.getLineContent(first)))) {
+        decline('Finish the current input before clearing visible history.'); return;
+      }
+      text = model.getValueInRange(new monaco.Range(first, 1, last, model.getLineMaxColumn(last)));
+      dirty.forEach((line) => { retainedDirty[line - first + 1] = se.dirty[line]; });
+    } else {
+      if (dirty.length) {
+        decline('Finish or cancel session edits before clearing visible history.'); return;
+      }
+      const tail = se.lines.at(-1);
+      text = tail && !tail.text.endsWith('\n') ? tail.text.slice(tail.text.lastIndexOf('\n') + 1) : '';
+      if (text ? model.getLineContent(last) !== text : !/^\s*$/.test(model.getLineContent(last))) {
+        decline('Wait for the current output line to settle before clearing visible history.'); return;
+      }
+      if (text) lines = [{ ...tail, text }];
+    }
+    if (first === 1 && model.getValue() === text && se.lines.length === lines.length
+      && se.lines.every((line, index) => line.text === lines[index].text)) return;
+
+    const selections = me.getSelections().map((selection) => {
+      const row = (line) => Math.max(1, line - first + 1);
+      const start = row(selection.selectionStartLineNumber);
+      const position = row(selection.positionLineNumber);
+      const { selectionStartColumn, positionColumn } = selection;
+      return new monaco.Selection(start, selectionStartColumn, position, positionColumn);
+    });
+    se.lines = lines;
+    se.dirty = retainedDirty;
+    se.multiLineBlocks = {};
+    se.lineEditor = {};
+    delete se.lastEchoLine;
+    me.listen = false;
+    try { model.setValue(text); } finally { me.listen = true; }
+    me.setSelections(selections);
+    if (se.cursorPosition) se.cursorPosition = me.getPosition();
+    me.setScrollTop(0);
+    se.btm = null;
     se.setDecorations();
   },
   CLS() {},

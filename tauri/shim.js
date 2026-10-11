@@ -713,7 +713,8 @@
   const appClicks = new Map(); // the application menu's, which popups must not clear
   let menuSeq = 0;
   let menuEvents = null;
-  if (new URLSearchParams(window.location.search).get('type') === 'prf') {
+  const pageType = new URLSearchParams(window.location.search).get('type');
+  if (pageType === 'prf') {
     window.addEventListener('DOMContentLoaded', () => {
       const preferencesWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
       preferencesWindow.listen('ride-preferences-select-all', () => {
@@ -724,6 +725,13 @@
         } else {
           document.execCommand('SelectAll');
         }
+      });
+    });
+  } else if (!pageType || pageType === 'editor') {
+    window.addEventListener('DOMContentLoaded', () => {
+      const sessionWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+      sessionWindow.listen('ride-clear-visible-history', () => {
+        if (window.D && D.ide) D.ide.CVH();
       });
     });
   }
@@ -759,7 +767,7 @@
   const menuItems = (items, prefix, clicks = menuClicks, app = false) => items
     .filter((it) => it.visible !== false)
     .map((it, i) => {
-      const id = `${prefix}:${i}${app && ['SC', 'SA'].includes(it.rideCommand) ? `:${it.rideCommand}` : ''}`;
+      const id = `${prefix}:${i}${app && ['SC', 'SA', 'CVH'].includes(it.rideCommand) ? `:${it.rideCommand}` : ''}`;
       const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
       if (!sub && it.type !== 'separator') {
         clicks.set(id, () => {

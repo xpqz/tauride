@@ -29,6 +29,16 @@ Alternatively, you can recall previously entered expressions using <kbd>Ctrl</kb
 
 If you set a keyboard shortcut (configurable via `Edit > Preferences > Shortcuts > VAL`) for the "Evaluate selection or name under cursor" action, then you can press your assigned shortcut to do exactly that.
 
+## Clearing Visible History
+
+Choose `View > Clear Visible History` to remove completed output and previously submitted input from the Session display. Your current draft, workspace and command recall are preserved. New output continues to appear; an output line that is still being written remains visible so subsequent text can continue it.
+
+Finish or cancel edits to earlier Session lines before clearing. Clearing also waits until multiline input or a `⎕` or `⍞` input request has finished. In these cases the command explains why it cannot clear yet and leaves the Session unchanged. An open editor or tracer keeps its focus and contents.
+
+Clearing takes effect immediately, without a confirmation dialog. Clearing resets the Session's Undo history, including earlier edits to the retained draft. It does not delete the interpreter's log, so reconnecting can restore earlier history. The configurable Session log line limit remains available for an ongoing limit; this command provides a one-off reset without changing that preference.
+
+The command code is `CVH`, with no default keyboard shortcut. If you have customised the menu, add `Clear Visible History =CVH` under View in the Menu preferences.
+
 ## Threads
 
 Ride supports multithreading. For information on threads, see the [Dyalog Programming Reference Guide](https://docs.dyalog.com/latest/Dyalog%20Programming%20Reference%20Guide.pdf).
