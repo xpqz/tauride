@@ -714,6 +714,16 @@
   let menuSeq = 0;
   let menuEvents = null;
   const pageType = new URLSearchParams(window.location.search).get('type');
+  const refreshInlineMenu = () => {
+    if ((!pageType || pageType === 'editor') && window.D && D.refreshInlineTracingMenu) {
+      D.refreshInlineTracingMenu();
+    } else Menu.updateInlineTracingState(false);
+  };
+  window.addEventListener('focus', refreshInlineMenu);
+  window.addEventListener('DOMContentLoaded', () => {
+    window.__TAURI__.webviewWindow.getCurrentWebviewWindow().listen('ride-inline-menu-refresh', refreshInlineMenu);
+    refreshInlineMenu();
+  });
   if (pageType === 'prf') {
     window.addEventListener('DOMContentLoaded', () => {
       const preferencesWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
@@ -734,7 +744,9 @@
         if (window.D && D.ide) D.ide.CVH();
       });
       sessionWindow.listen('ride-session-menu', ({ payload: command }) => {
-        if (window.D && D.ide && D.commands && D.commands[command]) D.commands[command]();
+        if (window.D && D.ide && D.commands && D.commands[command]) {
+          D.commands[command]((D.ide.focusedWin || {}).me);
+        }
       });
     });
   }
@@ -770,7 +782,11 @@
   const menuItems = (items, prefix, clicks = menuClicks, app = false) => items
     .filter((it) => it.visible !== false)
     .map((it, i) => {
-      const id = `${prefix}:${i}${app && ['SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB'].includes(it.rideCommand) ? `:${it.rideCommand}` : ''}`;
+      const semanticCommand = app && [
+        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'IT',
+        'ITL', 'ITF', 'ITR', 'ITA', 'ITRES', 'ITPL', 'ITPF', 'ITPR', 'ITPA',
+      ].includes(it.rideCommand);
+      const id = `${prefix}:${i}${semanticCommand ? `:${it.rideCommand}` : ''}`;
       const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
       if (!sub && it.type !== 'separator') {
         clicks.set(id, () => {
@@ -811,7 +827,13 @@
       menuSeq += 1;
       const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
       const items = menuItems(m.items, `app:${label}:${menuSeq}`, appClicks, true);
-      menuReady().then(() => invoke('set_app_menu', { items })).catch((e) => rlog('error', 'application menu failed:', e));
+      menuReady().then(() => invoke('set_app_menu', { items }))
+        .then(() => tev().emit('ride-inline-menu-refresh'))
+        .catch((e) => rlog('error', 'application menu failed:', e));
+    }
+    static updateInlineTracingState(enabled) {
+      if (nodePlatform !== 'darwin') return;
+      invoke('update_inline_tracing_menu', { enabled }).catch((e) => rlog('error', 'inline menu update failed:', e));
     }
     static getApplicationMenu() { return null; }
   }

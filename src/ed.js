@@ -399,6 +399,8 @@ D.Ed.prototype = {
     const model = me.getModel();
     if (!model) return; // sometimes window is closed just after an UpdateWindow
     ed.name = ee.name;
+    ed.entityType = ee.entityType;
+    ed.specialWindow = ee.special_window;
     // Check if a filename for a source file is provided.
     // Make sure it isn't duplicated in the existing name.
     if (ee.filename && (ed.name.indexOf(ee.filename) === -1) && D.prf.filenameInTitle()) {
@@ -443,7 +445,8 @@ D.Ed.prototype = {
       (isAplan || ed.canBeAplan) && ed.dom.classList.add('variable');
     }
     me.updateOptions({ folding: ed.isCode && !!D.prf.fold(), lineNumbers: ed.lineNumFmt(), lineNumbersMinChars: ed.lineNumChars() });
-    if (ed.isCode && D.prf.indentOnOpen()) ed.RD(me);
+    if (ed.isCode && !(ed.specialWindow >= 16 && ed.specialWindow <= 24)
+      && D.prf.indentOnOpen()) ed.RD(me);
     else ed.firstOpen = false;
     ed.setRO(ee.debugger);
     ed.setBP(ed.breakpoints);
@@ -710,7 +713,10 @@ D.Ed.prototype = {
   TVO() { D.prf.fold.toggle(); },
   TVB() { D.prf.breakPts.toggle(); },
   TC() { D.send('StepInto', { win: this.id }); D.ide.getStats(); },
-  IT() { D.send('TracePrimitive', { win: this.id }); D.ide.getStats(); },
+  IT() {
+    if (this.specialWindow >= 16 && this.specialWindow <= 24) this.ide.stepInline(this.me);
+    else { D.send('TracePrimitive', { win: this.id }); D.ide.getStats(); }
+  },
   AC(me) { // align comments
     const ed = this;
     const model = me.getModel();

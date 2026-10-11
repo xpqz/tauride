@@ -44,9 +44,16 @@
       AGO: { checkBoxPref: D.prf.agent },
       AGC: { checkBoxPref: D.prf.agentControl },
     };
+    D.inlineTracingViews.forEach(([code]) => {
+      extraOpts[code] = {
+        isEnabled: () => !!(D.ide && D.ide.canInspectInline && D.ide.canInspectInline()),
+      };
+    });
     const stk = [{ ind: -1, items: [] }];
     const lines = md.split('\n');
     const cb = (cmd) => () => {
+      const options = extraOpts[cmd];
+      if (options && options.isEnabled && !options.isEnabled()) return;
       const f = D.commands[cmd];
       const w = (D.ide || {}).focusedWin || {};
       if (f) f(w.me);

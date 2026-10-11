@@ -4,6 +4,17 @@
 // Some of the codes are inherited from Dyalog's old IDE
 // (see ../docs/cmd-codes.txt and near the end of km.js)
 // Others were made up for Ride's purposes - those use no fewer than three letters.
+D.inlineTracingViews = [
+  ['ITL', 'Left Argument', 'Left'],
+  ['ITF', 'Current Function', 'Function'],
+  ['ITR', 'Right Argument', 'Right'],
+  ['ITA', 'Axis Specification', 'Axis'],
+  ['ITRES', 'Previous Result', 'Result'],
+  ['ITPL', 'Previous Left Argument', 'PLeft'],
+  ['ITPF', 'Previous Function', 'PFunction'],
+  ['ITPR', 'Previous Right Argument', 'PRight'],
+  ['ITPA', 'Previous Axis', 'PAxis'],
+];
 D.cmds = [
   /* eslint-disable */
   //code description                default keys
@@ -42,6 +53,7 @@ D.cmds = [
   ['FX', 'Fix the current function',[]],
   ['HLP','Help',                    ['F1']],
   ['IT', 'Inline Tracing',          ['Ctrl+Alt+Enter']],
+  ...D.inlineTracingViews.map(([code, label]) => [code, `Inline Tracing: ${label}`, []]),
   ['JBK','Jump back',               ['Ctrl+Shift+J']],
   ['JSC','Show JavaScript console', ['Shift+F12']],
   ['LBR','Toggle language bar',     []],

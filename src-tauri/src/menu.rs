@@ -132,16 +132,51 @@ fn restore_checkbox<R: Runtime>(items: Vec<MenuItemKind<R>>, id: &str) -> tauri:
     Ok(false)
 }
 
+fn is_session_page(url: &tauri::Url) -> bool {
+    matches!(url.path(), "" | "/" | "/index.html")
+        && url.query_pairs().find(|(key, _)| key == "type")
+            .map(|(_, value)| value == "editor").unwrap_or(true)
+}
+
+fn session_menu_command(id: &str) -> Option<&str> {
+    if !id.starts_with("app:") { return None; }
+    let command = id.rsplit(':').next()?;
+    ["AGC", "AGO", "TTB", "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF",
+        "ITPR", "ITPA"].contains(&command).then_some(command)
+}
+
+fn set_inline_enabled<R: Runtime>(items: Vec<MenuItemKind<R>>, enabled: bool) -> tauri::Result<()> {
+    for item in items {
+        let inspection = session_menu_command(item.id().as_ref())
+            .is_some_and(|command| command.starts_with("IT") && command != "IT");
+        if inspection {
+            if let Some(normal) = item.as_menuitem() { normal.set_enabled(enabled)?; }
+        }
+        if let Some(submenu) = item.as_submenu() { set_inline_enabled(submenu.items()?, enabled)?; }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_inline_tracing_menu<R: Runtime>(
+    window: WebviewWindow<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    if !window.is_focused().map_err(|e| e.to_string())? { return Ok(()); }
+    let enabled = enabled && window.url().map(|url| is_session_page(&url)).unwrap_or(false);
+    if let Some(menu) = window.app_handle().menu() {
+        set_inline_enabled(menu.items().map_err(|e| e.to_string())?, enabled).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// App-wide menu event handler: forwards popup-menu clicks to the webviews.
 pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
     if id.starts_with("app:") {
-        if let Some(command) = ["AGC", "AGO", "TTB"].into_iter().find(|command| id.ends_with(&format!(":{command}"))) {
+        if let Some(command) = session_menu_command(id) {
             let focused = app.webview_windows().into_values().find(|window| window.is_focused().unwrap_or(false));
-            let eligible = focused.as_ref().and_then(|window| window.url().ok()).map(|url| {
-                matches!(url.path(), "" | "/" | "/index.html")
-                    && url.query_pairs().find(|(key, _)| key == "type")
-                        .map(|(_, value)| value == "editor").unwrap_or(true)
-            }).unwrap_or(false);
+            let eligible = focused.as_ref().and_then(|window| window.url().ok())
+                .map(|url| is_session_page(&url)).unwrap_or(false);
             if eligible {
                 if let Some(window) = focused {
                     let _ = window.emit_to(window.label(), "ride-session-menu", command);
@@ -188,5 +223,38 @@ pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
     }
     if id.starts_with("ctx:") || id.starts_with("app:") {
         let _ = app.emit("ride-menu", id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_commands_route_semantically_regardless_of_installing_session() {
+        for command in ["IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA"] {
+            for owner in ["main", "w1000001", "w1000012"] {
+                let id = format!("app:{owner}:42:3:1:{command}");
+                assert_eq!(session_menu_command(&id), Some(command));
+            }
+        }
+        assert_eq!(session_menu_command("ctx:2:0:ITL"), None);
+        assert_eq!(session_menu_command("app:main:1:0:PRF"), None);
+        for command in ["AGC", "AGO", "TTB"] {
+            assert_eq!(session_menu_command(&format!("app:main:1:0:{command}")), Some(command));
+        }
+    }
+
+    #[test]
+    fn session_menu_rejects_helper_pages_and_accepts_main_and_floating_editors() {
+        for page in ["http://tauri.localhost/", "http://tauri.localhost/index.html",
+            "http://tauri.localhost/index.html?type=editor&id=12"] {
+            assert!(is_session_page(&tauri::Url::parse(page).unwrap()), "{page}");
+        }
+        for page in ["http://tauri.localhost/index.html?type=prf", "http://tauri.localhost/about.html",
+            "http://tauri.localhost/log.html", "http://tauri.localhost/status.html",
+            "http://tauri.localhost/dialog.html", "http://tauri.localhost/index.html?type=other"] {
+            assert!(!is_session_page(&tauri::Url::parse(page).unwrap()), "{page}");
+        }
     }
 }

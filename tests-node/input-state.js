@@ -16,7 +16,7 @@ function load() {
     toggleStats() {}, updMenu() {}, eachWin: f => f(D.ide.wins[0]) });
   vm.runInContext(source, context);
   const ide = Object.assign(Object.create(D.IDE.prototype), {
-    lbarRecreate() {}, updTitle() {}, updPW() {}, getStats() {},
+    lbarRecreate() {}, updTitle() {}, updPW() {}, getStats() {}, quiescent: () => true,
   });
   // Use the constructor's actual state initialization without mounting GoldenLayout.
   const start = source.indexOf('  const ide = this;');

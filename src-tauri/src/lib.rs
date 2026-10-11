@@ -274,6 +274,7 @@ pub fn run() {
             winstate::save_win,
             menu::popup_menu,
             menu::set_app_menu,
+            menu::update_inline_tracing_menu,
         ])
         .on_menu_event(|app, e| menu::on_event(app, e.id().as_ref()))
         .setup(|app| {
