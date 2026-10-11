@@ -1,6 +1,7 @@
 const { Key } = require('webdriverio');
 const test = require('ava');
 const { tfw, keys } = require('./_utils');
+const nativeTest = process.platform === 'darwin' ? test : test.skip;
 
 tfw.init({ src: 'se', interpreter: true });
 
@@ -15,7 +16,7 @@ async function mainEditorState(c) {
 
 async function openPreferences(c) {
   const main = await c.getWindowHandle();
-  await c.waitUntil(async () => c.execute(() => !!D.prf_bw?.socket),
+  await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)),
     { timeout: 10000, timeoutMsg: 'Preferences window did not connect' });
   const label = await c.execute(() => D.prf_bw.win.label);
   await c.execute(() => D.commands.PRF());
@@ -64,61 +65,59 @@ async function assertFieldSelected(t, c, selector) {
   t.true((await selectedField(c, selector)).focused, `${selector} keeps focus`);
 }
 
-if (process.platform === 'darwin') {
-  test('Edit Select All targets focused Preferences fields without changing the session', async (t) => {
-    const c = t.context.app.client;
-    const originalMain = await mainEditorState(c);
-    const { main, label } = await openPreferences(c);
-    for (const { tab, selector, seed } of [
-      { tab: 'title', selector: '#title_inp' },
-      { tab: 'pmenu', selector: '#pmenu_ta' },
-      { tab: 'shc', selector: '#shc_sc', seed: 'select' },
-    ]) {
-      await showTab(c, tab);
-      await focusNativeWindow(c);
-      await c.execute((target, value) => {
-        const field = document.querySelector(target);
-        if (value) field.value = value;
-        field.focus();
-        field.setSelectionRange(2, 2);
-      }, selector, seed);
-      await invokeSelectAll(c);
-      await assertFieldSelected(t, c, selector);
-      await c.switchToWindow(main);
-      t.deepEqual(await mainEditorState(c), originalMain, `${selector} leaves the session alone`);
-      await c.switchToWindow(label);
-    }
-
-    await c.switchToWindow(main);
+nativeTest('Edit Select All targets focused Preferences fields without changing the session', async (t) => {
+  const c = t.context.app.client;
+  const originalMain = await mainEditorState(c);
+  const { main, label } = await openPreferences(c);
+  for (const { tab, selector, seed } of [
+    { tab: 'title', selector: '#title_inp' },
+    { tab: 'pmenu', selector: '#pmenu_ta' },
+    { tab: 'shc', selector: '#shc_sc', seed: 'select' },
+  ]) {
+    await showTab(c, tab);
     await focusNativeWindow(c);
-    await c.execute(() => D.ide.wins[0].me.focus());
-    await invokeSelectAll(c);
-    await c.waitUntil(async () => c.execute(() => {
-      const editor = D.ide.wins[0].me;
-      const selected = editor.getSelection();
-      const full = editor.getModel().getFullModelRange();
-      return selected.equalsRange(full);
-    }), { timeout: 10000, timeoutMsg: 'Main editor Select All stopped working' });
-  });
-
-  test('physical Cmd+A replaces the focused Preferences Title text', async (t) => {
-    const c = t.context.app.client;
-    const originalMain = await mainEditorState(c);
-    const { main } = await openPreferences(c);
-    await showTab(c, 'title');
-    await focusNativeWindow(c);
-    t.is((await selectedField(c, '#title_inp')).value, '{CAPTION}');
-    await c.execute(() => {
-      const field = document.querySelector('#title_inp');
+    await c.execute((target, value) => {
+      const field = document.querySelector(target);
+      if (value) field.value = value;
       field.focus();
       field.setSelectionRange(2, 2);
-    });
-    await keys(c, Key.Command, 'a');
-    await assertFieldSelected(t, c, '#title_inp');
-    await keys(c, 'thread ');
-    await c.waitUntil(async () => (await selectedField(c, '#title_inp')).value === 'thread ',
-      { timeout: 10000, timeoutMsg: 'Typing did not replace the selected Title text' });
+    }, selector, seed);
+    await invokeSelectAll(c);
+    await assertFieldSelected(t, c, selector);
     await c.switchToWindow(main);
-    t.deepEqual(await mainEditorState(c), originalMain, 'Cmd+A leaves the session alone');
+    t.deepEqual(await mainEditorState(c), originalMain, `${selector} leaves the session alone`);
+    await c.switchToWindow(label);
+  }
+
+  await c.switchToWindow(main);
+  await focusNativeWindow(c);
+  await c.execute(() => D.ide.wins[0].me.focus());
+  await invokeSelectAll(c);
+  await c.waitUntil(async () => c.execute(() => {
+    const editor = D.ide.wins[0].me;
+    const selected = editor.getSelection();
+    const full = editor.getModel().getFullModelRange();
+    return selected.equalsRange(full);
+  }), { timeout: 10000, timeoutMsg: 'Main editor Select All stopped working' });
+});
+
+nativeTest('physical Cmd+A replaces the focused Preferences Title text', async (t) => {
+  const c = t.context.app.client;
+  const originalMain = await mainEditorState(c);
+  const { main } = await openPreferences(c);
+  await showTab(c, 'title');
+  await focusNativeWindow(c);
+  t.is((await selectedField(c, '#title_inp')).value, '{CAPTION}');
+  await c.execute(() => {
+    const field = document.querySelector('#title_inp');
+    field.focus();
+    field.setSelectionRange(2, 2);
   });
-}
+  await keys(c, Key.Command, 'a');
+  await assertFieldSelected(t, c, '#title_inp');
+  await keys(c, 'thread ');
+  await c.waitUntil(async () => (await selectedField(c, '#title_inp')).value === 'thread ',
+    { timeout: 10000, timeoutMsg: 'Typing did not replace the selected Title text' });
+  await c.switchToWindow(main);
+  t.deepEqual(await mainEditorState(c), originalMain, 'Cmd+A leaves the session alone');
+});
