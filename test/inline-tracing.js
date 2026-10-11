@@ -28,7 +28,7 @@ async function beginInline(c, floating = false) {
   await ready(c);
   await c.execute((float) => {
     D.prf.floating(+float); D.prf.floatSingle(0);
-    D.prf.indentOnOpen(1); D.prf.ilf(0);
+    D.prf.indentOnOpen(1); D.prf.ilf(0); D.prf.showEditorToolbar(1);
     D.ide.wins[0].focus();
   }, floating);
   await focus(c);
@@ -36,6 +36,23 @@ async function beginInline(c, floating = false) {
   await wait(c, () => Object.values(D.ide.wins).some(w => w.tc));
   if (!floating) await wait(c, () => D.ide.canInspectInline());
   return c.execute(() => Object.values(D.ide.wins).find(w => w.tc).id);
+}
+
+async function aspectToolbar(c, id) {
+  await c.execute(token => D.ide.wins[token].focus(), id);
+  await wait(c, (token) => {
+    const w = D.ide.wins[token];
+    return w.dom.getBoundingClientRect().height > 0
+      && w.me.getDomNode().parentElement.getBoundingClientRect().height > 0;
+  }, id);
+  return c.execute((token) => {
+    const w = D.ide.wins[token];
+    const toolbar = w.dom.querySelector('.toolbar');
+    const content = w.me.getDomNode().parentElement;
+    return { hidden: getComputedStyle(toolbar).display === 'none',
+      top: parseFloat(getComputedStyle(content).top),
+      fillsPane: Math.abs(content.getBoundingClientRect().height - w.dom.getBoundingClientRect().height) < 1 };
+  }, id);
 }
 
 async function inspect(c, command, special, expected) {
@@ -69,7 +86,15 @@ test('inline views reuse live values, preserve drafts and retain tracer focus af
     selection: D.ide.wins[0].me.getSelection() }));
   const initial = { 16: '2', 19: '×', 17: '3', 18: '<no value>', 22: '<no value>' };
   const ids = {};
-  for (const [command, kind] of views) ids[kind] = await inspect(c, command, kind, initial[kind]);
+  for (const [command, kind] of views) {
+    ids[kind] = await inspect(c, command, kind, initial[kind]);
+    t.deepEqual(await aspectToolbar(c, ids[kind]), { hidden: true, top: 0, fillsPane: true },
+      `aspect ${kind} hides its toolbar and reclaims the space`);
+  }
+  await c.execute(() => { D.prf.showEditorToolbar(0); D.prf.showEditorToolbar(1); });
+  for (const [, kind] of views) t.true((await aspectToolbar(c, ids[kind])).hidden,
+    'global toolbar changes keep inspection panes hidden');
+  t.false((await aspectToolbar(c, tracer)).hidden, 'the tracer toolbar follows the global setting');
   t.is(await inspect(c, 'ITL', 16, '2'), ids[16], 'reopening reuses the interpreter window');
   await c.execute(() => D.ide.exec([']IT.Left'], 0));
   await wait(c, token => D.ide.canInspectInline() && D.ide.quiescent()
@@ -95,6 +120,8 @@ test('inline views reuse live values, preserve drafts and retain tracer focus af
   await wait(c, count => window.inlineFormats > count && D.ide.quiescent(), formats);
   t.true(await c.execute(id => D.ide.focusedWin.id === id && D.ide.wins[id].me.hasTextFocus(), tracer),
     'Next Primitive from an aspect focuses the tracer after all background updates');
+  for (const [, kind] of views) t.deepEqual(await aspectToolbar(c, ids[kind]),
+    { hidden: true, top: 0, fillsPane: true }, 'aspect updates preserve the hidden toolbar layout');
   const values = await c.execute(() => Object.fromEntries(Object.values(D.ide.wins)
     .filter(w => w.specialWindow >= 16 && w.specialWindow <= 24).map(w => [w.specialWindow, w.me.getValue().trim()])));
   t.deepEqual(values, { 16: '10', 17: '6', 18: '<no value>', 19: '+', 20: '2', 21: '3', 22: '6', 23: '<no value>', 24: '×' });
@@ -226,6 +253,11 @@ nativeTest('native inspection from a floating tracer reaches its owning interpre
     return false;
   }, { timeout: 15000 });
   await c.switchToWindow(aspectHandle); await focus(c);
+  t.deepEqual(await aspectToolbar(c, aspectId), { hidden: true, top: 0, fillsPane: true },
+    'the floating aspect reclaims its toolbar space');
+  await c.execute(() => { D.prf.showEditorToolbar(0); D.prf.showEditorToolbar(1); });
+  t.deepEqual(await aspectToolbar(c, aspectId), { hidden: true, top: 0, fillsPane: true },
+    'floating preference changes keep its aspect toolbar hidden');
   await c.execute(token => D.ide.wins[token].focus(), aspectId);
   await nativeItem(c, 'IT', true, true);
   await c.switchToWindow(floating);
@@ -234,6 +266,9 @@ nativeTest('native inspection from a floating tracer reaches its owning interpre
     const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
     return (await window.__TAURI_INTERNALS__.invoke('ui_test_window_state', { label })).focused;
   }), 'stepping from the floating aspect focuses its owning tracer');
+  await c.switchToWindow(aspectHandle);
+  t.deepEqual(await aspectToolbar(c, aspectId), { hidden: true, top: 0, fillsPane: true },
+    'floating aspect updates retain the reclaimed toolbar space');
   await c.switchToWindow(second);
   t.false(await c.execute(() => Object.values(D.ide.wins).some(w => w.specialWindow === 17)),
     'other session does not receive floating inspection');

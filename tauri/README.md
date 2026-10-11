@@ -217,7 +217,8 @@ by Previous Result and the previous arguments, function and axis.
 These commands open Dyalog’s existing `]IT` inspection windows. Opening a view
 again brings its existing window forward, and its contents update as execution
 advances. An argument or result that is unavailable is shown as `<no value>`.
-Next Primitive also works while an inspection window has focus.
+Next Primitive also works while an inspection window has focus. Inspection
+windows keep the edit toolbar hidden and use the full pane for their values.
 
 Inspection commands preserve unfinished Session input and selection. They are
 unavailable while the interpreter is running, accepting input, or processing

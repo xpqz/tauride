@@ -14,6 +14,7 @@ D.Ed = function Ed(ide, opts) { // constructor
   ed.dom = I.ed_tmpl.cloneNode(1);
   ed.dom.id = null;
   ed.dom.style.display = '';
+  ed.dom.classList.toggle('inline-inspection', opts.specialWindow >= 16 && opts.specialWindow <= 24);
   ed.$e = $(ed.dom);
   ed.jumps = [];
   ed.focusTS = 0;
@@ -401,6 +402,8 @@ D.Ed.prototype = {
     ed.name = ee.name;
     ed.entityType = ee.entityType;
     ed.specialWindow = ee.special_window;
+    ed.dom.classList.toggle('inline-inspection', ed.specialWindow >= 16 && ed.specialWindow <= 24);
+    ed.updSize();
     // Check if a filename for a source file is provided.
     // Make sure it isn't duplicated in the existing name.
     if (ee.filename && (ed.name.indexOf(ee.filename) === -1) && D.prf.filenameInTitle()) {
