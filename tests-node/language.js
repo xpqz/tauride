@@ -75,6 +75,79 @@ function scopes(line, result) {
   return Array.from(line, (_, i) => result.tokens.filter((t) => t.startIndex <= i).at(-1).scopes);
 }
 
+function tokenizeLines(api, lines, language) {
+  const provider = api.providers[language];
+  let state = provider.getInitialState();
+  return lines.map((line) => {
+    const result = provider.tokenize(line, state);
+    state = result.endState;
+    return result;
+  });
+}
+
+for (const language of ['apl', 'aplan']) {
+  test(`${language} colours APLAN keys before in-prefixed values`, () => {
+    const api = loadLanguage();
+    for (const [line, value] of [
+      ['x←(a:input ⋄ b:2)', 'input'],
+      ['x←[a:in ⋄ b:2]', 'in'],
+      ['x←[a :In ⋄ b:2]', 'In'],
+      ['x←(a:INEachValue ⋄ b:2)', 'INEachValue'],
+      ['x←[a:index ⋄ b:2]', 'index'],
+      ['x←(a: input ⋄ b:2)', 'input'],
+      ['x←[a:other ⋄ b:2]', 'other'],
+      ['x←(a:1 ⋄ b:2)', '1'],
+      ['x←(a:1 ⋄ b:integer)', 'integer'],
+    ]) {
+      const result = tokenizeLines(api, ['∇ f', line, '∇'], language)[1];
+      const s = scopes(line, result);
+      assert.equal(s[line.indexOf('a')], 'identifier.local.aplan.apl', line);
+      assert.equal(s[line.indexOf('b')], 'identifier.local.aplan.apl', line);
+      assert.equal(s[line.indexOf(':')], 'delimiter.aplan.apl', line);
+      assert.equal(s[line.lastIndexOf(':')], 'delimiter.aplan.apl', line);
+      assert.equal(s[line.indexOf(value)], value === '1' ? 'number.apl' : 'identifier.global.apl', line);
+      assert.ok(!result.tokens.some((t) => /^(?:invalid|meta\.label)/.test(t.scopes)), line);
+    }
+    const line = 'a:input ⋄ b:integer';
+    const result = tokenizeLines(api, ['∇ f', 'x←(', line, ')', '∇'], language)[2];
+    const s = scopes(line, result);
+    for (const key of ['a', 'b']) {
+      assert.equal(s[line.indexOf(key)], 'identifier.local.aplan.apl');
+    }
+    assert.equal(s[line.indexOf(':')], 'delimiter.aplan.apl');
+    assert.equal(s[line.lastIndexOf(':')], 'delimiter.aplan.apl');
+    assert.equal(s[line.indexOf('input')], 'identifier.global.apl');
+    assert.equal(s[line.indexOf('integer')], 'identifier.global.apl');
+  });
+}
+
+test('For iteration names before In and InEach retain ordinary identifier scopes', () => {
+  const api = loadLanguage();
+  for (const [keyword, space] of [['In', ''], ['iNeAcH', ''], ['In', ' '], ['InEach', ' ']]) {
+    const line = `:For item${space}:${keyword} values`;
+    const result = tokenizeLines(api, ['∇ f', line, ':EndFor', '∇'], 'apl');
+    const s = scopes(line, result[1]);
+    assert.equal(s[line.indexOf('item')], 'identifier.global.apl', line);
+    assert.equal(s[line.lastIndexOf(':')], 'keyword.apl', line);
+    assert.equal(s[line.indexOf('values')], 'identifier.global.apl', line);
+    assert.equal(scopes(':EndFor', result[2])[0], 'keyword.apl', line);
+  }
+});
+
+test('labels and dfn guards before in-prefixed values retain their scopes', () => {
+  const api = loadLanguage();
+  const lines = ['∇ f', 'label :input', 'label : input', 'f←{flag:input}', '∇'];
+  const result = tokenizeLines(api, lines, 'apl');
+  const label = scopes(lines[1], result[1]);
+  assert.equal(label[0], 'identifier.global.apl');
+  const spaced = scopes(lines[2], result[2]);
+  assert.equal(spaced[0], 'meta.label.apl');
+  assert.equal(spaced[lines[2].indexOf(':')], 'meta.label.apl');
+  const guard = scopes(lines[3], result[3]);
+  assert.equal(guard[lines[3].indexOf('flag')], 'identifier.local.apl');
+  assert.equal(guard[lines[3].indexOf(':')], 'identifier.dfn.1.apl');
+});
+
 for (const [open, close] of [['[', ']'], ['(', ')']]) {
   test(`session preserves inherited ${open} opener across long body lines`, () => {
     const api = loadLanguage();
