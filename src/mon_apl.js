@@ -540,7 +540,7 @@
                 m = sm.match(name1);
                 let [x] = m;
                 dd = dfnDepth(a);
-                if (!dd && /^\s*:(?!in)/i.test(sm.slice(x.length))) {
+                if (!dd && (la.isAplan ? /^\s*:/ : /^\s*:(?!in)/i).test(sm.slice(x.length))) {
                   if (la.isAplan) {
                     addToken(offset, 'identifier.local.aplan');
                   } else {
