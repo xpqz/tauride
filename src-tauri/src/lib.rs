@@ -275,6 +275,7 @@ pub fn run() {
             menu::popup_menu,
             menu::set_app_menu,
             menu::update_inline_tracing_menu,
+            menu::update_output_command_menu,
         ])
         .on_menu_event(|app, e| menu::on_event(app, e.id().as_ref()))
         .setup(|app| {

@@ -706,7 +706,7 @@ D.IDE = function IDE(opts = {}) {
         D.send('Execute', { trace: 0, text: `${ide.pending.shift()}\n` });
         ide.wins[0].prompt(t);
       } else eachWin((w) => { w.prompt(t); });
-      if (t && ide.inlineInspection) {
+      if (t) {
         ide.wins[0].preserveDraft = false;
         ide.inlineInspection = null;
       }
@@ -1102,13 +1102,38 @@ D.IDE.prototype = {
         && (h.lineEnd > h.lineStart || h.colEnd > h.colStart);
     });
   },
+  canRunOutputCommand() {
+    if (this.floating) return !!(this.connected && !this.dead && this.outputCommandAvailable);
+    return !!(this.connected && !this.dead && this.promptReceived && this.promptType === 1
+      && !this.inputOperation && !this.inlineInspection && !this.pending.length && this.quiescent());
+  },
+  runOutputCommand(code, me) {
+    if (!Object.prototype.hasOwnProperty.call(D.outputCommands, code)) return;
+    const w = (me && me.dyalogCmds) || this.focusedWin;
+    if (!w || this.wins[w.id] !== w) return;
+    if (this.floating) {
+      this.ipc.emit('runOutputCommand', [code, w.id]);
+      return;
+    }
+    if (!this.canRunOutputCommand()) return;
+    this.wins[0].preserveDraft = true;
+    D.send('Execute', { text: `${D.outputCommands[code]}\n`, trace: 0 });
+  },
+  refreshOutputCommandState() {
+    const available = this.canRunOutputCommand();
+    if (this.lastOutputCommandState === available) return;
+    this.lastOutputCommandState = available;
+    if (!this.floating && D.ipc && D.ipc.server) {
+      D.ipc.server.broadcast('outputCommandState', available);
+    }
+    D.refreshOutputCommandMenu && D.refreshOutputCommandMenu();
+  },
   canInspectInline() {
     if (this.floating) return !!this.inlineInspectionAvailable;
-    return !!(this.connected && !this.dead && this.promptReceived && this.promptType === 1
-      && !this.inputOperation && !this.inlineInspection && !this.pending.length
-      && this.quiescent() && this.inlineTracer());
+    return !!(this.canRunOutputCommand() && this.inlineTracer());
   },
   refreshInlineInspectionState() {
+    this.refreshOutputCommandState();
     const available = this.canInspectInline();
     if (this.lastInlineInspectionState === available) return;
     this.lastInlineInspectionState = available;

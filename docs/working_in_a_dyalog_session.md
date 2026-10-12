@@ -39,6 +39,26 @@ Clearing takes effect immediately, without a confirmation dialog. Clearing reset
 
 The command code is `CVH`, with no default keyboard shortcut. If you have customised the menu, add `Clear Visible History =CVH` under View in the Menu preferences.
 
+## Boxing and Rows
+
+`View > Boxing` controls borders around Session results. Choose **Off** for normal Dyalog output, **No Borders** for the boxing formatter without borders, **Minimal** for plain boxes, **Medium** for boxes showing shape and type, or **Maximum** for full nested diagrams. Selecting a style enables boxing. Settings for `]View`, function trains and output from running functions are retained.
+
+`View > Rows` controls wide output. **Extend** keeps rows on one line, **Cut** truncates them at the Session width, and **Wrap** wraps each row. **Off** restores Dyalog's normal print-width block wrapping. `Rows > Folding` can shorten tall output, retaining zero through nine trailing rows; **Off** shows every row. Selecting a style or folding option enables Rows. Wrap ignores folding, so choose Extend or Cut to see its effect. Function-output and fold-marker settings are retained.
+
+These actions run Dyalog's `]box` and `]rows` user commands in the active session, including when a floating editor has focus. They require a connected interpreter at its normal prompt and preserve unfinished Session input and selections. Both submenus offer **Current Settings**, which queries the interpreter, and **Help**. The choices have no checkmarks. Settings changed directly with user commands take effect immediately; Tauride does not store a separate copy or save the Dyalog session file. Advanced options such as train display, function output and fold markers remain available through the user commands.
+
+There are no default shortcuts. Assign one in Preferences > Shortcuts, or use the following command codes in a custom menu. Saved custom menus remain unchanged; for example, add `Minimal Boxing =BXMIN` and `Wrap Rows =RWW` under View in Preferences > Menu.
+
+| Menu choice | Command code |
+| --- | --- |
+| Boxing: Off / No Borders | `BXO` / `BXN` |
+| Boxing: Minimal / Medium / Maximum | `BXMIN` / `BXMID` / `BXMAX` |
+| Boxing: Current Settings / Help | `BXQ` / `BXH` |
+| Rows: Off / Extend / Cut / Wrap | `RWO` / `RWL` / `RWC` / `RWW` |
+| Rows > Folding: Off | `RWFO` |
+| Rows > Folding: 0–9 trailing rows | `RWF0`–`RWF9` |
+| Rows: Current Settings / Help | `RWQ` / `RWH` |
+
 ## Threads
 
 Ride supports multithreading. For information on threads, see the [Dyalog Programming Reference Guide](https://docs.dyalog.com/latest/Dyalog%20Programming%20Reference%20Guide.pdf).

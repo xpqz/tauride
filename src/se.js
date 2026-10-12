@@ -281,8 +281,9 @@ D.Se.prototype = {
     const se = this;
     const model = se.me.getModel();
     let last = model.getLineCount();
+    const dirty = { ...draft.dirty, [draft.tail]: draft.dirty[draft.tail] ?? '      ' };
     const partial = se.lines.length && se.lines.at(-1).text.at(-1) !== '\n'
-      && !!model.getLineContent(last) && draft.dirty[draft.tail] != null;
+      && !!model.getLineContent(last);
     if (partial) {
       const column = model.getLineMaxColumn(last);
       se.edit([{ range: new monaco.Range(last, column, last, column), text: '\n' }]);
@@ -295,11 +296,11 @@ D.Se.prototype = {
     });
     const shifted = (line) => (line >= draft.tail ? line - draft.tail + last
       : line - truncate - expired.filter((i) => i < line).length);
-    Object.keys(draft.dirty).forEach((key) => {
+    Object.keys(dirty).forEach((key) => {
       const line = shifted(+key);
       if (line < 1 || expired.includes(+key)) return;
       const text = draft.lines[+key - 1];
-      if (draft.dirty[key] === 0 && +key !== draft.tail) {
+      if (dirty[key] === 0 && +key !== draft.tail) {
         const previous = line - 1;
         const column = model.getLineMaxColumn(previous);
         se.edit([{ range: new monaco.Range(previous, column, previous, column), text: `\n${text}` }]);
@@ -307,8 +308,10 @@ D.Se.prototype = {
       } else {
         se.edit([{ range: new monaco.Range(line, 1, line, model.getLineMaxColumn(line)), text }]);
       }
-      se.dirty[line] = +key === draft.tail
-        ? (partial ? 0 : '      ') : draft.dirty[key];
+      if (+key !== draft.tail || partial || text !== '      ') {
+        se.dirty[line] = +key === draft.tail
+          ? (partial ? 0 : '      ') : dirty[key];
+      }
     });
     se.me.setSelections(draft.selections.map((s) => (
       new monaco.Selection(
