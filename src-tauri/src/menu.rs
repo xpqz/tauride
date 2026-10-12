@@ -161,7 +161,7 @@ fn allow_edit_accelerator(command: &str, url: &tauri::Url) -> bool {
 
 fn filter_edit_accelerators(items: &mut [Item], url: &tauri::Url) {
     for item in items {
-        if let Some(command) = focused_edit_command(&item.id) {
+        if let Some(command) = focused_edit_command(&item.id).or_else(|| session_menu_command(&item.id)) {
             if !allow_edit_accelerator(command, url) {
                 item.enabled = false;
                 item.accelerator = None;
@@ -177,16 +177,55 @@ fn focused_edit_command(id: &str) -> Option<&str> {
     ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD"].contains(&command).then_some(command)
 }
 
+const INLINE_INSPECTIONS: &[&str] = &["ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA"];
+const OUTPUT_COMMANDS: &[&str] = &["BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH",
+    "RWO", "RWL", "RWC", "RWW", "RWFO", "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5",
+    "RWF6", "RWF7", "RWF8", "RWF9", "RWQ", "RWH"];
+
+fn session_menu_command(id: &str) -> Option<&str> {
+    if !id.starts_with("app:") { return None; }
+    let command = id.rsplit(':').next()?;
+    (["AGC", "AGO", "TTB", "IT"].contains(&command)
+        || INLINE_INSPECTIONS.contains(&command) || OUTPUT_COMMANDS.contains(&command)).then_some(command)
+}
+
+fn set_commands_enabled<R: Runtime>(items: Vec<MenuItemKind<R>>, enabled: bool, commands: &[&str]) -> tauri::Result<()> {
+    for item in items {
+        let matching = session_menu_command(item.id().as_ref()).is_some_and(|command| commands.contains(&command));
+        if matching {
+            if let Some(normal) = item.as_menuitem() { normal.set_enabled(enabled)?; }
+        }
+        if let Some(submenu) = item.as_submenu() { set_commands_enabled(submenu.items()?, enabled, commands)?; }
+    }
+    Ok(())
+}
+
+fn update_commands_menu<R: Runtime>(window: WebviewWindow<R>, enabled: bool, commands: &[&str]) -> Result<(), String> {
+    if !window.is_focused().map_err(|e| e.to_string())? { return Ok(()); }
+    let enabled = enabled && window.url().map(|url| is_session_page(&url)).unwrap_or(false);
+    if let Some(menu) = window.app_handle().menu() {
+        set_commands_enabled(menu.items().map_err(|e| e.to_string())?, enabled, commands).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_inline_tracing_menu<R: Runtime>(window: WebviewWindow<R>, enabled: bool) -> Result<(), String> {
+    update_commands_menu(window, enabled, INLINE_INSPECTIONS)
+}
+
+#[tauri::command]
+pub fn update_output_command_menu<R: Runtime>(window: WebviewWindow<R>, enabled: bool) -> Result<(), String> {
+    update_commands_menu(window, enabled, OUTPUT_COMMANDS)
+}
+
 /// App-wide menu event handler: forwards popup-menu clicks to the webviews.
 pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
     if id.starts_with("app:") {
-        if let Some(command) = ["AGC", "AGO", "TTB"].into_iter().find(|command| id.ends_with(&format!(":{command}"))) {
+        if let Some(command) = session_menu_command(id) {
             let focused = app.webview_windows().into_values().find(|window| window.is_focused().unwrap_or(false));
-            let eligible = focused.as_ref().and_then(|window| window.url().ok()).map(|url| {
-                matches!(url.path(), "" | "/" | "/index.html")
-                    && url.query_pairs().find(|(key, _)| key == "type")
-                        .map(|(_, value)| value == "editor").unwrap_or(true)
-            }).unwrap_or(false);
+            let eligible = focused.as_ref().and_then(|window| window.url().ok())
+                .map(|url| is_session_page(&url)).unwrap_or(false);
             if eligible {
                 if let Some(window) = focused {
                     let _ = window.emit_to(window.label(), "ride-session-menu", command);
@@ -282,6 +321,31 @@ mod tests {
     }
 
     #[test]
+    fn helper_menus_release_inline_and_output_accelerators_in_nested_custom_menus() {
+        let commands: Vec<_> = ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD", "IT", "AGC", "AGO", "TTB"]
+            .into_iter().chain(INLINE_INSPECTIONS.iter().copied()).chain(OUTPUT_COMMANDS.iter().copied()).collect();
+        for page in ["http://tauri.localhost/index.html?type=prf", "http://tauri.localhost/about.html",
+            "http://tauri.localhost/log.html", "http://tauri.localhost/index.html?type=editor&winId=12"] {
+            let url = tauri::Url::parse(page).unwrap();
+            let item = |command: &str| Item {
+                id: format!("app:main:7:3:{command}"), label: command.into(), kind: "normal".into(),
+                checked: false, enabled: true, submenu: None,
+                accelerator: Some("Ctrl+Alt+Enter".into()), role: None,
+            };
+            let mut items = vec![Item { submenu: Some(commands.iter().map(|command| item(command)).collect()),
+                ..item("Custom") }, item("CP")];
+            filter_edit_accelerators(&mut items, &url);
+            for (command, item) in commands.iter().zip(items[0].submenu.as_ref().unwrap()) {
+                let allowed = is_session_page(&url) || (*command == "SC" && matches!(url.path(), "/about.html" | "/log.html"));
+                assert_eq!(item.enabled, allowed, "{page}: {command} enabled state");
+                assert_eq!(item.accelerator.is_some(), allowed, "{page}: {command} accelerator");
+            }
+            assert!(items[1].enabled, "clipboard commands remain available");
+            assert!(items[1].accelerator.is_some());
+        }
+    }
+
+    #[test]
     fn editing_commands_accept_session_and_floating_pages_and_reject_helpers() {
         for url in ["http://tauri.localhost/", "http://tauri.localhost/index.html",
             "http://tauri.localhost/index.html?type=editor&winId=12"] {
@@ -291,6 +355,46 @@ mod tests {
             "http://tauri.localhost/log.html", "http://tauri.localhost/status.html",
             "http://tauri.localhost/dialog.html"] {
             assert!(!is_session_page(&tauri::Url::parse(url).unwrap()));
+        }
+    }
+    #[test]
+    fn inline_commands_route_semantically_regardless_of_installing_session() {
+        for command in ["IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA"] {
+            for owner in ["main", "w1000001", "w1000012"] {
+                let id = format!("app:{owner}:42:3:1:{command}");
+                assert_eq!(session_menu_command(&id), Some(command));
+            }
+        }
+        assert_eq!(session_menu_command("ctx:2:0:ITL"), None);
+        assert_eq!(session_menu_command("app:main:1:0:PRF"), None);
+        for command in ["AGC", "AGO", "TTB"] {
+            assert_eq!(session_menu_command(&format!("app:main:1:0:{command}")), Some(command));
+        }
+    }
+
+    #[test]
+    fn output_commands_route_semantically_regardless_of_installing_session() {
+        for command in ["BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH", "RWO", "RWL",
+            "RWC", "RWW", "RWFO", "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5", "RWF6",
+            "RWF7", "RWF8", "RWF9", "RWQ", "RWH"] {
+            for owner in ["main", "w1000001", "w1000012"] {
+                assert_eq!(session_menu_command(&format!("app:{owner}:42:3:1:{command}")), Some(command));
+            }
+        }
+        assert_eq!(session_menu_command("app:main:1:0:RWF10"), None);
+        assert_eq!(session_menu_command("ctx:2:0:BXN"), None);
+    }
+
+    #[test]
+    fn session_menu_rejects_helper_pages_and_accepts_main_and_floating_editors() {
+        for page in ["http://tauri.localhost/", "http://tauri.localhost/index.html",
+            "http://tauri.localhost/index.html?type=editor&id=12"] {
+            assert!(is_session_page(&tauri::Url::parse(page).unwrap()), "{page}");
+        }
+        for page in ["http://tauri.localhost/index.html?type=prf", "http://tauri.localhost/about.html",
+            "http://tauri.localhost/log.html", "http://tauri.localhost/status.html",
+            "http://tauri.localhost/dialog.html", "http://tauri.localhost/index.html?type=other"] {
+            assert!(!is_session_page(&tauri::Url::parse(page).unwrap()), "{page}");
         }
     }
 }

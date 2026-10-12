@@ -146,9 +146,12 @@ page's `document.title` (the session caption).
 On macOS, Observe Session, Allow Control and Show Trace/Edit Toolbar act on
 whichever session or floating editor/tracer has native focus. Floating windows
 propagate the preference to their owning session through the existing IPC path.
-These commands carry their command code in the native menu item ID and are sent
-to the focused webview, even if another session last installed the application
-menu. Helper windows do not change session preferences.
+These commands and the Inline Tracing commands carry their command code in the
+native menu item ID and are sent to the focused webview, even if another session
+last installed the application menu. Inline inspection requests from floating
+windows are checked by their owning session. The focused session supplies the
+inspection items’ enabled state; helper windows disable them and do not change
+session preferences.
 
 Mac editing shortcuts and Strong Interrupt use the existing command registry,
 Shortcuts preferences and menu DSL. Explicit custom assignments outrank defaults;
@@ -213,6 +216,25 @@ Ride's frontend changes:
   pages cannot load `file://` scripts.
 - `src/abt.js`: About reports Tauri and the webview instead of Electron,
   Chrome and Node.
+
+## Inline tracing
+
+Use **Action → Inline Tracing → Next Primitive** (the existing Ctrl+Alt+Enter
+shortcut) to start or advance inline tracing. The same submenu is available in
+the native tracer context menu. While paused within an expression, it offers
+Left Argument, Current Function, Right Argument and Axis Specification, followed
+by Previous Result and the previous arguments, function and axis.
+
+These commands open Dyalog’s existing `]IT` inspection windows. Opening a view
+again brings its existing window forward, and its contents update as execution
+advances. An argument or result that is unavailable is shown as `<no value>`.
+Next Primitive also works while an inspection window has focus. Inspection
+windows keep the edit toolbar hidden and use the full pane for their values.
+
+Inspection commands preserve unfinished Session input and selection. They are
+unavailable while the interpreter is running, accepting input, or processing
+another command. The commands have no additional default shortcuts. Saved
+custom menus remain unchanged; the commands can be added through Preferences.
 
 ## Pair programming with an agent
 

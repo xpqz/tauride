@@ -365,6 +365,33 @@
       });
     }
   }
+  D.commands.IT = (me) => D.ide.stepInline(me);
+  D.inlineTracingViews.forEach(([code, , aspect]) => {
+    D.commands[code] = (me) => D.ide.openInlineInspection(aspect, me);
+  });
+  Object.keys(D.outputCommands).forEach((code) => {
+    D.commands[code] = (me) => {
+      if (!D.ide) return;
+      if (D.el && !window.__RIDE__) {
+        const focused = D.el.BrowserWindow.getFocusedWindow();
+        if (!focused) return;
+        const url = new URL(focused.webContents.getURL());
+        const type = url.searchParams.get('type');
+        if (!url.pathname.endsWith('/index.html') || (type && type !== 'editor')) return;
+      }
+      D.ide.runOutputCommand(code, me);
+    };
+  });
+  D.inlineTracingMenuItems = (me) => {
+    const items = D.inlineTracingViews.map(([code, label]) => ({
+      label,
+      enabled: !!(D.ide && D.ide.canInspectInline && D.ide.canInspectInline()),
+      click: () => { D.commands[code](me); },
+    }));
+    items.splice(4, 0, { type: 'separator' });
+    items.unshift({ label: 'Next Primitive', click: () => { D.commands.IT(me); } }, { type: 'separator' });
+    return items;
+  };
   const C = [
   //  0     1     2     3     4     5     6     7     8     9     A     B     C     D     E     F
     'QT', 'ER', 'TB', 'BT', 'EP', 'UC', 'DC', 'RC', 'LC', 'US', 'DS', 'RS', 'LS', 'UL', 'DL', 'RL', // 00

@@ -202,6 +202,19 @@ nativeTest('Preferences can rebind Fix for a floating editor and reset it to the
   await wait(c, () => !!document.querySelector('#shc_itm_FX .shc_text[title="Cmd+S"]'));
   t.true(await c.execute(() => !document.querySelector('#shc_itm_FX .shc_editor')),
     'Preferences records an existing native menu shortcut without running it');
+  await wait(c, async () => {
+    try {
+      await window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
+        { command: 'IT', expectedEnabled: false, dispatch: false });
+      return true;
+    } catch (_) { return false; }
+  });
+  await (await c.$('#shc_itm_FX .shc_del')).click();
+  await (await c.$('#shc_itm_FX .shc_add')).click();
+  await keys(c, Key.Control, Key.Alt, Key.Enter);
+  await wait(c, () => !!document.querySelector('#shc_itm_FX .shc_text[title="Ctrl+Option+Enter"]'));
+  t.true(await c.execute(() => !document.querySelector('#shc_itm_FX .shc_editor')),
+    'Preferences records the Inline Tracing chord without a native accelerator intercepting it');
   await (await c.$('#shc_itm_FX .shc_del')).click();
   await (await c.$('#shc_itm_FX .shc_add')).click();
   await keys(c, Key.Command, Key.Shift, 'y');

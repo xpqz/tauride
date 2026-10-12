@@ -714,11 +714,24 @@
   let menuSeq = 0;
   let menuEvents = null;
   const pageType = new URLSearchParams(window.location.search).get('type');
+  const refreshInlineMenu = () => {
+    if ((!pageType || pageType === 'editor') && window.D && D.refreshInlineTracingMenu) {
+      D.refreshInlineTracingMenu();
+    } else Menu.updateInlineTracingState(false);
+    if ((!pageType || pageType === 'editor') && window.D && D.refreshOutputCommandMenu) {
+      D.refreshOutputCommandMenu();
+    } else if (Menu.updateOutputCommandState) Menu.updateOutputCommandState(false);
+  };
   window.addEventListener('focus', () => {
+    refreshInlineMenu();
     if (nodePlatform === 'darwin') {
       tev().emitTo(sessionLabel(), 'ride-menu-refresh')
         .catch((e) => rlog('error', 'menu refresh failed:', e));
     }
+  });
+  window.addEventListener('DOMContentLoaded', () => {
+    window.__TAURI__.webviewWindow.getCurrentWebviewWindow().listen('ride-inline-menu-refresh', refreshInlineMenu);
+    refreshInlineMenu();
   });
   if (pageType === 'prf') {
     window.addEventListener('DOMContentLoaded', () => {
@@ -745,7 +758,7 @@
       sessionWindow.listen('ride-session-menu', ({ payload: command }) => {
         if (!(window.D && D.ide && D.commands && D.commands[command])) return;
         if (D.focusedShortcutCommands.includes(command)) D.runFocusedCommand(command);
-        else D.commands[command]();
+        else D.commands[command]((D.ide.focusedWin || {}).me);
       });
     });
   }
@@ -782,7 +795,11 @@
     .filter((it) => it.visible !== false)
     .map((it, i) => {
       const semanticCommand = app && [
-        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'FX', 'SI', 'RP', 'QCP', 'TGC', 'RD',
+        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'FX', 'SI', 'RP', 'QCP', 'TGC', 'RD', 'IT',
+        'ITL', 'ITF', 'ITR', 'ITA', 'ITRES', 'ITPL', 'ITPF', 'ITPR', 'ITPA',
+        'BXO', 'BXN', 'BXMIN', 'BXMID', 'BXMAX', 'BXQ', 'BXH',
+        'RWO', 'RWL', 'RWC', 'RWW', 'RWFO', 'RWF0', 'RWF1', 'RWF2', 'RWF3',
+        'RWF4', 'RWF5', 'RWF6', 'RWF7', 'RWF8', 'RWF9', 'RWQ', 'RWH',
       ].includes(it.rideCommand);
       const id = `${prefix}:${i}${semanticCommand ? `:${it.rideCommand}` : ''}`;
       const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
@@ -825,7 +842,17 @@
       menuSeq += 1;
       const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
       const items = menuItems(m.items, `app:${label}:${menuSeq}`, appClicks, true);
-      menuReady().then(() => invoke('set_app_menu', { items })).catch((e) => rlog('error', 'application menu failed:', e));
+      menuReady().then(() => invoke('set_app_menu', { items }))
+        .then(() => tev().emit('ride-inline-menu-refresh'))
+        .catch((e) => rlog('error', 'application menu failed:', e));
+    }
+    static updateInlineTracingState(enabled) {
+      if (nodePlatform !== 'darwin') return;
+      invoke('update_inline_tracing_menu', { enabled }).catch((e) => rlog('error', 'inline menu update failed:', e));
+    }
+    static updateOutputCommandState(enabled) {
+      if (nodePlatform !== 'darwin') return;
+      invoke('update_output_command_menu', { enabled }).catch((e) => rlog('error', 'output menu update failed:', e));
     }
     static getApplicationMenu() { return null; }
   }

@@ -1,6 +1,22 @@
 // two menu implementations -- one native and one in html
 // (Tauri builds, which set window.__RIDE__, use the html one except on macOS)
+D.refreshInlineTracingMenu = () => {
+  D.refreshMenuItems && D.refreshMenuItems();
+  if (D.el && D.mac && window.__RIDE__ && D.el.Menu.updateInlineTracingState) {
+    const enabled = !!(D.ide && D.ide.canInspectInline && D.ide.canInspectInline());
+    D.el.Menu.updateInlineTracingState(enabled);
+  }
+};
+D.refreshOutputCommandMenu = () => {
+  D.refreshMenuItems && D.refreshMenuItems();
+  if (D.el && D.mac && window.__RIDE__ && D.el.Menu.updateOutputCommandState) {
+    const enabled = !!(D.ide && D.ide.canRunOutputCommand && D.ide.canRunOutputCommand());
+    D.el.Menu.updateOutputCommandState(enabled);
+  }
+};
 D.installMenu = function Menu(mx) {
+  const updates = [];
+  D.refreshMenuItems = () => { updates.forEach((update) => { update(); }); };
   if (D.el && (!window.__RIDE__ || D.mac)) {
     const pk = D.effectiveKeys();
     const k = {}; // k:a map of all keyboard shortcuts
@@ -17,6 +33,7 @@ D.installMenu = function Menu(mx) {
           ? () => D.runFocusedCommand(x.cmd) : x.action,
         rideCommand: x.cmd,
         accelerator: x.cmd && k[x.cmd] ? k[x.cmd].replace(/-(.)/g, '+$1') : null,
+        enabled: !x.isEnabled || x.isEnabled(),
       };
       if (x.group) {
         h.type = 'radio';
@@ -38,13 +55,16 @@ D.installMenu = function Menu(mx) {
         hideothers: 0,
         showall: 'unhide',
       };
-      const r = x[''].replace(/[& ]/g, '').toLowerCase();
+      const r = x.cmd
+        ? { CT: 'cut', CP: 'copy', PT: 'paste' }[x.cmd]
+        : x[''].replace(/[& ]/g, '').toLowerCase();
       if (r in roles) h.role = roles[r] || r;
       if (x.items) {
         h.submenu = new D.el.Menu();
         x.items.forEach((y) => { h.submenu.append(render(y)); });
       }
       mi = new D.el.MenuItem(h);
+      if (x.isEnabled) updates.push(() => { mi.enabled = !!x.isEnabled(); });
       return mi;
     };
     const m = new D.el.Menu();
@@ -85,6 +105,14 @@ D.installMenu = function Menu(mx) {
         return r;
       }); // acc:access key
       const $a = $(`<a href=#><span>${name}</span></a>`);
+      if (x.isEnabled) {
+        const update = () => {
+          const enabled = !!x.isEnabled();
+          $a.attr('aria-disabled', String(!enabled)).css('opacity', enabled ? '' : 0.5);
+        };
+        updates.push(update);
+        update();
+      }
       x.cmd && $a.append(`<span class=m-shc data-cmd=${x.cmd}>`);
       if (x.group) {
         $a.addClass(`m-group-${x.group}`)
@@ -179,4 +207,5 @@ D.installMenu = function Menu(mx) {
     };
     updShcs(D.prf.keys()); D.prf.keys(updShcs);
   }
+  D.refreshInlineTracingMenu();
 };

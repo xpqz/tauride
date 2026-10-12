@@ -255,7 +255,7 @@ test('embedded newlines retain one editor source line and make the entity read o
   ]) {
     let rendered;
     const stop = {};
-    const ed = { id: 1, updateTitle() {}, me: { getModel: () => ({ getEOL: () => '\n', setValue: value => { rendered = value; throw stop; } }) } };
+    const ed = { id: 1, dom: { classList: { toggle() {} } }, updSize() {}, updateTitle() {}, me: { getModel: () => ({ getEOL: () => '\n', setValue: value => { rendered = value; throw stop; } }) } };
     assert.throws(() => D.Ed.prototype.open.call(ed, { name: 'f', text, entityType: 1 }), error => error === stop);
     assert.equal(rendered, expected);
     assert.equal(ed.isReadOnlyEntity, readonly);

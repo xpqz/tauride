@@ -70,12 +70,14 @@ test('native focused session listener uses actual editor focus guards rather tha
   const listeners = {};
   const calls = [];
   const D = { ide: { focusedWin: { me: { id: 'stale-editor' } } },
-    commands: Object.fromEntries(commands.map(code => [code, () => calls.push(`unguarded:${code}`)])),
+    commands: { ...Object.fromEntries(commands.map(code => [code, () => calls.push(`unguarded:${code}`)])),
+      ITL: me => calls.push(['ITL', me]), BXMAX: me => calls.push(['BXMAX', me]) },
     focusedShortcutCommands: commands, runFocusedCommand: code => calls.push(code) };
   vm.runInNewContext(text.slice(begin, end), { window: { D }, D,
     sessionWindow: { listen(name, callback) { listeners[name] = callback; } } });
   for (const code of commands) listeners['ride-session-menu']({ payload: code });
-  assert.deepEqual(calls, commands);
+  for (const code of ['ITL', 'BXMAX']) listeners['ride-session-menu']({ payload: code });
+  assert.deepEqual(calls, [...commands, ['ITL', D.ide.focusedWin.me], ['BXMAX', D.ide.focusedWin.me]]);
 });
 
 test('native focus requests the owning main menu for session, floating, and helper pages', () => {
@@ -85,14 +87,18 @@ test('native focus requests the owning main menu for session, floating, and help
   for (const type of ['', 'editor', 'prf', 'other']) {
     const events = {};
     const refreshes = [];
+    const availability = [];
     const D = { ide: { updMenu() { throw new Error('floating/helper handler must not install menus'); } } };
     const window = { location: { search: type ? `?type=${type}` : '' }, D,
       __TAURI__: { webviewWindow: { getCurrentWebviewWindow: () => ({ listen() {} }) } },
       addEventListener(name, callback) { events[name] = callback; } };
     vm.runInNewContext(text.slice(begin, end), { window, D, URLSearchParams, nodePlatform: 'darwin',
+      Menu: { updateInlineTracingState: value => availability.push(['inline', value]),
+        updateOutputCommandState: value => availability.push(['output', value]) },
       sessionLabel: () => 'w1000001', tev: () => ({ emitTo: (target, event) => { refreshes.push([target, event]); return Promise.resolve(); } }), rlog() {} });
     assert.equal(typeof events.focus, 'function'); events.focus();
     assert.deepEqual(refreshes, [['w1000001', 'ride-menu-refresh']]);
+    assert.deepEqual(availability, [['inline', false], ['output', false]]);
   }
 });
 

@@ -29,7 +29,14 @@ D.IDE = function IDE(opts = {}) {
     D.send = (name, payload) => {
       if (name === 'Execute') {
         if (ide.promptType === 0) return;
+        const inspection = /^\s*\]it\.([a-z]+)(?:\s+-aplan)?\s*$/i.exec(payload.text);
+        const aspect = inspection && ide.inlineInspectionKind(inspection[1]);
+        if (!payload.trace && aspect && ide.canInspectInline()) {
+          ide.inlineInspection = aspect;
+          ide.wins[0].preserveDraft = true;
+        }
         ide.inputOperation = {};
+        ide.refreshInlineInspectionState();
         if (payload.text === ide.pasteCleanup) {
           ide.pasteSources.clear(); ide.pasteCleanup = null;
         }
@@ -37,6 +44,12 @@ D.IDE = function IDE(opts = {}) {
         if (started) { ide.pasteSources.add(started); ide.pasteStarts.delete(payload.text); }
         const source = ide.pasteFinishes.get(payload.text);
         if (source) { ide.pasteSources.delete(source); ide.pasteFinishes.delete(payload.text); }
+      }
+      if (name === 'TracePrimitive') {
+        if (!ide.connected || ide.dead || ide.promptType !== 1 || ide.inputOperation
+          || ide.inlineInspection || ide.pending.length) return;
+        ide.inputOperation = {};
+        ide.refreshInlineInspectionState();
       }
       if (name === 'SaveChanges') ide.saveRequests.set(payload.win, { explained: false });
       send(name, payload);
@@ -217,6 +230,7 @@ D.IDE = function IDE(opts = {}) {
       }
     } finally {
       last = +new Date(); tid = 0;
+      if (!mq.length && !blk) ide.refreshInlineInspectionState();
       if (mq.length && !blk) tid = setTimeout(rd, 20);
     }
   }
@@ -693,6 +707,11 @@ D.IDE = function IDE(opts = {}) {
         D.send('Execute', { trace: 0, text: `${ide.pending.shift()}\n` });
         ide.wins[0].prompt(t);
       } else eachWin((w) => { w.prompt(t); });
+      if (t) {
+        ide.wins[0].preserveDraft = false;
+        ide.inlineInspection = null;
+      }
+      ide.refreshInlineInspectionState();
       (t === 2 || t === 4) && ide.wins[0].focus(); // ⎕ / ⍞ input
       if (t === 1) {
         ide.getStats();
@@ -733,8 +752,14 @@ D.IDE = function IDE(opts = {}) {
       se.hadErrTmr = setTimeout(() => { ide.hadErr = -1; delete se.hadErrTmr; }, 100);
       ide.hadErr = 0; // initialise counter to delay setting focus on session
     },
-    GotoWindow(x) { const w = ide.wins[x.win]; w && w.focus(); },
-    WindowTypeChanged(x) { return ide.wins[x.win].setTC(x.tracer); },
+    GotoWindow(x) {
+      const w = ide.wins[x.win];
+      w && w.focus();
+    },
+    WindowTypeChanged(x) {
+      ide.wins[x.win].setTC(x.tracer);
+      ide.refreshInlineInspectionState();
+    },
     ReplyGetAutocomplete(x) { const w = ide.wins[x.token]; w && w.processAutocompleteReply(x); },
     ReplyGetHelpInformation(x) {
       if (x.url.length === 0) ide.getHelpExecutor.reject({ supported: true, msg: 'No help found' });
@@ -772,6 +797,8 @@ D.IDE = function IDE(opts = {}) {
     },
     SetHighlightLine(x) {
       const w = D.wins[x.win];
+      w.HIGHLIGHT = { lineStart: x.line + 1, lineEnd: x.end_line + 1,
+        colStart: x.start_col + 1, colEnd: x.end_col + 1 };
       w.SetHighlightLine(ide.hadErr, x.line + 1, x.end_line + 1, x.start_col + 1, x.end_col + 1);
       ide.hadErr > 0 && (ide.hadErr -= 1);
       D.prf.wse() && ide.wse.refresh();
@@ -779,7 +806,12 @@ D.IDE = function IDE(opts = {}) {
     },
     UpdateWindow(x) {
       const w = ide.wins[x.token];
-      w && w.update(x);
+      if (w) {
+        w.entityType = x.entityType;
+        w.specialWindow = x.special_window;
+        w.update(x);
+        ide.refreshInlineInspectionState();
+      }
     },
     ReplySaveChanges(x) {
       const request = ide.saveRequests.get(x.win);
@@ -804,6 +836,7 @@ D.IDE = function IDE(opts = {}) {
         w.container && w.container.close();
       }
       delete ide.wins[x.win]; ide.focusMRUWin();
+      ide.refreshInlineInspectionState();
       ide.WSEwidth = ide.wsew; ide.DBGwidth = ide.dbgw;
       w.tc && ide.getStats();
     },
@@ -842,7 +875,8 @@ D.IDE = function IDE(opts = {}) {
       }
       const w = ee.token;
       let done;
-      const editorOpts = { id: w, name: ee.name, tc: ee.debugger };
+      const editorOpts = { id: w, name: ee.name, tc: ee.debugger,
+        entityType: ee.entityType, specialWindow: ee.special_window };
       !editorOpts.tc && (ide.hadErr = -1);
       ide.block(); // unblock the message queue once monaco ready
       if (D.el && D.prf.floating() && !ide.dead) {
@@ -858,6 +892,7 @@ D.IDE = function IDE(opts = {}) {
       ed.me_ready.then(() => {
         ed.open(ee);
         ide.unblock();
+        ide.refreshInlineInspectionState();
       });
       // add to golden layout:
       const tc = !!ee.debugger;
@@ -1004,7 +1039,7 @@ D.IDE = function IDE(opts = {}) {
       const w = D.wins[x.win];
       w.ReplyFormatCode(x.text);
       ide.hadErr > 0 && (ide.hadErr -= 1);
-      ide.focusWin(w);
+      if (!ide.isInlineInspection(w)) ide.focusWin(w);
     },
     ReplyGetConfiguration(x) {
       x.configurations.forEach((c) => {
@@ -1058,6 +1093,86 @@ D.IDE = function IDE(opts = {}) {
   };
 };
 D.IDE.prototype = {
+  isInlineInspection(w) {
+    return !!w && w.specialWindow >= 16 && w.specialWindow <= 24;
+  },
+  inlineTracer() {
+    return Object.values(this.wins).find((w) => {
+      const h = w.HIGHLIGHT;
+      return w.tc && h && h.colStart > 0 && h.colEnd > 0
+        && (h.lineEnd > h.lineStart || h.colEnd > h.colStart);
+    });
+  },
+  canRunOutputCommand() {
+    if (this.floating) return !!(this.connected && !this.dead && this.outputCommandAvailable);
+    return !!(this.connected && !this.dead && this.promptReceived && this.promptType === 1
+      && !this.inputOperation && !this.inlineInspection && !this.pending.length && this.quiescent());
+  },
+  runOutputCommand(code, me) {
+    if (!Object.prototype.hasOwnProperty.call(D.outputCommands, code)) return;
+    const w = (me && me.dyalogCmds) || this.focusedWin;
+    if (!w || this.wins[w.id] !== w) return;
+    if (this.floating) {
+      this.ipc.emit('runOutputCommand', [code, w.id]);
+      return;
+    }
+    if (!this.canRunOutputCommand()) return;
+    this.wins[0].preserveDraft = true;
+    D.send('Execute', { text: `${D.outputCommands[code]}\n`, trace: 0 });
+  },
+  refreshOutputCommandState() {
+    const available = this.canRunOutputCommand();
+    if (this.lastOutputCommandState === available) return;
+    this.lastOutputCommandState = available;
+    if (!this.floating && D.ipc && D.ipc.server) {
+      D.ipc.server.broadcast('outputCommandState', available);
+    }
+    D.refreshOutputCommandMenu && D.refreshOutputCommandMenu();
+  },
+  canInspectInline() {
+    if (this.floating) return !!this.inlineInspectionAvailable;
+    return !!(this.canRunOutputCommand() && this.inlineTracer());
+  },
+  refreshInlineInspectionState() {
+    this.refreshOutputCommandState();
+    const available = this.canInspectInline();
+    if (this.lastInlineInspectionState === available) return;
+    this.lastInlineInspectionState = available;
+    if (!this.floating && D.ipc && D.ipc.server) {
+      D.ipc.server.broadcast('inlineInspectionState', available);
+    }
+    D.refreshInlineTracingMenu && D.refreshInlineTracingMenu();
+  },
+  inlineInspectionKind(aspect) {
+    const aspects = { left: 16, right: 17, axis: 18, function: 19, pleft: 20,
+      pright: 21, result: 22, paxis: 23, pfunction: 24 };
+    const key = typeof aspect === 'string' ? aspect.toLowerCase() : '';
+    return Object.prototype.hasOwnProperty.call(aspects, key) ? aspects[key] : undefined;
+  },
+  openInlineInspection(aspect, me) {
+    const kind = this.inlineInspectionKind(aspect);
+    if (!kind) return;
+    if (this.floating) {
+      this.ipc.emit('openInlineInspection', [aspect, me && me.dyalogCmds.id]);
+      return;
+    }
+    if (!this.canInspectInline()) return;
+    this.inlineInspection = kind;
+    this.wins[0].preserveDraft = true;
+    D.send('Execute', { text: `]IT.${aspect}\n`, trace: 0 });
+    this.refreshInlineInspectionState();
+  },
+  stepInline(me) {
+    const w = (me && me.dyalogCmds) || this.focusedWin;
+    if (!w) return;
+    if (this.isInlineInspection(w)) {
+      if (this.floating) this.ipc.emit('stepInline', w.id);
+      else if (this.canInspectInline()) {
+        const tracer = this.inlineTracer();
+        tracer.focus(); tracer.execCommand('IT');
+      }
+    } else if (this.connected && !this.dead) w.execCommand('IT');
+  },
   updateInputState() {
     const ide = this;
     I.sb_busy.hidden = !!ide.floating;
@@ -1112,6 +1227,9 @@ D.IDE.prototype = {
     ide.unsavedStops = 0;
     ide.saveRequests.clear();
     ide.inputOperation = null;
+    ide.inlineInspection = null;
+    if (ide.wins[0]) ide.wins[0].preserveDraft = false;
+    ide.refreshInlineInspectionState();
     ide.pasteSources.clear();
     ide.pasteFinishes.clear();
     ide.pasteStarts.clear();

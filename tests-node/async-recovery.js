@@ -12,7 +12,7 @@ function queue() {
   let nextId = 0; let now = 1000;
   const ide = {
     wins: { 0: { add: x => batches.push(Array.from(x, value => ({ ...value }))) } },
-    handlers: { Seen: x => received.push(x) },
+    handlers: { Seen: x => received.push(x) }, refreshInlineInspectionState() {},
   };
   const D = { ide, send: (...x) => sent.push(x), prf: { floating: () => false } };
   class Clock extends Date { constructor() { super(now); } }

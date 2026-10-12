@@ -68,6 +68,14 @@
           });
         }, 100);
       });
+      rm.on('outputCommandState', (available) => {
+        ide.outputCommandAvailable = available;
+        ide.refreshOutputCommandState();
+      });
+      rm.on('inlineInspectionState', (available) => {
+        ide.inlineInspectionAvailable = available;
+        ide.refreshInlineInspectionState();
+      });
       rm.on('syntax', (x) => {
         Object.assign(D.syntax, x);
         D.defineSyntaxRegex();
@@ -191,6 +199,8 @@
       srv.on('browserCreated', (bwId, socket) => {
         const wp = new D.IPC_WindowProxy(bwId, socket);
         srv.emit(socket, 'caption', D.ide.caption);
+        srv.emit(socket, 'inlineInspectionState', D.ide.canInspectInline());
+        srv.emit(socket, 'outputCommandState', D.ide.canRunOutputCommand());
         D.pwins.push(wp);
         D.IPC_LinkEditor();
       });
@@ -207,6 +217,18 @@
         const w = D.ide.wins[id];
         D.ide.focusedWin = w;
         w && (w.focusTS = +new Date());
+      });
+      srv.on('runOutputCommand', ([code, id]) => {
+        const w = D.ide.wins[id];
+        w && D.ide.runOutputCommand(code, w.me);
+      });
+      srv.on('openInlineInspection', ([aspect, id]) => {
+        const w = D.ide.wins[id];
+        w && D.ide.openInlineInspection(aspect, w.me);
+      });
+      srv.on('stepInline', (id) => {
+        const w = D.ide.wins[id];
+        w && D.ide.stepInline(w.me);
       });
       srv.on('pfKey', x => D.ide.pfKey(x));
       srv.on('getStats', () => D.ide.getStats());
@@ -270,9 +292,12 @@
     const ped = D.pendingEditors.shift();
     wp.id = ped.editorOpts.id;
     wp.tc = ped.editorOpts.tc;
+    wp.entityType = ped.editorOpts.entityType;
+    wp.specialWindow = ped.editorOpts.specialWindow;
     wp.focusTS =  +new Date();
     D.wins[wp.id] = wp;
     D.ipc.server.emit(wp.socket, 'pendingEditor', ped);
+    D.ide.refreshInlineInspectionState();
   };
 
   D.IPC_WindowProxy = function IPCWindowProxy(bwId, socket) {

@@ -32,14 +32,17 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
 }
 
 fn installed_menu_command_item<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<MenuItemKind<R>, String> {
-    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC", "FX", "SI", "RP", "QCP", "TGC", "RD"].contains(&command) { return Err("Unsupported test menu command".into()); }
+    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC", "FX", "SI", "RP", "QCP", "TGC", "RD",
+        "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA",
+        "BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH", "RWO", "RWL", "RWC", "RWW", "RWFO",
+        "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5", "RWF6", "RWF7", "RWF8", "RWF9", "RWQ", "RWH"].contains(&command) { return Err("Unsupported test menu command".into()); }
     let menu = app.menu().ok_or("No application menu")?;
     let items = menu.items().map_err(|e| e.to_string())?;
     menu_command_item(items, command)?.ok_or_else(|| format!("No application menu item for {command}"))
 }
 
 #[tauri::command]
-pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String, dispatch: Option<bool>, expected_checked: Option<bool>) -> Result<String, String> {
+pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String, dispatch: Option<bool>, expected_checked: Option<bool>, expected_enabled: Option<bool>) -> Result<String, String> {
     let item = installed_menu_command_item(&app, &command)?;
     let id = item.id().as_ref().to_string();
     let checked = item.as_check_menuitem()
@@ -47,6 +50,16 @@ pub fn ui_test_menu_command<R: Runtime>(app: AppHandle<R>, command: String, disp
     if let Some(expected) = expected_checked {
         if checked != Some(expected) {
             return Err(format!("Installed menu {command} checked state is {checked:?}, expected {expected}"));
+        }
+    }
+    if let Some(expected) = expected_enabled {
+        let enabled = if let Some(menu_item) = item.as_menuitem() {
+            menu_item.is_enabled().map_err(|e| e.to_string())?
+        } else if let Some(menu_item) = item.as_check_menuitem() {
+            menu_item.is_enabled().map_err(|e| e.to_string())?
+        } else { return Err(format!("Menu {command} is not a command item")); };
+        if enabled != expected {
+            return Err(format!("Installed menu {command} enabled state is {enabled}, expected {expected}"));
         }
     }
     if dispatch.unwrap_or(true) {

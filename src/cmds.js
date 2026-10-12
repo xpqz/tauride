@@ -4,6 +4,34 @@
 // Some of the codes are inherited from Dyalog's old IDE
 // (see ../docs/cmd-codes.txt and near the end of km.js)
 // Others were made up for Ride's purposes - those use no fewer than three letters.
+D.inlineTracingViews = [
+  ['ITL', 'Left Argument', 'Left'],
+  ['ITF', 'Current Function', 'Function'],
+  ['ITR', 'Right Argument', 'Right'],
+  ['ITA', 'Axis Specification', 'Axis'],
+  ['ITRES', 'Previous Result', 'Result'],
+  ['ITPL', 'Previous Left Argument', 'PLeft'],
+  ['ITPF', 'Previous Function', 'PFunction'],
+  ['ITPR', 'Previous Right Argument', 'PRight'],
+  ['ITPA', 'Previous Axis', 'PAxis'],
+];
+D.outputCommands = {
+  BXO: ']box off',
+  BXN: ']box on -style=non',
+  BXMIN: ']box on -style=min',
+  BXMID: ']box on -style=mid',
+  BXMAX: ']box on -style=max',
+  BXQ: ']box ?',
+  BXH: ']box -??',
+  RWO: ']rows off',
+  RWL: ']rows on -style=long',
+  RWC: ']rows on -style=cut',
+  RWW: ']rows on -style=wrap',
+  RWFO: ']rows on -fold=off',
+  ...Object.fromEntries(Array.from({ length: 10 }, (_, n) => [`RWF${n}`, `]rows on -fold=${n}`])),
+  RWQ: ']rows ?',
+  RWH: ']rows -??',
+};
 D.cmds = [
   /* eslint-disable */
   //code description                default keys
@@ -19,6 +47,13 @@ D.cmds = [
   ['BH', 'Run to exit (in tracer)', []],
   ['BK', 'Backward or Undo',        ['Ctrl+Shift+Backspace']],
   ['BP', 'Toggle breakpoint',       []],
+  ['BXO','Boxing: Off',             []],
+  ['BXN','Boxing: No Borders',      []],
+  ['BXMIN','Boxing: Minimal',       []],
+  ['BXMID','Boxing: Medium',        []],
+  ['BXMAX','Boxing: Maximum',       []],
+  ['BXQ','Boxing: Current Settings',[]],
+  ['BXH','Boxing: Help',            []],
   ['BT', 'Back Tab between windows',['Ctrl+Shift+Tab']],
   ['CAM','Clear all trace/stop/monitor',[]],
   ['CAW','Close All Windows',[]],
@@ -42,6 +77,7 @@ D.cmds = [
   ['FX', 'Fix the current function',D.mac?['Cmd+S']:[]],
   ['HLP','Help',                    ['F1']],
   ['IT', 'Inline Tracing',          ['Ctrl+Alt+Enter']],
+  ...D.inlineTracingViews.map(([code, label]) => [code, `Inline Tracing: ${label}`, []]),
   ['JBK','Jump back',               ['Ctrl+Shift+J']],
   ['JSC','Show JavaScript console', ['Shift+F12']],
   ['LBR','Toggle language bar',     []],
@@ -63,6 +99,14 @@ D.cmds = [
   ['RDO', 'Redo',                   [D.mac?'Shift+Cmd+Z':'Ctrl+Y']],
   ['RP', 'Replace',                 D.mac?['Cmd+Option+F']:[]],
   ['RL', 'Right Limit',             ['End']],
+  ['RWO','Rows: Off',               []],
+  ['RWL','Rows: Extend',            []],
+  ['RWC','Rows: Cut',               []],
+  ['RWW','Rows: Wrap',              []],
+  ['RWFO','Rows: Folding Off',      []],
+  ...Array.from({ length: 10 }, (_, n) => [`RWF${n}`, `Rows: Folding: Keep ${n} trailing row${n === 1 ? '' : 's'}`, []]),
+  ['RWQ','Rows: Current Settings',  []],
+  ['RWH','Rows: Help',              []],
   ['RM', 'Continue execution of this thread', []],
   ['UAT','Unpause all paused threads',[]],
   ['SA', 'Select All',              [D.mac?'Cmd+A':'Ctrl+A']],
