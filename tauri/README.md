@@ -153,6 +153,17 @@ windows are checked by their owning session. The focused session supplies the
 inspection items’ enabled state; helper windows disable them and do not change
 session preferences.
 
+Mac editing shortcuts and Strong Interrupt use the existing command registry,
+Shortcuts preferences and menu DSL. Explicit custom assignments outrank defaults;
+empty bindings and live remapping also remove inherited or stale Monaco bindings.
+The effective assignments supply both editor bindings and menu accelerators.
+Fix, Find, Replace, Command Palette, Toggle Comment, Reformat and Strong Interrupt
+route to the eligible focused pane. Strong Interrupt remains available while the
+Session is busy; search fields and helper inputs cannot trigger it. Focus changes
+install the owning session's configured menu; other sessions cannot replace it.
+Windows and Linux keep their previous defaults until physical user testing can
+validate proposed platform mappings. See `docs/keyboard_shortcuts.md`.
+
 Windows: `src/wm.js` gives Ride's code one small window API (create, find,
 show/hide/focus/close, size, title, run a script, print, devtools) with two
 implementations: Electron's `BrowserWindow`, and Tauri's JS window API

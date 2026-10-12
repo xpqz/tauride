@@ -156,7 +156,8 @@ test('semantic native menu dispatch supplies the focused floating or main editor
   const end = source.indexOf('\n      });', begin) + '\n      });'.length;
   const handlers = {};
   const calls = [];
-  const D = { ide: { focusedWin: { me: { id: 'floating-tracer' } } }, commands: { IT: me => calls.push(me), ITL: me => calls.push(me) } };
+  const D = { focusedShortcutCommands: ['FX', 'SI', 'SC', 'RP', 'QCP', 'TGC', 'RD'],
+    ide: { focusedWin: { me: { id: 'floating-tracer' } } }, commands: { IT: me => calls.push(me), ITL: me => calls.push(me) } };
   vm.runInNewContext(source.slice(begin, end), { window: { D }, D,
     sessionWindow: { listen: (name, callback) => { handlers[name] = callback; } } });
   for (const command of ['IT', 'ITL']) handlers['ride-session-menu']({ payload: command });
@@ -216,7 +217,8 @@ function focusHooks(type, D) {
   const window = { location: { search: type ? `?type=${type}` : '' }, D,
     __TAURI__: { webviewWindow: { getCurrentWebviewWindow: () => ({ listen() {} }) } },
     addEventListener(name, callback) { listeners[name] = callback; } };
-  vm.runInNewContext(source.slice(begin, end), { window, D, URLSearchParams,
+  vm.runInNewContext(source.slice(begin, end), { window, D, URLSearchParams, nodePlatform: 'darwin',
+    sessionLabel: () => 'main', tev: () => ({ emitTo: () => Promise.resolve() }), rlog() {},
     Menu: { updateInlineTracingState: enabled => state.push(enabled) } });
   return { listeners, state };
 }

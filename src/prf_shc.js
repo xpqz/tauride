@@ -1,12 +1,14 @@
 {
 // Preferences > Shortcuts
 
+  let loadedKeys;
+  let loadedEffective;
   let q; // DOM elements whose ids start with "shc_", keyed by the rest of the id
   const updDups = () => { // check for duplicates and make them show in red
     const a = q.tbl_wr.querySelectorAll('.shc_text');
     const h = {}; // h:maps keystrokes to jQuery objects
     [...a].forEach((k) => {
-      const t = k.title;
+      const t = D.canonicalShortcut(k.title);
       k.classList.toggle('shc_dup', !!h[t]) && h[t].classList.add('shc_dup');
       h[t] = k;
     });
@@ -101,6 +103,8 @@
     q.no_res.hidden = !empty;
   };
   const loadFrom = (h) => {
+    loadedKeys = { ...h };
+    loadedEffective = D.effectiveKeys(h);
     let html = '<table>';
     const { cmds } = D;
     const pfKey = (c) => `<input class=shc_val id=shc_val_${c}`
@@ -108,12 +112,12 @@
       + ' title="Sequence of commands (command code in angle brackets) to execute and/or text to type">';
     for (let i = 0; i < cmds.length; i++) {
       const x = cmds[i];
-      const [c, s, d] = x; // c:code,s:description,d:default
+      const [c, s] = x; // c:code,s:description
       html += `<tr data-code=${c}>`
         + `<td class=shc_code>${c}`
         // pfkeys show an <input> for the commands mapped to them
         + `<td>${s || pfKey(c)}`
-        + `<td id=shc_itm_${c}>${(h[c] || d).map(keyHTML).join('')}`
+        + `<td id=shc_itm_${c}>${loadedEffective[c].map(keyHTML).join('')}`
         + '<button class=shc_add title="Add shortcut"><span class="fas fa-plus"></span></button>'
         + `<td><button class=shc_rst title="Reset &quot;${c}&quot; to its defaults"><span class="fas fa-undo-alt"></span></button>`;
     }
@@ -126,17 +130,10 @@
   const updKeys = (x) => {
     const h = {};
     D.keyMap.dyalog = h;
-    for (let i = 0; i < D.cmds.length; i++) {
-      const [c,, d] = D.cmds[i];
-      const ks = x[c] || d;
-      if ((ks.length === 0) && (h[d] === c)) {
-        delete h[d];
-      } else {
-        for (let j = 0; j < ks.length; j++) {
-          h[ks[j]] = c;
-        }
-      }
-    }
+    const keys = D.effectiveKeys(x);
+    Object.keys(keys).forEach(command => {
+      keys[command].forEach(stroke => { h[stroke] = command; });
+    });
   };
   D.prf.keys(updKeys);
   D.keyMap.dyalog = {}; // temporarily set keyMap.dyalog to something
@@ -171,6 +168,7 @@
         if (p) {
           const tr = u.closest('tr');
           const c = tr.dataset.code;
+          delete loadedKeys[c];
           for (let i = 0; i < D.cmds.length; i++) {
             if (D.cmds[i][0] === c) {
               const a = tr.getElementsByClassName('shc_key');
@@ -212,18 +210,22 @@
         let shortcuts = a[i].querySelectorAll('[class^=shc_text]');
         const keys = [];
         if (shortcuts.length) {
-          shortcuts = shortcuts.forEach((e) => { keys.push(e.title); });
+          shortcuts = shortcuts.forEach((e) => { keys.push(D.canonicalShortcut(e.title)); });
         }
         h[cmdName] = keys;
       }
       for (let i = 0; i < cmds.length; i++) {
         const c = cmds[i][0];
-        const d = cmds[i][2].slice(0).sort(); // d:defaults
-        if (h[c] && JSON.stringify(h[c].sort()) === JSON.stringify(d)) delete h[c];
+        const equal = (a, b) => JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
+        if (D.mac && equal(h[c], loadedEffective[c])) {
+          if (Object.prototype.hasOwnProperty.call(loadedKeys, c)) h[c] = loadedKeys[c];
+          else delete h[c];
+        } else if (equal(h[c], cmds[i][2].map(D.canonicalShortcut))) delete h[c];
       }
       a = [''];
       for (let i = 1; i <= 48; i++) { a.push(document.getElementById(`shc_val_PF${i}`).value); }
       D.prf.keys(h); D.prf.pfkeys(a);
+      if (D.mac) loadFrom(h);
     },
     activate() { q.sc.focus(); },
   };

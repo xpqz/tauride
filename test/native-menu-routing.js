@@ -81,12 +81,14 @@ async function listenForMenuBarrier(c) {
 
 async function dispatchFromHelper(c, helper, installer, marker) {
   await c.switchToWindow(installer);
+  await focusNativeWindow(c);
   await c.execute(() => D.installMenu(D.parseMenuDSL(D.prf.menu())));
   await installedItem(c, 'AGC', installer, true);
   await c.switchToWindow(helper);
   await focusNativeWindow(c);
+  await installedItem(c, 'AGC', 'main', false);
   for (const command of Object.keys(preferences)) {
-    await clickInstalledItem(c, command, installer, true);
+    await clickInstalledItem(c, command, 'main', false);
   }
   await c.execute(async (value) => window.__TAURI__.event.emit('ui-test-menu-barrier', value), marker);
 }
@@ -96,7 +98,7 @@ async function reachedMenuBarrier(c, marker) {
     { timeout: 10000, timeoutMsg: `Menu event barrier ${marker} did not arrive` });
 }
 
-nativeTest('native checkbox menu commands change the focused first session, not the last installer', async (t) => {
+nativeTest('native checkbox commands follow the first session after focus refreshes its menu', async (t) => {
   const c = t.context.app.client;
   const first = await c.getWindowHandle();
   await setPreferences(c, { AGC: false, AGO: false, TTB: false });
@@ -104,11 +106,13 @@ nativeTest('native checkbox menu commands change the focused first session, not 
   await setPreferences(c, { AGC: true, AGO: true, TTB: true });
 
   for (const command of Object.keys(preferences)) {
+    await focusNativeWindow(c);
     await c.execute(() => D.installMenu(D.parseMenuDSL(D.prf.menu())));
     await installedItem(c, command, second, true);
     await c.switchToWindow(first);
     await focusNativeWindow(c);
-    await clickInstalledItem(c, command, second, true);
+    await installedItem(c, command, 'main', false);
+    await clickInstalledItem(c, command, 'main', false);
     await c.waitUntil(async () => (await preferenceState(c))[command],
       { timeout: 10000, timeoutMsg: `${command} did not turn on in the focused first session` });
     await installedItem(c, command, 'main', true);
@@ -117,18 +121,20 @@ nativeTest('native checkbox menu commands change the focused first session, not 
   }
 });
 
-nativeTest('native checkbox command follows the focused second session when the first installed the menu', async (t) => {
+nativeTest('native checkbox command follows the second session after focus refreshes its menu', async (t) => {
   const c = t.context.app.client;
   const first = await c.getWindowHandle();
   await setPreferences(c, { AGC: true });
   const second = await openSecondSession(c);
   await setPreferences(c, { AGC: false });
   await c.switchToWindow(first);
+  await focusNativeWindow(c);
   await c.execute(() => D.installMenu(D.parseMenuDSL(D.prf.menu())));
   await installedItem(c, 'AGC', 'main', true);
   await c.switchToWindow(second);
   await focusNativeWindow(c);
-  await clickInstalledItem(c, 'AGC', 'main', true);
+  await installedItem(c, 'AGC', second, false);
+  await clickInstalledItem(c, 'AGC', second, false);
   await c.waitUntil(async () => (await preferenceState(c)).AGC,
     { timeout: 10000, timeoutMsg: 'Allow Control did not turn on in the focused second session' });
   await installedItem(c, 'AGC', second, true);
@@ -169,6 +175,7 @@ nativeTest('native checkbox command from a floating tracer changes its owning se
   const second = await openSecondSession(c);
   await setPreferences(c, { AGC: true, AGO: true, TTB: true });
   for (const command of Object.keys(preferences)) {
+    await focusNativeWindow(c);
     await c.execute(() => D.installMenu(D.parseMenuDSL(D.prf.menu())));
     await installedItem(c, command, second, true);
     await c.switchToWindow(tracer);
@@ -179,7 +186,8 @@ nativeTest('native checkbox command from a floating tracer changes its owning se
       const state = await window.__TAURI_INTERNALS__.invoke('ui_test_window_state', { label });
       return state.focused && D.ide.wins[87001].me.hasTextFocus();
     }), { timeout: 10000, timeoutMsg: 'Floating tracer did not receive native text focus' });
-    await clickInstalledItem(c, command, second, true);
+    await installedItem(c, command, 'main', false);
+    await clickInstalledItem(c, command, 'main', false);
     t.true(await c.execute(async () => {
       const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
       const state = await window.__TAURI_INTERNALS__.invoke('ui_test_window_state', { label });
@@ -226,7 +234,7 @@ nativeTest('native checkbox commands do nothing while a helper window has focus'
   await c.switchToWindow(second);
   await reachedMenuBarrier(c, 'preferences');
   t.deepEqual(await preferenceState(c), { AGC: true, AGO: true, TTB: true });
-  for (const command of Object.keys(preferences)) await installedItem(c, command, second, true);
+  for (const command of Object.keys(preferences)) await installedItem(c, command, 'main', false);
 
   await c.switchToWindow(first);
   const handles = await c.getWindowHandles();
@@ -243,5 +251,5 @@ nativeTest('native checkbox commands do nothing while a helper window has focus'
   await c.switchToWindow(second);
   await reachedMenuBarrier(c, 'about');
   t.deepEqual(await preferenceState(c), { AGC: true, AGO: true, TTB: true });
-  for (const command of Object.keys(preferences)) await installedItem(c, command, second, true);
+  for (const command of Object.keys(preferences)) await installedItem(c, command, 'main', false);
 });

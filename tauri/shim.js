@@ -722,7 +722,13 @@
       D.refreshOutputCommandMenu();
     } else if (Menu.updateOutputCommandState) Menu.updateOutputCommandState(false);
   };
-  window.addEventListener('focus', refreshInlineMenu);
+  window.addEventListener('focus', () => {
+    refreshInlineMenu();
+    if (nodePlatform === 'darwin') {
+      tev().emitTo(sessionLabel(), 'ride-menu-refresh')
+        .catch((e) => rlog('error', 'menu refresh failed:', e));
+    }
+  });
   window.addEventListener('DOMContentLoaded', () => {
     window.__TAURI__.webviewWindow.getCurrentWebviewWindow().listen('ride-inline-menu-refresh', refreshInlineMenu);
     refreshInlineMenu();
@@ -743,13 +749,16 @@
   } else if (!pageType || pageType === 'editor') {
     window.addEventListener('DOMContentLoaded', () => {
       const sessionWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+      if (!pageType) sessionWindow.listen('ride-menu-refresh', () => {
+        if (window.D && D.ide && D.ide.updMenu) D.ide.updMenu();
+      });
       sessionWindow.listen('ride-clear-visible-history', () => {
         if (window.D && D.ide) D.ide.CVH();
       });
       sessionWindow.listen('ride-session-menu', ({ payload: command }) => {
-        if (window.D && D.ide && D.commands && D.commands[command]) {
-          D.commands[command]((D.ide.focusedWin || {}).me);
-        }
+        if (!(window.D && D.ide && D.commands && D.commands[command])) return;
+        if (D.focusedShortcutCommands.includes(command)) D.runFocusedCommand(command);
+        else D.commands[command]((D.ide.focusedWin || {}).me);
       });
     });
   }
@@ -786,7 +795,7 @@
     .filter((it) => it.visible !== false)
     .map((it, i) => {
       const semanticCommand = app && [
-        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'IT',
+        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'FX', 'SI', 'RP', 'QCP', 'TGC', 'RD', 'IT',
         'ITL', 'ITF', 'ITR', 'ITA', 'ITRES', 'ITPL', 'ITPF', 'ITPR', 'ITPA',
         'BXO', 'BXN', 'BXMIN', 'BXMID', 'BXMAX', 'BXQ', 'BXH',
         'RWO', 'RWL', 'RWC', 'RWW', 'RWFO', 'RWF0', 'RWF1', 'RWF2', 'RWF3',

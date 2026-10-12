@@ -74,7 +74,7 @@ D.cmds = [
   ['ER', 'Execute line',            ['Enter']],
   ['EXP','Expand selection',        [D.mac?'Shift+Option+Up':'Shift+Alt+Up']],
   ['FD', 'Forward or Redo',         ['Ctrl+Shift+Enter']],
-  ['FX', 'Fix the current function',[]],
+  ['FX', 'Fix the current function',D.mac?['Cmd+S']:[]],
   ['HLP','Help',                    ['F1']],
   ['IT', 'Inline Tracing',          ['Ctrl+Alt+Enter']],
   ...D.inlineTracingViews.map(([code, label]) => [code, `Inline Tracing: ${label}`, []]),
@@ -92,12 +92,12 @@ D.cmds = [
   ['POE','Pause on Error',          []],
   ['PRF','Show preferences',        D.mac?['Cmd+,']:[]],
   ['PV' ,'Previous match',          []], 
-  ['QCP','Quick Command Palette',   []], 
+  ['QCP','Quick Command Palette',   D.mac?['Cmd+Shift+P']:[]],
   ['QIT','Quit',                    [D.mac?'Cmd+Q':'Ctrl+Q']],
   ['QT', 'Close window (and lose changes)',['Shift+Escape']],
-  ['RD', 'Reformat',                ['NumPad_Divide']],
+  ['RD', 'Reformat',                D.mac?['Shift+Option+F','NumPad_Divide']:['NumPad_Divide']],
   ['RDO', 'Redo',                   [D.mac?'Shift+Cmd+Z':'Ctrl+Y']],
-  ['RP', 'Replace',                 []],
+  ['RP', 'Replace',                 D.mac?['Cmd+Option+F']:[]],
   ['RL', 'Right Limit',             ['End']],
   ['RWO','Rows: Off',               []],
   ['RWL','Rows: Extend',            []],
@@ -110,14 +110,14 @@ D.cmds = [
   ['RM', 'Continue execution of this thread', []],
   ['UAT','Unpause all paused threads',[]],
   ['SA', 'Select All',              [D.mac?'Cmd+A':'Ctrl+A']],
-  ['SC', 'Search',                  ['Ctrl+F']],
-  ['SI', 'Strong interrupt',        []],
+  ['SC', 'Search',                  [D.mac?'Cmd+F':'Ctrl+F']],
+  ['SI', 'Strong interrupt',        D.mac?['Ctrl+C']:[]],
   ['SBR','Toggle status bar',       []],
   ['SSW','Toggle status window',    []],
   ['STL','Skip to line',            []],
   ['TB', 'Tab between windows',     ['Ctrl+Tab']],
   ['TC', 'Trace line',              ['Ctrl+Enter']],
-  ['TGC','Toggle comment',          []],
+  ['TGC','Toggle comment',          D.mac?['Cmd+/']:[]],
   ['TIP','Show value tip',          []],
   ['TL', 'Toggle localisation',     ['Ctrl+Up']],
   ['TO', 'Toggle fold',             []],
@@ -127,7 +127,7 @@ D.cmds = [
   ['TFR', 'Refresh threads',        []],
   ['UND', 'Undo',                   [D.mac?'Cmd+Z':'Ctrl+Z']],
   ['VAL','Evaluate selection or name under cursor',[]],
-  ['WI', 'Weak interrupt',          ['Ctrl+PauseBreak']],
+  ['WI', 'Weak interrupt',          D.mac?[]:['Ctrl+PauseBreak']],
   ['WSE','Toggle workspace explorer',[]],
   ['ZM', 'Toggle maximise editor',  []],
   ['ZMI','Increase font size',      D.mac?['Cmd+=','Cmd+Shift+=']:['Ctrl+=','Ctrl+Shift+=']],
@@ -183,3 +183,34 @@ D.cmds = [
   ['PF48','',                       ['Ctrl+Shift+F12']],
   /* eslint-enable */
 ];
+
+D.focusedShortcutCommands = ['FX', 'SI', 'SC', 'RP', 'QCP', 'TGC', 'RD'];
+D.canonicalShortcut = (stroke) => {
+  if (!D.mac) return stroke;
+  const parts = stroke.replace(/\+(.)/g, '\n$1').split('\n');
+  const key = parts.pop();
+  const aliases = { Meta: 'Cmd', Alt: 'Option', Win: 'Ctrl' };
+  const modifiers = parts.map(part => aliases[part] || part);
+  return ['Ctrl', 'Cmd', 'Shift', 'Option'].filter(part => modifiers.includes(part))
+    .concat(key).join('+');
+};
+D.effectiveKeys = (preferences = D.prf.keys()) => {
+  const keys = {};
+  if (!D.mac) {
+    D.cmds.forEach(([command, , defaults]) => { keys[command] = preferences[command] || defaults; });
+    return keys;
+  }
+  const owners = {};
+  const own = command => Object.prototype.hasOwnProperty.call(preferences, command);
+  D.cmds.forEach(([command, , defaults]) => {
+    keys[command] = (own(command) ? preferences[command] : defaults).map(D.canonicalShortcut);
+    if (!own(command)) keys[command].forEach(stroke => { owners[stroke] = command; });
+  });
+  D.cmds.forEach(([command]) => {
+    if (own(command)) keys[command].forEach(stroke => { owners[stroke] = command; });
+  });
+  Object.keys(keys).forEach(command => {
+    keys[command] = keys[command].filter(stroke => owners[stroke] === command);
+  });
+  return keys;
+};

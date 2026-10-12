@@ -32,7 +32,8 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
 }
 
 fn installed_menu_command_item<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<MenuItemKind<R>, String> {
-    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC", "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA",
+    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC", "FX", "SI", "RP", "QCP", "TGC", "RD",
+        "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA",
         "BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH", "RWO", "RWL", "RWC", "RWW", "RWFO",
         "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5", "RWF6", "RWF7", "RWF8", "RWF9", "RWQ", "RWH"].contains(&command) { return Err("Unsupported test menu command".into()); }
     let menu = app.menu().ok_or("No application menu")?;
@@ -166,6 +167,16 @@ pub async fn ui_test_keys(app: AppHandle, window: WebviewWindow, keys: Vec<Strin
     send_keys(keys)
 }
 
+fn character_key(ch: char) -> Key {
+    #[cfg(target_os = "macos")]
+    match ch {
+        '/' => return Key::Other(0x2c),
+        ',' => return Key::Other(0x2b),
+        _ => {}
+    }
+    Key::Unicode(ch)
+}
+
 fn send_keys(keys: Vec<String>) -> Result<(), String> {
     // Enigo releases held modifiers on Drop, including after an input error.
     let mut input = native_input()?;
@@ -182,7 +193,7 @@ fn send_keys(keys: Vec<String>) -> Result<(), String> {
             } else if ('\u{e000}'..='\u{f8ff}').contains(&ch) {
                 return Err(format!("Unsupported WebDriver key U+{:04X}", ch as u32));
             } else if !modifiers.is_empty() || ch.is_ascii_lowercase() || ch.is_ascii_digit() {
-                input.key(Key::Unicode(ch), Direction::Click).map_err(input_error)?;
+                input.key(character_key(ch), Direction::Click).map_err(input_error)?;
             } else {
                 input.text(&ch.to_string()).map_err(input_error)?;
             }
@@ -246,5 +257,25 @@ pub async fn ui_test_move_to(window: WebviewWindow, x: f64, y: f64) -> Result<()
         let screen_x = f64::from(origin.x) + x * scale;
         let screen_y = f64::from(origin.y) + y * scale;
         native_input()?.move_mouse(screen_x.round() as i32, screen_y.round() as i32, Coordinate::Abs).map_err(input_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn modified_punctuation_uses_physical_keys() {
+        assert_eq!(character_key('/'), Key::Other(0x2c));
+        assert_eq!(character_key(','), Key::Other(0x2b));
+        assert_eq!(character_key('s'), Key::Unicode('s'));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn other_platform_character_mapping_is_unchanged() {
+        assert_eq!(character_key('/'), Key::Unicode('/'));
+        assert_eq!(character_key(','), Key::Unicode(','));
     }
 }

@@ -159,15 +159,19 @@ test('missing monadic operands remain valid inline views', async (t) => {
   t.true(await c.execute(() => D.ide.canInspectInline()), 'no operand is not unsupported inline tracing');
 });
 
-async function nativeItem(c, command, enabled, dispatch = false) {
+async function nativeItem(c, command, enabled, dispatch = false, owner) {
   let id;
   await c.waitUntil(async () => {
     try {
       id = await c.execute((code, state, click) => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
-        { command: code, expectedEnabled: state, dispatch: click }), command, enabled, dispatch);
-      return true;
+        { command: code, expectedEnabled: state, dispatch: click }), command, enabled, false);
+      return !owner || id.startsWith(`app:${owner}:`);
     } catch (_) { return false; }
-  }, { timeout: 10000, timeoutMsg: `${command} did not reach enabled=${enabled}` });
+  }, { timeout: 10000, timeoutMsg: `${command} did not reach enabled=${enabled}${owner ? ` for ${owner}` : ''}` });
+  if (dispatch) {
+    id = await c.execute((code, state) => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
+      { command: code, expectedEnabled: state, dispatch: true }), command, enabled);
+  }
   return id;
 }
 
@@ -186,20 +190,20 @@ nativeTest('native inspections follow ready and busy session focus and reject he
   await beginInline(c);
   await c.execute(() => D.installMenu(D.parseMenuDSL(D.prf.menu())));
   await focus(c);
-  t.true((await nativeItem(c, 'ITL', true)).startsWith(`app:${second}:`));
+  t.true((await nativeItem(c, 'ITL', true, false, second)).startsWith(`app:${second}:`));
   await c.execute(() => D.ide.exec(['⎕DL 20'], 0));
   await wait(c, () => D.ide.promptType === 0);
-  await nativeItem(c, 'ITL', false);
+  await nativeItem(c, 'ITL', false, false, second);
   await c.switchToWindow(first); await focus(c);
-  const installed = await nativeItem(c, 'ITL', true, true);
-  t.true(installed.startsWith(`app:${second}:`), 'focus refresh preserves the installed global menu');
+  const installed = await nativeItem(c, 'ITL', true, true, first);
+  t.true(installed.startsWith(`app:${first}:`), 'focus installs the owning session menu');
   await wait(c, () => Object.values(D.ide.wins).some(w => w.specialWindow === 16));
   await c.switchToWindow(second);
   await focus(c);
-  await nativeItem(c, 'ITL', false);
+  await nativeItem(c, 'ITL', false, false, second);
   t.false(await c.execute(() => Object.values(D.ide.wins).some(w => w.specialWindow === 16)),
     'busy last installer never receives the first session command');
-  await c.switchToWindow(first);
+  await c.switchToWindow(first); await focus(c);
   const handles = await c.getWindowHandles();
   await c.execute(async () => {
     window.inlineMenuBarrier = false;
@@ -209,7 +213,7 @@ nativeTest('native inspections follow ready and busy session focus and reject he
   await c.waitUntil(async () => (await c.getWindowHandles()).length > handles.length, { timeout: 10000 });
   const helper = (await c.getWindowHandles()).find(handle => !handles.includes(handle));
   await c.switchToWindow(helper); await focus(c);
-  await nativeItem(c, 'ITR', false, true);
+  await nativeItem(c, 'ITR', false, true, first);
   await c.execute(() => window.__TAURI__.event.emit('ui-test-inline-menu-barrier'));
   await c.switchToWindow(first);
   await wait(c, () => window.inlineMenuBarrier);
@@ -237,7 +241,8 @@ nativeTest('native inspection from a floating tracer reaches its owning interpre
   await c.execute(() => D.installMenu(D.parseMenuDSL(D.prf.menu())));
   await c.switchToWindow(floating); await focus(c);
   await c.execute(token => D.ide.wins[token].focus(), id);
-  t.true((await nativeItem(c, 'ITR', true, true)).startsWith(`app:${second}:`));
+  t.true((await nativeItem(c, 'ITR', true, true, first)).startsWith(`app:${first}:`),
+    'the floating tracer installs its owning session menu');
   await c.switchToWindow(first);
   await wait(c, () => Object.values(D.ide.wins).some(w => w.specialWindow === 17));
   const aspectId = await c.execute(() => Object.values(D.ide.wins).find(w => w.specialWindow === 17).id);
@@ -259,7 +264,7 @@ nativeTest('native inspection from a floating tracer reaches its owning interpre
   t.deepEqual(await aspectToolbar(c, aspectId), { hidden: true, top: 0, fillsPane: true },
     'floating preference changes keep its aspect toolbar hidden');
   await c.execute(token => D.ide.wins[token].focus(), aspectId);
-  await nativeItem(c, 'IT', true, true);
+  await nativeItem(c, 'IT', true, true, first);
   await c.switchToWindow(floating);
   await wait(c, token => D.ide.wins[token].HIGHLIGHT.colStart === 4 && D.ide.wins[token].me.hasTextFocus(), id);
   t.true(await c.execute(async () => {

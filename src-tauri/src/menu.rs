@@ -96,10 +96,20 @@ pub fn popup_menu<R: Runtime>(window: WebviewWindow<R>, items: Vec<Item>) -> Res
 
 /// Electron's Menu.setApplicationMenu: the menu bar on macOS.
 #[tauri::command]
-pub fn set_app_menu<R: Runtime>(app: tauri::AppHandle<R>, items: Vec<Item>) -> Result<(), String> {
+pub fn set_app_menu<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    window: WebviewWindow<R>,
+    mut items: Vec<Item>,
+) -> Result<(), String> {
+    let Some(focused) = app.webview_windows().into_values()
+        .find(|window| window.is_focused().unwrap_or(false)) else { return Ok(()); };
+    if !owns_focused_window(window.label(), focused.label()) { return Ok(()); }
+    let url = focused.url().map_err(|e| e.to_string())?;
+    filter_edit_accelerators(&mut items, &url);
     let built = build(&app, &items).map_err(|e| e.to_string())?;
     let refs: Vec<&dyn IsMenuItem<R>> = built.iter().map(|c| c.as_ref()).collect();
     let menu = Menu::with_items(&app, &refs).map_err(|e| e.to_string())?;
+    if !focused.is_focused().map_err(|e| e.to_string())? { return Ok(()); }
     app.set_menu(menu.clone()).map_err(|e| e.to_string())?;
     // macOS lists the open windows in its Window menu and adds its search
     // field to the Help menu. This must follow set_menu, which creates the
@@ -136,6 +146,35 @@ fn is_session_page(url: &tauri::Url) -> bool {
     matches!(url.path(), "" | "/" | "/index.html")
         && url.query_pairs().find(|(key, _)| key == "type")
             .map(|(_, value)| value == "editor").unwrap_or(true)
+}
+
+fn owns_focused_window(owner: &str, focused: &str) -> bool {
+    let owner = crate::win::id_of(owner);
+    let focused = crate::win::id_of(focused);
+    crate::win::is_session_window(owner)
+        && crate::win::session_of(owner) == crate::win::session_of(focused)
+}
+
+fn allow_edit_accelerator(command: &str, url: &tauri::Url) -> bool {
+    is_session_page(url) || (command == "SC" && matches!(url.path(), "/about.html" | "/log.html"))
+}
+
+fn filter_edit_accelerators(items: &mut [Item], url: &tauri::Url) {
+    for item in items {
+        if let Some(command) = focused_edit_command(&item.id).or_else(|| session_menu_command(&item.id)) {
+            if !allow_edit_accelerator(command, url) {
+                item.enabled = false;
+                item.accelerator = None;
+            }
+        }
+        if let Some(children) = &mut item.submenu { filter_edit_accelerators(children, url); }
+    }
+}
+
+fn focused_edit_command(id: &str) -> Option<&str> {
+    if !id.starts_with("app:") { return None; }
+    let command = id.rsplit(':').next()?;
+    ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD"].contains(&command).then_some(command)
 }
 
 const INLINE_INSPECTIONS: &[&str] = &["ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA"];
@@ -231,6 +270,15 @@ pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
             }
         }
     }
+    if let Some(command) = focused_edit_command(id) {
+        if let Some(window) = app.webview_windows().into_values()
+            .find(|window| window.is_focused().unwrap_or(false)) {
+            if window.url().map(|url| is_session_page(&url)).unwrap_or(false) {
+                let _ = window.emit_to(window.label(), "ride-session-menu", command);
+            }
+        }
+        return;
+    }
     if id.starts_with("ctx:") || id.starts_with("app:") {
         let _ = app.emit("ride-menu", id);
     }
@@ -240,6 +288,75 @@ pub fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn configurable_editing_and_interrupt_commands_route_independently_of_menu_owner() {
+        for code in ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD"] {
+            for owner in ["main", "w1000001", "w1000012"] {
+                assert_eq!(focused_edit_command(&format!("app:{owner}:7:3:2:{code}")), Some(code));
+            }
+        }
+        assert_eq!(focused_edit_command("ctx:7:3:FX"), None);
+        assert_eq!(focused_edit_command("app:main:1:2:PRF"), None);
+    }
+
+    #[test]
+    fn owning_main_installs_the_menu_for_its_floating_and_helper_windows() {
+        for focused in ["main", "w12", "w50"] { assert!(owns_focused_window("main", focused)); }
+        assert!(owns_focused_window("w1000001", "w1000012"));
+        assert!(!owns_focused_window("main", "w1000001"));
+        assert!(!owns_focused_window("w1000001", "w12"));
+        assert!(!owns_focused_window("w12", "w12"));
+    }
+
+    #[test]
+    fn helpers_release_contextual_accelerators_but_preserve_diagnostic_find() {
+        let preferences = tauri::Url::parse("http://tauri.localhost/index.html?type=prf").unwrap();
+        let diagnostic = tauri::Url::parse("http://tauri.localhost/about.html").unwrap();
+        let session = tauri::Url::parse("http://tauri.localhost/index.html?type=editor").unwrap();
+        for command in ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD"] {
+            assert!(!allow_edit_accelerator(command, &preferences));
+            assert_eq!(allow_edit_accelerator(command, &diagnostic), command == "SC");
+            assert!(allow_edit_accelerator(command, &session));
+        }
+    }
+
+    #[test]
+    fn helper_menus_release_inline_and_output_accelerators_in_nested_custom_menus() {
+        let commands: Vec<_> = ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD", "IT", "AGC", "AGO", "TTB"]
+            .into_iter().chain(INLINE_INSPECTIONS.iter().copied()).chain(OUTPUT_COMMANDS.iter().copied()).collect();
+        for page in ["http://tauri.localhost/index.html?type=prf", "http://tauri.localhost/about.html",
+            "http://tauri.localhost/log.html", "http://tauri.localhost/index.html?type=editor&winId=12"] {
+            let url = tauri::Url::parse(page).unwrap();
+            let item = |command: &str| Item {
+                id: format!("app:main:7:3:{command}"), label: command.into(), kind: "normal".into(),
+                checked: false, enabled: true, submenu: None,
+                accelerator: Some("Ctrl+Alt+Enter".into()), role: None,
+            };
+            let mut items = vec![Item { submenu: Some(commands.iter().map(|command| item(command)).collect()),
+                ..item("Custom") }, item("CP")];
+            filter_edit_accelerators(&mut items, &url);
+            for (command, item) in commands.iter().zip(items[0].submenu.as_ref().unwrap()) {
+                let allowed = is_session_page(&url) || (*command == "SC" && matches!(url.path(), "/about.html" | "/log.html"));
+                assert_eq!(item.enabled, allowed, "{page}: {command} enabled state");
+                assert_eq!(item.accelerator.is_some(), allowed, "{page}: {command} accelerator");
+            }
+            assert!(items[1].enabled, "clipboard commands remain available");
+            assert!(items[1].accelerator.is_some());
+        }
+    }
+
+    #[test]
+    fn editing_commands_accept_session_and_floating_pages_and_reject_helpers() {
+        for url in ["http://tauri.localhost/", "http://tauri.localhost/index.html",
+            "http://tauri.localhost/index.html?type=editor&winId=12"] {
+            assert!(is_session_page(&tauri::Url::parse(url).unwrap()));
+        }
+        for url in ["http://tauri.localhost/index.html?type=prf", "http://tauri.localhost/about.html",
+            "http://tauri.localhost/log.html", "http://tauri.localhost/status.html",
+            "http://tauri.localhost/dialog.html"] {
+            assert!(!is_session_page(&tauri::Url::parse(url).unwrap()));
+        }
+    }
     #[test]
     fn inline_commands_route_semantically_regardless_of_installing_session() {
         for command in ["IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA"] {

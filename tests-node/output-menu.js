@@ -92,7 +92,8 @@ function focusHooks(type, D) {
   const window = { location: { search: type ? `?type=${type}` : '' }, D,
     __TAURI__: { webviewWindow: { getCurrentWebviewWindow: () => ({ listen() {} }) } },
     addEventListener(name, callback) { listeners[name] = callback; } };
-  vm.runInNewContext(source.slice(begin, end), { window, D, URLSearchParams,
+  vm.runInNewContext(source.slice(begin, end), { window, D, URLSearchParams, nodePlatform: 'darwin',
+    sessionLabel: () => 'main', tev: () => ({ emitTo: () => Promise.resolve() }), rlog() {},
     Menu: { updateInlineTracingState() {}, updateOutputCommandState: enabled => state.push(enabled) } });
   return { listeners, state };
 }
@@ -214,7 +215,8 @@ test('semantic output dispatch supplies the focused floating editor rather than 
   const end = source.indexOf('\n      });', begin) + '\n      });'.length;
   const handlers = {};
   const calls = [];
-  const D = { ide: { focusedWin: { me: { id: 'floating-editor' } } }, commands: {} };
+  const D = { focusedShortcutCommands: ['FX', 'SI', 'SC', 'RP', 'QCP', 'TGC', 'RD'],
+    ide: { focusedWin: { me: { id: 'floating-editor' } } }, commands: {} };
   for (const code of Object.keys(commands)) D.commands[code] = me => calls.push([code, me]);
   vm.runInNewContext(source.slice(begin, end), { window: { D }, D,
     sessionWindow: { listen: (name, callback) => { handlers[name] = callback; } } });
