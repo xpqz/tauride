@@ -68,6 +68,10 @@
           });
         }, 100);
       });
+      rm.on('outputCommandState', (available) => {
+        ide.outputCommandAvailable = available;
+        ide.refreshOutputCommandState();
+      });
       rm.on('inlineInspectionState', (available) => {
         ide.inlineInspectionAvailable = available;
         ide.refreshInlineInspectionState();
@@ -196,6 +200,7 @@
         const wp = new D.IPC_WindowProxy(bwId, socket);
         srv.emit(socket, 'caption', D.ide.caption);
         srv.emit(socket, 'inlineInspectionState', D.ide.canInspectInline());
+        srv.emit(socket, 'outputCommandState', D.ide.canRunOutputCommand());
         D.pwins.push(wp);
         D.IPC_LinkEditor();
       });
@@ -212,6 +217,10 @@
         const w = D.ide.wins[id];
         D.ide.focusedWin = w;
         w && (w.focusTS = +new Date());
+      });
+      srv.on('runOutputCommand', ([code, id]) => {
+        const w = D.ide.wins[id];
+        w && D.ide.runOutputCommand(code, w.me);
       });
       srv.on('openInlineInspection', ([aspect, id]) => {
         const w = D.ide.wins[id];

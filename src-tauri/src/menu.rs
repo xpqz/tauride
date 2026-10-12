@@ -138,36 +138,46 @@ fn is_session_page(url: &tauri::Url) -> bool {
             .map(|(_, value)| value == "editor").unwrap_or(true)
 }
 
+const INLINE_INSPECTIONS: &[&str] = &["ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA"];
+const OUTPUT_COMMANDS: &[&str] = &["BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH",
+    "RWO", "RWL", "RWC", "RWW", "RWFO", "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5",
+    "RWF6", "RWF7", "RWF8", "RWF9", "RWQ", "RWH"];
+
 fn session_menu_command(id: &str) -> Option<&str> {
     if !id.starts_with("app:") { return None; }
     let command = id.rsplit(':').next()?;
-    ["AGC", "AGO", "TTB", "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF",
-        "ITPR", "ITPA"].contains(&command).then_some(command)
+    (["AGC", "AGO", "TTB", "IT"].contains(&command)
+        || INLINE_INSPECTIONS.contains(&command) || OUTPUT_COMMANDS.contains(&command)).then_some(command)
 }
 
-fn set_inline_enabled<R: Runtime>(items: Vec<MenuItemKind<R>>, enabled: bool) -> tauri::Result<()> {
+fn set_commands_enabled<R: Runtime>(items: Vec<MenuItemKind<R>>, enabled: bool, commands: &[&str]) -> tauri::Result<()> {
     for item in items {
-        let inspection = session_menu_command(item.id().as_ref())
-            .is_some_and(|command| command.starts_with("IT") && command != "IT");
-        if inspection {
+        let matching = session_menu_command(item.id().as_ref()).is_some_and(|command| commands.contains(&command));
+        if matching {
             if let Some(normal) = item.as_menuitem() { normal.set_enabled(enabled)?; }
         }
-        if let Some(submenu) = item.as_submenu() { set_inline_enabled(submenu.items()?, enabled)?; }
+        if let Some(submenu) = item.as_submenu() { set_commands_enabled(submenu.items()?, enabled, commands)?; }
+    }
+    Ok(())
+}
+
+fn update_commands_menu<R: Runtime>(window: WebviewWindow<R>, enabled: bool, commands: &[&str]) -> Result<(), String> {
+    if !window.is_focused().map_err(|e| e.to_string())? { return Ok(()); }
+    let enabled = enabled && window.url().map(|url| is_session_page(&url)).unwrap_or(false);
+    if let Some(menu) = window.app_handle().menu() {
+        set_commands_enabled(menu.items().map_err(|e| e.to_string())?, enabled, commands).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn update_inline_tracing_menu<R: Runtime>(
-    window: WebviewWindow<R>,
-    enabled: bool,
-) -> Result<(), String> {
-    if !window.is_focused().map_err(|e| e.to_string())? { return Ok(()); }
-    let enabled = enabled && window.url().map(|url| is_session_page(&url)).unwrap_or(false);
-    if let Some(menu) = window.app_handle().menu() {
-        set_inline_enabled(menu.items().map_err(|e| e.to_string())?, enabled).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+pub fn update_inline_tracing_menu<R: Runtime>(window: WebviewWindow<R>, enabled: bool) -> Result<(), String> {
+    update_commands_menu(window, enabled, INLINE_INSPECTIONS)
+}
+
+#[tauri::command]
+pub fn update_output_command_menu<R: Runtime>(window: WebviewWindow<R>, enabled: bool) -> Result<(), String> {
+    update_commands_menu(window, enabled, OUTPUT_COMMANDS)
 }
 
 /// App-wide menu event handler: forwards popup-menu clicks to the webviews.
@@ -243,6 +253,19 @@ mod tests {
         for command in ["AGC", "AGO", "TTB"] {
             assert_eq!(session_menu_command(&format!("app:main:1:0:{command}")), Some(command));
         }
+    }
+
+    #[test]
+    fn output_commands_route_semantically_regardless_of_installing_session() {
+        for command in ["BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH", "RWO", "RWL",
+            "RWC", "RWW", "RWFO", "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5", "RWF6",
+            "RWF7", "RWF8", "RWF9", "RWQ", "RWH"] {
+            for owner in ["main", "w1000001", "w1000012"] {
+                assert_eq!(session_menu_command(&format!("app:{owner}:42:3:1:{command}")), Some(command));
+            }
+        }
+        assert_eq!(session_menu_command("app:main:1:0:RWF10"), None);
+        assert_eq!(session_menu_command("ctx:2:0:BXN"), None);
     }
 
     #[test]

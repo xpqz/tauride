@@ -718,6 +718,9 @@
     if ((!pageType || pageType === 'editor') && window.D && D.refreshInlineTracingMenu) {
       D.refreshInlineTracingMenu();
     } else Menu.updateInlineTracingState(false);
+    if ((!pageType || pageType === 'editor') && window.D && D.refreshOutputCommandMenu) {
+      D.refreshOutputCommandMenu();
+    } else if (Menu.updateOutputCommandState) Menu.updateOutputCommandState(false);
   };
   window.addEventListener('focus', refreshInlineMenu);
   window.addEventListener('DOMContentLoaded', () => {
@@ -785,6 +788,9 @@
       const semanticCommand = app && [
         'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'IT',
         'ITL', 'ITF', 'ITR', 'ITA', 'ITRES', 'ITPL', 'ITPF', 'ITPR', 'ITPA',
+        'BXO', 'BXN', 'BXMIN', 'BXMID', 'BXMAX', 'BXQ', 'BXH',
+        'RWO', 'RWL', 'RWC', 'RWW', 'RWFO', 'RWF0', 'RWF1', 'RWF2', 'RWF3',
+        'RWF4', 'RWF5', 'RWF6', 'RWF7', 'RWF8', 'RWF9', 'RWQ', 'RWH',
       ].includes(it.rideCommand);
       const id = `${prefix}:${i}${semanticCommand ? `:${it.rideCommand}` : ''}`;
       const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
@@ -834,6 +840,10 @@
     static updateInlineTracingState(enabled) {
       if (nodePlatform !== 'darwin') return;
       invoke('update_inline_tracing_menu', { enabled }).catch((e) => rlog('error', 'inline menu update failed:', e));
+    }
+    static updateOutputCommandState(enabled) {
+      if (nodePlatform !== 'darwin') return;
+      invoke('update_output_command_menu', { enabled }).catch((e) => rlog('error', 'output menu update failed:', e));
     }
     static getApplicationMenu() { return null; }
   }

@@ -1,15 +1,22 @@
 // two menu implementations -- one native and one in html
 // (Tauri builds, which set window.__RIDE__, use the html one except on macOS)
 D.refreshInlineTracingMenu = () => {
-  D.refreshInlineTracingItems && D.refreshInlineTracingItems();
+  D.refreshMenuItems && D.refreshMenuItems();
   if (D.el && D.mac && window.__RIDE__ && D.el.Menu.updateInlineTracingState) {
     const enabled = !!(D.ide && D.ide.canInspectInline && D.ide.canInspectInline());
     D.el.Menu.updateInlineTracingState(enabled);
   }
 };
+D.refreshOutputCommandMenu = () => {
+  D.refreshMenuItems && D.refreshMenuItems();
+  if (D.el && D.mac && window.__RIDE__ && D.el.Menu.updateOutputCommandState) {
+    const enabled = !!(D.ide && D.ide.canRunOutputCommand && D.ide.canRunOutputCommand());
+    D.el.Menu.updateOutputCommandState(enabled);
+  }
+};
 D.installMenu = function Menu(mx) {
   const updates = [];
-  D.refreshInlineTracingItems = () => { updates.forEach((update) => { update(); }); };
+  D.refreshMenuItems = () => { updates.forEach((update) => { update(); }); };
   if (D.el && (!window.__RIDE__ || D.mac)) {
     const pk = D.prf.keys();
     const k = {}; // k:a map of all keyboard shortcuts
@@ -47,7 +54,9 @@ D.installMenu = function Menu(mx) {
         hideothers: 0,
         showall: 'unhide',
       };
-      const r = x[''].replace(/[& ]/g, '').toLowerCase();
+      const r = x.cmd
+        ? { CT: 'cut', CP: 'copy', PT: 'paste' }[x.cmd]
+        : x[''].replace(/[& ]/g, '').toLowerCase();
       if (r in roles) h.role = roles[r] || r;
       if (x.items) {
         h.submenu = new D.el.Menu();

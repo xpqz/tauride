@@ -32,7 +32,9 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
 }
 
 fn installed_menu_command_item<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<MenuItemKind<R>, String> {
-    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC", "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA"].contains(&command) { return Err("Unsupported test menu command".into()); }
+    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC", "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA",
+        "BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH", "RWO", "RWL", "RWC", "RWW", "RWFO",
+        "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5", "RWF6", "RWF7", "RWF8", "RWF9", "RWQ", "RWH"].contains(&command) { return Err("Unsupported test menu command".into()); }
     let menu = app.menu().ok_or("No application menu")?;
     let items = menu.items().map_err(|e| e.to_string())?;
     menu_command_item(items, command)?.ok_or_else(|| format!("No application menu item for {command}"))

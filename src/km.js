@@ -369,6 +369,19 @@
   D.inlineTracingViews.forEach(([code, , aspect]) => {
     D.commands[code] = (me) => D.ide.openInlineInspection(aspect, me);
   });
+  Object.keys(D.outputCommands).forEach((code) => {
+    D.commands[code] = (me) => {
+      if (!D.ide) return;
+      if (D.el && !window.__RIDE__) {
+        const focused = D.el.BrowserWindow.getFocusedWindow();
+        if (!focused) return;
+        const url = new URL(focused.webContents.getURL());
+        const type = url.searchParams.get('type');
+        if (!url.pathname.endsWith('/index.html') || (type && type !== 'editor')) return;
+      }
+      D.ide.runOutputCommand(code, me);
+    };
+  });
   D.inlineTracingMenuItems = (me) => {
     const items = D.inlineTracingViews.map(([code, label]) => ({
       label,

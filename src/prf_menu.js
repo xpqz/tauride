@@ -49,6 +49,11 @@
         isEnabled: () => !!(D.ide && D.ide.canInspectInline && D.ide.canInspectInline()),
       };
     });
+    Object.keys(D.outputCommands).forEach((code) => {
+      extraOpts[code] = {
+        isEnabled: () => !!(D.ide && D.ide.canRunOutputCommand && D.ide.canRunOutputCommand()),
+      };
+    });
     const stk = [{ ind: -1, items: [] }];
     const lines = md.split('\n');
     const cb = (cmd) => () => {
