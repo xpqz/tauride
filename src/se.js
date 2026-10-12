@@ -264,9 +264,65 @@ D.Se.prototype = {
   isInputLine(line) { // line in []IO 1 (to match monaco)
     return this.lines[line - 1] && [11, 14].includes(this.lines[line - 1].type);
   },
+  captureDraft() {
+    const model = this.me.getModel();
+    const inserted = Object.keys(this.dirty).filter((l) => this.dirty[l] === 0).map(Number);
+    const count = model.getLineCount() - inserted.length;
+    const tail = Object.keys(this.dirty).map(Number)
+      .find((l) => l - inserted.filter((i) => i < l).length >= count) || model.getLineCount();
+    return {
+      lines: model.getLinesContent(),
+      dirty: { ...this.dirty },
+      selections: this.me.getSelections(),
+      tail,
+    };
+  },
+  restoreDraft(draft, truncate) {
+    const se = this;
+    const model = se.me.getModel();
+    let last = model.getLineCount();
+    const partial = se.lines.length && se.lines.at(-1).text.at(-1) !== '\n'
+      && !!model.getLineContent(last) && draft.dirty[draft.tail] != null;
+    if (partial) {
+      const column = model.getLineMaxColumn(last);
+      se.edit([{ range: new monaco.Range(last, column, last, column), text: '\n' }]);
+      last += 1;
+    }
+    const expired = [];
+    Object.keys(draft.dirty).map(Number).forEach((line) => {
+      if (line < draft.tail && draft.dirty[line] === 0
+        && line - truncate - expired.length <= 1) expired.push(line);
+    });
+    const shifted = (line) => (line >= draft.tail ? line - draft.tail + last
+      : line - truncate - expired.filter((i) => i < line).length);
+    Object.keys(draft.dirty).forEach((key) => {
+      const line = shifted(+key);
+      if (line < 1 || expired.includes(+key)) return;
+      const text = draft.lines[+key - 1];
+      if (draft.dirty[key] === 0 && +key !== draft.tail) {
+        const previous = line - 1;
+        const column = model.getLineMaxColumn(previous);
+        se.edit([{ range: new monaco.Range(previous, column, previous, column), text: `\n${text}` }]);
+        if (+key < draft.tail) last += 1;
+      } else {
+        se.edit([{ range: new monaco.Range(line, 1, line, model.getLineMaxColumn(line)), text }]);
+      }
+      se.dirty[line] = +key === draft.tail
+        ? (partial ? 0 : '      ') : draft.dirty[key];
+    });
+    se.me.setSelections(draft.selections.map((s) => (
+      new monaco.Selection(
+        Math.max(1, shifted(s.selectionStartLineNumber)), s.selectionStartColumn,
+        Math.max(1, shifted(s.positionLineNumber)), s.positionColumn,
+      )
+    )));
+    if (se.isReadOnly) se.cursorPosition = se.me.getPosition();
+    se.setDecorations();
+  },
   add(s, type) { // append text to session
     const se = this;
     const { me } = se;
+    const draft = se.preserveDraft && se.captureDraft();
     se.isReadOnly && me.updateOptions({ readOnly: false });
     se.undoChanges();
     const model = me.getModel();
@@ -333,6 +389,7 @@ D.Se.prototype = {
     me.revealLine(ll);
     me.setScrollLeft(0);
     se.btm = Math.max(se.dom.clientHeight + me.getScrollTop(), me.getTopForLineNumber(ll));
+    if (draft) se.restoreDraft(draft, truncate);
     se.isReadOnly && me.updateOptions({ readOnly: true });
     model._commandManager.clear();
     se.setDecorations();
@@ -373,6 +430,7 @@ D.Se.prototype = {
     const t = model.getLineContent(line);
     const wasMultiLine = se.promptType === 3;
     const promptChanged = se.promptType !== x;
+    const selections = se.preserveDraft && me.getSelections();
     se.promptType = x;
     se.isReadOnly = !x;
     me.updateOptions({
@@ -398,7 +456,9 @@ D.Se.prototype = {
       if (x) delete se.cursorPosition;
       else se.cursorPosition = me.getPosition();
     }
-    if ((x === 1 && this.dirty[line] == null) || ![0, 1, 3, 4].includes(x)) {
+    if (se.preserveDraft) {
+      me.setSelections(selections);
+    } else if ((x === 1 && this.dirty[line] == null) || ![0, 1, 3, 4].includes(x)) {
       const isEmpty = /^\s*$/.test(t);
       const text = isEmpty ? ssp : t;
       se.edit(

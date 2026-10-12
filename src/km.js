@@ -365,6 +365,20 @@
       });
     }
   }
+  D.commands.IT = (me) => D.ide.stepInline(me);
+  D.inlineTracingViews.forEach(([code, , aspect]) => {
+    D.commands[code] = (me) => D.ide.openInlineInspection(aspect, me);
+  });
+  D.inlineTracingMenuItems = (me) => {
+    const items = D.inlineTracingViews.map(([code, label]) => ({
+      label,
+      enabled: !!(D.ide && D.ide.canInspectInline && D.ide.canInspectInline()),
+      click: () => { D.commands[code](me); },
+    }));
+    items.splice(4, 0, { type: 'separator' });
+    items.unshift({ label: 'Next Primitive', click: () => { D.commands.IT(me); } }, { type: 'separator' });
+    return items;
+  };
   const C = [
   //  0     1     2     3     4     5     6     7     8     9     A     B     C     D     E     F
     'QT', 'ER', 'TB', 'BT', 'EP', 'UC', 'DC', 'RC', 'LC', 'US', 'DS', 'RS', 'LS', 'UL', 'DL', 'RL', // 00

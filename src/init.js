@@ -75,6 +75,7 @@ const Console = console;
                   click: () => { win.STL(me); },
                   visible: tc,
                 },
+                { label: 'Inline Tracing', submenu: D.inlineTracingMenuItems(me) },
                 { type: 'separator' },
               ]);
             }

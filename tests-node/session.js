@@ -71,7 +71,7 @@ test('ordinary dialog cannot explain a save failure', () => {
   assert.equal(ide.saveRequests.get(7).explained, false);
 });
 function session() {
-  const sent = []; const ide = { promptType: 1, pending: [], getStats() {} };
+  const sent = []; const ide = { promptType: 1, pending: [], getStats() {}, refreshInlineInspectionState() {} };
   const D = { send: (name, payload) => sent.push([name, payload]) };
   vm.runInNewContext(extract('  ide.saveRequests =', '  ide.host ='), {
     ide, D, window: { __RIDE__: true, crypto: require('node:crypto').webcrypto, TextEncoder },
@@ -111,7 +111,7 @@ test('Unicode-heavy and apostrophe-heavy source remains below 450 UTF8 bytes per
 });
 test('new IDE send wrapper replaces the old IDE wrapper', () => {
   const s = session(); const oldIde = s.ide;
-  const ide = { promptType: 1, pending: [], getStats() {} };
+  const ide = { promptType: 1, pending: [], getStats() {}, refreshInlineInspectionState() {} };
   vm.runInNewContext(extract('  ide.saveRequests =', '  // The interpreter'), { ide, D: s.D });
   s.D.send('SaveChanges', { win: 9 });
   assert.equal(oldIde.saveRequests.size, 0);
