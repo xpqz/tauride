@@ -5243,7 +5243,7 @@ dependencies = [
 
 [[package]]
 name = "tauride"
-version = "4.8.1"
+version = "4.8.2"
 dependencies = [
  "base64 0.23.1",
  "enigo",
