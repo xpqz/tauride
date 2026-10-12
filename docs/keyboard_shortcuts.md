@@ -7,6 +7,10 @@ Command-Option-F replaces, Command-Shift-P opens the editor command palette,
 Command-/ toggles comments, and Shift-Option-F reformats. Command-W closes an
 editor and Command-comma opens Preferences.
 
+Weak Interrupt has no default shortcut on macOS because its Pause/Break menu
+key equivalent displays a missing glyph. The command remains in the Action menu
+and can be assigned a shortcut in Preferences.
+
 Each binding can be replaced, removed or reset in Shortcuts. Explicit custom
 bindings take precedence over defaults, and removing a managed binding also
 removes its inherited editor shortcut. The editable menu definition in
@@ -94,7 +98,7 @@ The Dyalog keyboard shortcuts that are supported by the Ride are listed below; t
 | UL | Up limit | Linux: <kbd>Ctrl</kbd> + <kbd>Home</kbd> macOS: <kbd>⌘</kbd> + <kbd>Up Arrow</kbd> Windows: <kbd>Ctrl</kbd> + <kbd>Home</kbd> | Session : Move cursor to top left corner of Session log Edit : Move cursor to top left corner of content |
 | US | Up screen | Linux: <kbd>Page Up</kbd> macOS: <kbd>Fn</kbd> + <kbd>Up Arrow</kbd> Windows: <kbd>Page Up</kbd> | Move cursor up one screen |
 | VAL* | Evaluate selection or name |  | Edit : Evaluate the selected expression or name and display the result in the Session window. |
-| WI* | Weak interrupt | <kbd>Ctrl</kbd> + <kbd>PauseBreak</kbd> | Suspend code execution at the start of the next line (generally after completing execution of the statement currently being processed) |
+| WI* | Weak interrupt | macOS: none; Windows/Linux: <kbd>Ctrl</kbd> + <kbd>PauseBreak</kbd> | Suspend code execution at the start of the next line (generally after completing execution of the statement currently being processed) |
 | WSE* | Toggle Workspace Explorer |  | Toggle display of the workspace explorer to the left of the Session window |
 | ZM* | Toggle maximise Edit window |  | Toggle active Edit window between current size and full Session size |
 | ZMI* | Increase font size | <kbd>Ctrl</kbd> + <kbd>=</kbd> or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>=</kbd> | Increase the size of the font in all the windows |

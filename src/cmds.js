@@ -83,7 +83,7 @@ D.cmds = [
   ['TFR', 'Refresh threads',        []],
   ['UND', 'Undo',                   [D.mac?'Cmd+Z':'Ctrl+Z']],
   ['VAL','Evaluate selection or name under cursor',[]],
-  ['WI', 'Weak interrupt',          ['Ctrl+PauseBreak']],
+  ['WI', 'Weak interrupt',          D.mac?[]:['Ctrl+PauseBreak']],
   ['WSE','Toggle workspace explorer',[]],
   ['ZM', 'Toggle maximise editor',  []],
   ['ZMI','Increase font size',      D.mac?['Cmd+=','Cmd+Shift+=']:['Ctrl+=','Ctrl+Shift+=']],

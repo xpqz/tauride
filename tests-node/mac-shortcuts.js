@@ -119,14 +119,14 @@ function load(mac = true, overrides = {}) {
 }
 
 const newMac = { FX: ['Cmd+S'], SI: ['Ctrl+C'], SC: ['Cmd+F'], RP: ['Cmd+Option+F'],
-  QCP: ['Cmd+Shift+P'], TGC: ['Cmd+/'], RD: ['Shift+Option+F', 'NumPad_Divide'] };
+  QCP: ['Cmd+Shift+P'], TGC: ['Cmd+/'], RD: ['Shift+Option+F', 'NumPad_Divide'], WI: [] };
 
 test('Mac defaults change only the agreed commands; Windows/Linux defaults and PF bindings stay intact', () => {
   const mac = load().D; const other = load(false).D;
   for (const [command, keys] of Object.entries(newMac)) {
     assert.deepEqual(plain(mac.cmds.find(entry => entry[0] === command)[2]), keys);
   }
-  const old = { FX: [], SI: [], SC: ['Ctrl+F'], RP: [], QCP: [], TGC: [], RD: ['NumPad_Divide'] };
+  const old = { FX: [], SI: [], SC: ['Ctrl+F'], RP: [], QCP: [], TGC: [], RD: ['NumPad_Divide'], WI: ['Ctrl+PauseBreak'] };
   for (const [command, keys] of Object.entries(old)) assert.deepEqual(plain(other.cmds.find(entry => entry[0] === command)[2]), keys);
   assert.deepEqual(plain(mac.cmds.filter(entry => /^PF/.test(entry[0]))), plain(other.cmds.filter(entry => /^PF/.test(entry[0]))));
 });
@@ -134,12 +134,15 @@ test('Mac defaults change only the agreed commands; Windows/Linux defaults and P
 test('explicit saved shortcuts and empty arrays beat new defaults, including modifier aliases and order', () => {
   const { D } = load();
   assert.equal(typeof D.effectiveKeys, 'function');
-  const resolved = D.effectiveKeys({ AC: ['Meta+S'], AO: ['Option+Shift+F'], SC: [], RP: ['Alt+Cmd+R'], SI: [], BP: ['Shift+Meta+P'] });
+  const resolved = D.effectiveKeys({ AC: ['Meta+S'], AO: ['Option+Shift+F'], SC: [], RP: ['Alt+Cmd+R'], SI: [], BP: ['Shift+Meta+P'], WI: ['Ctrl+PauseBreak'] });
   assert.deepEqual(plain(resolved.AC), ['Cmd+S']);
   assert.deepEqual(plain(resolved.FX), []);
   assert.deepEqual(plain(resolved.RD), ['NumPad_Divide']);
   assert.deepEqual(plain(resolved.SC), []);
   assert.deepEqual(plain(resolved.SI), []);
+  assert.deepEqual(plain(resolved.WI), ['Ctrl+PauseBreak'], 'saved Weak Interrupt bindings remain available');
+  assert.deepEqual(plain(D.effectiveKeys({ WI: [] }).WI), []);
+  assert.deepEqual(plain(D.effectiveKeys({ WI: ['Cmd+Shift+I'] }).WI), ['Cmd+Shift+I']);
   assert.deepEqual(plain(resolved.RP), ['Cmd+Option+R']);
   assert.deepEqual(plain(resolved.QCP), [], 'modifier order aliases must claim the same chord');
 });
