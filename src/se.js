@@ -416,6 +416,12 @@ D.Se.prototype = {
       se.taCb = se.taCb || me.onKeyDown((ke) => {
         const be = ke.browserEvent;
         const k = be.key;
+        if (D.mac) {
+          const label = D.keyMap.labels[monaco.KeyCode[ke.keyCode]];
+          const stroke = [be.ctrlKey && 'Ctrl', be.metaKey && 'Cmd',
+            be.shiftKey && 'Shift', be.altKey && 'Option', label].filter(Boolean).join('+');
+          if (label && D.keyMap.dyalog[D.canonicalShortcut(stroke)] === 'SI') return;
+        }
         if (k.length === 1 && !be.ctrlKey && !be.altKey && !be.metaKey) se.taBuffer.push(k);
         else se.taBuffer.push(be);
       });

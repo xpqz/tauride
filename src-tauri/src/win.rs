@@ -25,7 +25,7 @@ pub fn id_of(label: &str) -> u32 {
     if label == "main" { 1 } else { label.trim_start_matches('w').parse().unwrap_or(0) }
 }
 
-fn session_of(id: u32) -> u32 {
+pub fn session_of(id: u32) -> u32 {
     id / SESSION_SPAN
 }
 

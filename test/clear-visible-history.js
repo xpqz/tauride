@@ -340,7 +340,7 @@ test('clear invoked from a floating tracer leaves that editor and its focus alon
   }), { text: editorText, focused: true, textFocus: true, nativeFocus: true, tracer: true });
 });
 
-nativeTest('native View clear targets the focused session, not the last session to install a menu', async (t) => {
+nativeTest('native View clear follows the focused session after its menu is refreshed', async (t) => {
   const c = t.context.app.client;
   const first = await c.getWindowHandle();
   await runLine(c, "⎕←'first-history-86'", 'first-history-86');
@@ -353,6 +353,7 @@ nativeTest('native View clear targets the focused session, not the last session 
   await c.waitUntil(async () => c.execute(() => !!(D.ide && D.ide.wins[0]
     && D.ide.wins[0].promptType === 1 && D.ide.wins[0].me.getModel())),
   { timeout: 30000, timeoutMsg: 'Second Dyalog session did not become ready' });
+  await focusNativeWindow(c);
   await runLine(c, "⎕←'second-history-86'", 'second-history-86');
   await c.execute(() => {
     D.ide.wins[0].loadLine('      second-draft-86');
@@ -369,9 +370,14 @@ nativeTest('native View clear targets the focused session, not the last session 
 
   await c.switchToWindow(first);
   await focusNativeWindow(c);
+  await c.waitUntil(async () => {
+    const id = await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
+      { command: 'CVH', dispatch: false }));
+    return id.startsWith(`app:${first}:`);
+  }, { timeout: 10000, timeoutMsg: 'Focused first session did not refresh the View menu' });
   const dispatchedId = await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
     { command: 'CVH' }));
-  t.true(dispatchedId.startsWith(`app:${second}:`), 'the second session still owned the installed menu');
+  t.true(dispatchedId.startsWith(`app:${first}:`), 'the focused first session owns the refreshed menu');
   await c.waitUntil(async () => (await session(c)).text === '      first-draft-86',
     { timeout: 10000, timeoutMsg: 'Native View clear did not target the focused first session' });
   t.true(firstBefore.text.includes('first-history-86'));

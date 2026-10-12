@@ -714,6 +714,12 @@
   let menuSeq = 0;
   let menuEvents = null;
   const pageType = new URLSearchParams(window.location.search).get('type');
+  window.addEventListener('focus', () => {
+    if (nodePlatform === 'darwin') {
+      tev().emitTo(sessionLabel(), 'ride-menu-refresh')
+        .catch((e) => rlog('error', 'menu refresh failed:', e));
+    }
+  });
   if (pageType === 'prf') {
     window.addEventListener('DOMContentLoaded', () => {
       const preferencesWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
@@ -730,11 +736,16 @@
   } else if (!pageType || pageType === 'editor') {
     window.addEventListener('DOMContentLoaded', () => {
       const sessionWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+      if (!pageType) sessionWindow.listen('ride-menu-refresh', () => {
+        if (window.D && D.ide && D.ide.updMenu) D.ide.updMenu();
+      });
       sessionWindow.listen('ride-clear-visible-history', () => {
         if (window.D && D.ide) D.ide.CVH();
       });
       sessionWindow.listen('ride-session-menu', ({ payload: command }) => {
-        if (window.D && D.ide && D.commands && D.commands[command]) D.commands[command]();
+        if (!(window.D && D.ide && D.commands && D.commands[command])) return;
+        if (D.focusedShortcutCommands.includes(command)) D.runFocusedCommand(command);
+        else D.commands[command]();
       });
     });
   }
@@ -770,7 +781,10 @@
   const menuItems = (items, prefix, clicks = menuClicks, app = false) => items
     .filter((it) => it.visible !== false)
     .map((it, i) => {
-      const id = `${prefix}:${i}${app && ['SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB'].includes(it.rideCommand) ? `:${it.rideCommand}` : ''}`;
+      const semanticCommand = app && [
+        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'FX', 'SI', 'RP', 'QCP', 'TGC', 'RD',
+      ].includes(it.rideCommand);
+      const id = `${prefix}:${i}${semanticCommand ? `:${it.rideCommand}` : ''}`;
       const sub = it.submenu && (Array.isArray(it.submenu) ? it.submenu : it.submenu.items);
       if (!sub && it.type !== 'separator') {
         clicks.set(id, () => {

@@ -1,5 +1,22 @@
 # Keyboard Shortcuts
 
+On macOS, Tauride provides familiar defaults through **Preferences → Shortcuts**:
+Command-S fixes the edited object and keeps its editor open; Control-C sends a
+strong interrupt to the session owning the focused APL pane. Command-F finds,
+Command-Option-F replaces, Command-Shift-P opens the editor command palette,
+Command-/ toggles comments, and Shift-Option-F reformats. Command-W closes an
+editor and Command-comma opens Preferences.
+
+Each binding can be replaced, removed or reset in Shortcuts. Explicit custom
+bindings take precedence over defaults, and removing a managed binding also
+removes its inherited editor shortcut. The editable menu definition in
+**Preferences → Menu** controls which commands appear; menu shortcuts follow
+the effective key mappings. Existing custom menus are retained.
+
+Windows and Linux keep their existing defaults. Future changes should use the
+same customization system and be tested physically with users on each platform,
+including their APL input methods and keyboard layouts, before becoming defaults.
+
 The Dyalog keyboard shortcuts that are supported by the Ride are listed below; those that can be configured in the [Shortcuts tab](customising_your_session.md/#shortcuts-tab) of the Preferences dialog box are indicated with a * character.
 
 | Code | Command | Default Keystrokes | Description |
@@ -33,7 +50,7 @@ The Dyalog keyboard shortcuts that are supported by the Ride are listed below; t
 | ER* | Execute line | <kbd>Enter</kbd> | Session : Execute current line/all modified lines Edit : Insert new line Trace : Execute current line |
 | EXP* | Expand Selection | <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>Up Arrow</kbd> | Successive presses of <EXP> expand the highlighted selection Session: select the: current line entire Session log Edit: select the: current token (number, name, string, and so on) current line entire contents of window |
 | FD* | Forward or Redo | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd> | Session : Show next line in input history Edit : Reapply last change Trace : Skip current line |
-| FX* | Fix the current function |  | Edit : Fixes the function without closing the Edit window |
+| FX* | Fix the current function | macOS: Command-S | Edit : Fixes the function without closing the Edit window |
 | HLP* | Help | F1 | Display the documentation for the system command, system name, control structure keyword or primitive glyph immediately to the left of the cursor |
 | HO | <kbd>Home</kbd> cursor | Linux: <kbd>Ctrl</kbd> + <kbd>Home</kbd> macOS: <kbd>⌘</kbd> + <kbd>Up Arrow</kbd> Windows: <kbd>Ctrl</kbd> + <kbd>Home</kbd> | Session : Move cursor to top left corner of Session log Edit : Move cursor to top left corner of content |
 | JBK* | Jump back | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>J<kbd> | Edit (a class or namespace): move the cursor back to where the last double-click or Edit command (`<ED>`) was issued in the current **Edit** window. Repeatable. |
@@ -52,21 +69,21 @@ The Dyalog keyboard shortcuts that are supported by the Ride are listed below; t
 | PRF* | Show preferences |  | Display the Preferences dialog box |
 | PT | Paste | Linux: <kbd>Ctrl</kbd> + <kbd>V</kbd> macOS: <kbd>⌘</kbd> + <kbd>V</kbd> Windows: <kbd>Ctrl</kbd> + <kbd>V</kbd> | Session / Edit : Paste the text contents of the clipboard at cursor |
 | PV* | Previous match |  | Edit / Trace : When performing a Search/Replace, locate first match before current one |
-| QCP | Quick Command Palette |  | Expose the underlying (Monaco) editor command palette |
+| QCP | Quick Command Palette | macOS: Command-Shift-P | Expose the underlying (Monaco) editor command palette |
 | QIT* | Quit Session | <kbd>Ctrl</kbd> + <kbd>Q</kbd> | Terminate the Dyalog Session |
 | QT* | Close window (and lose changes) | <kbd>Shift</kbd> + <kbd>Esc</kbd> | Session : Undo changes to a previously-entered expression that has not been re-executed and advance the cursor to the next line Edit : Close without saving changes |
 | RC | Right cursor | <kbd>Right Arrow</kbd> | Move cursor right one character |
-| RD* | Reformat |  | Edit : Formats function to have correct indentation and spacing between tokens |
+| RD* | Reformat | Keypad Divide; macOS also Shift-Option-F | Edit : Formats function to have correct indentation and spacing between tokens |
 | RL | Right limit | Linux: <kbd>End</kbd> macOS: <kbd>Fn</kbd> + <kbd>Right Arrow</kbd> Windows: <kbd>End</kbd> | Move cursor to the last non-blank character on the current line. If already there, move to end of line. |
-| RP* | Replace string |  | Edit : Replace. To do this, enter `<RP>` and type the string to replace the  current search string with (see `<SC>`); enter `<ER>` to make the change. Enter `<EP>` to clear the field. |
+| RP* | Replace string | macOS: Command-Option-F | Edit : Replace. To do this, enter `<RP>` and type the string to replace the  current search string with (see `<SC>`); enter `<ER>` to make the change. Enter `<EP>` to clear the field. |
 | SA* | Select all | Linux: <kbd>Ctrl</kbd> + <kbd>A</kbd> macOS: <kbd>⌘</kbd> + <kbd>A</kbd> Windows: <kbd>Ctrl</kbd> + <kbd>A</kbd> | Select all text in the active window |
 | SBR* | Toggle Status bar |  | Toggle display of the Status bar at the bottom of the Session window and floating Edit / Trace windows. |
-| SC* | Search | <kbd>Ctrl</kbd> + <kbd>F</kbd> | Edit / Trace : Search. To do this, enter `<SC>`, type the string to search for and then enter `<ER>` to find the first occurrence of the string. Enter `<EP>` to clear the field. Also see related `<NX>`, `<PV>` and `<RP>`. |
-| SI* | Strong interrupt |  | Suspend code execution as soon as possible (generally after completing execution of the primitive currently being processed) |
+| SC* | Search | macOS: Command-F; Windows/Linux: Control-F | Edit / Trace : Search. To do this, enter `<SC>`, type the string to search for and then enter `<ER>` to find the first occurrence of the string. Enter `<EP>` to clear the field. Also see related `<NX>`, `<PV>` and `<RP>`. |
+| SI* | Strong interrupt | macOS: Control-C | Suspend code execution as soon as possible (generally after completing execution of the primitive currently being processed) |
 | STL* | Skip to line |  | Trace : Move the current execution marker to the line on which the cursor is positioned |
 | TB* | Tab between windows | <kbd>Ctrl</kbd> + <kbd>Tab</kbd> | Move to next window in loop |
 | TC* | Trace line | <kbd>Ctrl</kbd> + <kbd>Enter</kbd> | Session : If entered directly after an expression, open a Trace window for that expression (explicit trace). If there is a suspended function on the execution stack, open a Trace window for that function (naked trace). |
-| TGC* | Toggle comment |  | Session/Edit : Toggle a comment glyph at the start of the line in which the cursor is located |
+| TGC* | Toggle comment | macOS: Command-/ | Session/Edit : Toggle a comment glyph at the start of the line in which the cursor is located |
 | TIP* | Show value tips |  | For the name or glyph under or immediately before the cursor, highlight that name/glyph and display: for a name: its referent (for example, the value of a variable or the code of a function) for a glyph: the name of the glyph, the keyboard shortcut to enter it, its name and examples of its syntax, arguments and result |
 | TL* | Toggle localisation | <kbd>Ctrl</kbd> + <kbd>Up Arrow</kbd> | Edit : For tradfns, the name under the cursor is added to or removed from the list of localised names on the function's header line |
 | TO* | Toggle fold |  | Edit : Open/Close outlined blocks (by default, outlines are shown) |

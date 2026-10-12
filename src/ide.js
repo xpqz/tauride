@@ -506,6 +506,7 @@ D.IDE = function IDE(opts = {}) {
       D.installMenu(D.parseMenuDSL(D.prf.menu.getDefault()));
     }
   };
+  ide.updMenu = updMenu;
   D.prf.lbar((x) => {
     I.lb.hidden = !x;
     updTopBtm();

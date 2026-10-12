@@ -2,18 +2,19 @@
 // (Tauri builds, which set window.__RIDE__, use the html one except on macOS)
 D.installMenu = function Menu(mx) {
   if (D.el && (!window.__RIDE__ || D.mac)) {
-    const pk = D.prf.keys();
+    const pk = D.effectiveKeys();
     const k = {}; // k:a map of all keyboard shortcuts
     for (let i = 0; i < D.cmds.length; i++) {
       const [c,, d] = D.cmds[i];
-      [k[c]] = (pk[c] || d);
+      [k[c]] = pk[c] || d;
     } // c:code, d:defaults
     const render = (x) => {
       let mi;
       if (x[''] === '-') return new D.el.MenuItem({ type: 'separator' });
       const h = {
         label: x[''],
-        click: x.action,
+        click: D.mac && D.focusedShortcutCommands.includes(x.cmd)
+          ? () => D.runFocusedCommand(x.cmd) : x.action,
         rideCommand: x.cmd,
         accelerator: x.cmd && k[x.cmd] ? k[x.cmd].replace(/-(.)/g, '+$1') : null,
       };
@@ -165,13 +166,14 @@ D.installMenu = function Menu(mx) {
     });
     $(document).mousedown((e) => { $(e.target).closest('.menu').length || mFocus(null); });
     const updShcs = (h) => {
+      const keys = D.effectiveKeys(h);
       const k = {};
       for (let i = 0; i < D.cmds.length; i++) {
         const [c,, d] = D.cmds[i];
-        [k[c]] = (h[c] || d);
+        [k[c]] = keys[c] || d;
       } // c:code, d:defaults
-      $('.m-shc').each((e) => {
-        const $e = $(e.currentTarget);
+      $('.m-shc').each((_, element) => {
+        const $e = $(element);
         $e.text(k[$e.data('cmd')] || '');
       });
     };

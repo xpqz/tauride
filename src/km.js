@@ -404,11 +404,53 @@
       }
     });
   };
+  D.runFocusedCommand = (command) => {
+    if (command === 'SC' && diagnosticCommand('find')) return;
+    if (D.el && !window.__RIDE__) {
+      const focused = D.el.BrowserWindow.getFocusedWindow();
+      if (!focused) return;
+      if (focused.id !== D.el.getCurrentWindow().id) {
+        const url = new URL(focused.webContents.getURL());
+        if (/\/index\.html$/.test(url.pathname) && url.searchParams.get('type') === 'editor') {
+          focused.webContents.executeJavaScript(`D.runFocusedCommand(${JSON.stringify(command)})`);
+        }
+        return;
+      }
+    }
+    const ide = D.ide;
+    if (!ide) return;
+    const widget = command === 'SC' || command === 'RP';
+    const w = Object.values(ide.wins).find(win => win.me && win.me.hasTextFocus
+      && (win.me.hasTextFocus() || (widget && win.me.hasWidgetFocus())));
+    if (!w) return;
+    if ((command === 'SI' || command === 'FX') && (!ide.connected || ide.dead)) return;
+    if (command === 'FX' && (w.id === 0 || w.tc || w.isReadOnly || w.isReadOnlyEntity)) return;
+    if ((command === 'RD' || command === 'TGC') && w.isReadOnly) return;
+    D.commands[command] && D.commands[command](w.me);
+  };
   D.mapKeys = (ed) => {
     const { me } = ed;
+    if (D.mac && ed.keybindingsDisposed) return;
+    if (D.mac) {
+      if (!ed.keybindingDisposables) {
+        me.onDidDispose(() => {
+          ed.keybindingsDisposed = true;
+          ed.keybindingDisposables.forEach(binding => binding.dispose());
+        });
+      } else ed.keybindingDisposables.forEach(binding => binding.dispose());
+      ed.keybindingDisposables = [];
+    }
     // Monaco's dynamic keybinding service is shared by all editors.
-    const addCommand = (key, run, when) => me.addCommand(key, run,
-      `editorId == ${me.getId()}${when ? ` && (${when})` : ''}`);
+    const addCommand = (key, run, when) => {
+      const condition = `editorId == ${me.getId()}${when ? ` && (${when})` : ''}`;
+      if (!D.mac) return me.addCommand(key, run, condition);
+      const command = `ride-key-${me.getId()}-${ed.keybindingDisposables.length}`;
+      ed.keybindingDisposables.push(
+        monaco.editor.registerCommand(command, run),
+        monaco.editor.addKeybindingRules([{ command, keybinding: key, when: condition }]),
+      );
+      return command;
+    };
     const kc = monaco.KeyCode;
     const km = monaco.KeyMod;
     const ctrlcmd = {
@@ -441,7 +483,10 @@
         } else if (cmd === 'LL' || cmd === 'RL') {
           cond = '!suggestWidgetVisible && !findInputFocussed';
         } else if (nkc === kc.Escape) cond = '!suggestWidgetVisible && !editorHasMultipleSelections && !findWidgetVisible && !inSnippetMode';
-        addCommand(nkc, () => D.commands[cmd](me), cond);
+        if (D.mac && D.focusedShortcutCommands.includes(cmd)) {
+          cond = 'editorTextFocus';
+          addCommand(nkc, () => D.runFocusedCommand(cmd), cond);
+        } else addCommand(nkc, () => D.commands[cmd](me), cond);
       });
     }
     addCmd(D.keyMap.dyalogDefault);
@@ -460,7 +505,7 @@
     addCommand(kc.UpArrow, () => ed.UC(me), '!suggestWidgetVisible && !findInputFocussed');
     addCommand(kc.RightArrow, () => ed.RC(me), '!suggestWidgetVisible && !findInputFocussed');
 
-    me.addAction({
+    const skipAction = me.addAction({
       id: 'dyalog-skip-to-line',
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 0,
@@ -469,15 +514,16 @@
       label: 'Skip to line',
       run: (e) => ed.STL(e),
     });
-    me.addAction({
+    const fixAction = me.addAction({
       id: 'dyalog-fix',
       contextMenuGroupId: 'modification',
       contextMenuOrder: 0,
-      precondition: '!tracer && !session',
+      precondition: D.mac ? '!tracer && !session && !editorReadonly && editorTextFocus' : '!tracer && !session',
       keybindings: fxkbs,
       label: 'Fix',
-      run: (e) => ed.FX(e),
+      run: (e) => { if (D.mac) D.runFocusedCommand('FX'); else ed.FX(e); },
     });
+    if (D.mac) ed.keybindingDisposables.push(skipAction, fixAction);
   };
   D.remDefaultMap = () => {
     if (D.defaultMapRemoved) return;
@@ -485,6 +531,9 @@
       { command: '-editor.action.insertCursorAtEndOfEachLineSelected', keybinding: 0 },
       { command: '-editor.action.blockComment', keybinding: 0 },
       { command: '-editor.action.formatDocument', keybinding: 0 },
+      ...(D.mac ? ['actions.find', 'editor.action.startFindReplaceAction',
+        'editor.action.commentLine', 'editor.action.quickCommand']
+        .map(command => ({ command: `-${command}`, keybinding: 0 })) : []),
     ]);
   };
   const l = {
