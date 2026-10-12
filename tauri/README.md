@@ -169,7 +169,9 @@ show/hide/focus/close, size, title, run a script, print, devtools) with two
 implementations: Electron's `BrowserWindow`, and Tauri's JS window API
 (`WebviewWindow`, monitors), where windows are addressed by label (`main`,
 `w<id>`) and queries are promises. Calls on a window wait until Tauri has
-created it. A small plugin (`ride_plugin` in `lib.rs`) injects the shim into
+created it. Content-size requests preserve fullscreen and maximized window
+geometry; ordinary windows retain the queued resize and hidden-window handling.
+A small plugin (`ride_plugin` in `lib.rs`) injects the shim into
 every webview, however its window was created, reports page loads, and
 attaches `win.rs`'s handling to every window: close requests go to the page
 first (Ride's `onbeforeunload`), the main window's geometry is saved, and the

@@ -96,6 +96,7 @@
       }
 
       async resizeShown(sz, size) {
+        if (await this.ww.isFullscreen() || await this.ww.isMaximized()) return;
         await this.ww.setMinSize(size);
         await this.ww.setMaxSize(size);
         await this.ww.setSize(size);
