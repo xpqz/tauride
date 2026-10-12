@@ -483,7 +483,8 @@ D.Se.prototype = {
           const label = D.keyMap.labels[monaco.KeyCode[ke.keyCode]];
           const stroke = [be.ctrlKey && 'Ctrl', be.metaKey && 'Cmd',
             be.shiftKey && 'Shift', be.altKey && 'Option', label].filter(Boolean).join('+');
-          if (label && D.keyMap.dyalog[D.canonicalShortcut(stroke)] === 'SI') return;
+          const command = label && D.keyMap.dyalog[D.canonicalShortcut(stroke)];
+          if (command === 'SI' || (window.__RIDE__ && command === 'CLS')) return;
         }
         if (k.length === 1 && !be.ctrlKey && !be.altKey && !be.metaKey) se.taBuffer.push(k);
         else se.taBuffer.push(be);
@@ -926,7 +927,7 @@ D.Se.prototype = {
     se.btm = null;
     se.setDecorations();
   },
-  CLS() {},
+  CLS() { if (window.__RIDE__ && D.mac && this.me.hasTextFocus()) window.close(); },
   EMI() { if (this.promptType === 3) D.send('ExitMultilineInput', {}); },
   EP() { this.ide.focusMRUWin(); },
   ER() { this.exec(0); },
