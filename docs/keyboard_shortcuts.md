@@ -4,8 +4,9 @@ On macOS, Tauride provides familiar defaults through **Preferences → Shortcuts
 Command-S fixes the edited object and keeps its editor open; Control-C sends a
 strong interrupt to the session owning the focused APL pane. Command-F finds,
 Command-Option-F replaces, Command-Shift-P opens the editor command palette,
-Command-/ toggles comments, and Shift-Option-F reformats. Command-W closes an
-editor and Command-comma opens Preferences.
+Command-/ toggles comments, and Shift-Option-F reformats. Command-W closes the
+focused editor, tracer or Session. Closing a Session follows its normal window
+close confirmation and affects only that session. Command-comma opens Preferences.
 
 Weak Interrupt has no default shortcut on macOS because its Pause/Break menu
 key equivalent displays a missing glyph. The command remains in the Action menu

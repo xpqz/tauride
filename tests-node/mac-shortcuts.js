@@ -7,7 +7,7 @@ const root = process.env.TAURIDE_TEST_ROOT || path.resolve(__dirname, '..');
 const source = file => fs.readFileSync(path.join(root, file), 'utf8');
 const plain = x => JSON.parse(JSON.stringify(x));
 
-function load(mac = true, overrides = {}) {
+function load(mac = true, overrides = {}, tauri = false) {
   const handlers = new Map(); const bindings = []; const removed = []; const sent = [];
   const callbacks = {}; let next = 0;
   const prefs = { keys: overrides, pfkeys: [], kbdLocale: 'en_US', prefixKey: '`', prefixMaps: {} };
@@ -41,9 +41,10 @@ function load(mac = true, overrides = {}) {
     },
   };
   const $ = () => []; $.extend = Object.assign;
+  const closes = [];
   const context = vm.createContext({ D, monaco, navigator: { language: 'en-US' },
-    $, URL, window: {}, setTimeout() {}, console });
-  ['src/cmds.js', 'src/km.js', 'src/prf_shc.js'].forEach(file => vm.runInContext(source(file), context));
+    $, URL, window: { __RIDE__: tauri, close: () => closes.push('current') }, setTimeout() {}, console });
+  ['src/cmds.js', 'src/km.js', 'src/prf_shc.js', 'src/se.js', 'src/ed.js'].forEach(file => vm.runInContext(source(file), context));
   function pane(id, options = {}) {
     const w = Object.assign({ id, tc: false, isReadOnly: false, isReadOnlyEntity: false, ide: D.ide,
       FX() {}, RD() {}, STL() {}, DC() {}, UC() {}, RC() {}, indentOrComplete() {},
@@ -115,8 +116,120 @@ function load(mac = true, overrides = {}) {
       },
     };
   }
-  return { D, monaco, bindings, removed, sent, pane, remap, register, preferencesUI };
+  return { D, monaco, bindings, removed, sent, closes, context, pane, remap, register, preferencesUI };
 }
+
+test('Mac Tauri Session Close uses the current window close path only with Session text focus', () => {
+  for (const [mac, tauri] of [[true, true], [true, false], [false, true]]) {
+    const api = load(mac, {}, tauri);
+    const session = api.pane(0, { CLS: api.D.Se.prototype.CLS });
+    api.D.quit = () => { throw new Error('Session Close must not quit all sessions'); };
+    api.D.commands.CLS(session.me);
+    assert.equal(api.closes.length, mac && tauri ? 1 : 0);
+    session.focus(false, true);
+    api.D.commands.CLS(session.me);
+    session.focus(false);
+    api.D.commands.CLS(session.me);
+    assert.equal(api.closes.length, mac && tauri ? 1 : 0, 'search fields and helper inputs cannot close a stale Session');
+    session.focus(true);
+    api.D.ide.connected = false; api.D.ide.dead = true;
+    api.D.commands.CLS(session.me);
+    assert.equal(api.closes.length, mac && tauri ? 2 : 0, 'a disconnected Session can still close');
+  }
+});
+
+test('Session Close follows removal, rebinding and reset while editor and tracer Close retain onClose', () => {
+  const api = load(true, {}, true);
+  const session = api.pane(0, { CLS: api.D.Se.prototype.CLS });
+  api.D.prf.keys(api.D.mapKeys.bind(null, session.w));
+  const cmdW = 2048 | api.monaco.KeyCode.KeyW;
+  const cmdY = 2048 | api.monaco.KeyCode.KeyY;
+  api.remap({}); session.press(cmdW); assert.equal(api.closes.length, 1);
+  api.remap({ CLS: [] }); session.press(cmdW); assert.equal(api.closes.length, 1);
+  api.remap({ CLS: ['Cmd+Y'] });
+  session.press(cmdW); assert.equal(api.closes.length, 1, 'the default binding is removed');
+  session.press(cmdY); assert.equal(api.closes.length, 2);
+  api.remap({});
+  session.press(cmdY); assert.equal(api.closes.length, 2, 'the old custom binding is removed');
+  session.press(cmdW); assert.equal(api.closes.length, 3);
+  session.focus(false);
+  for (const tc of [false, true]) {
+    let closed = 0;
+    const editor = api.pane(tc ? 5 : 4, { tc, CLS: api.D.Ed.prototype.CLS, onClose() { closed += 1; } });
+    api.D.mapKeys(editor.w); editor.press(cmdW);
+    assert.equal(closed, 1, 'editor/tracer Close still calls its existing onClose');
+    assert.equal(api.closes.length, 3, 'editor/tracer Close cannot close the Session window');
+    editor.focus(false);
+  }
+});
+
+test('Session Close retains cancellation, spawned Exit, external Disconnect and disconnected window closure', () => {
+  for (const spawned of [true, false]) {
+    const api = load(true, {}, true);
+    const session = api.pane(0, { CLS: api.D.Se.prototype.CLS });
+    const prompts = []; let answer = false; let destroys = 0;
+    api.D.spawned = spawned;
+    api.D.wins = { 0: { histWrite() {} } };
+    api.D.wm = { current: () => ({ native: {} }) };
+    api.D.el = {};
+    api.D.prf.sqp(1);
+    api.context.$.confirm = (message, title, callback) => { prompts.push(message); callback(answer); };
+    api.context.process = { env: {} };
+    api.context.document = { title: 'Session Close' };
+    api.context.setTimeout = callback => callback();
+    api.context.thisWindow = () => ({ destroy() { destroys += 1; } });
+    const init = source('src/init.js');
+    vm.runInContext(init.slice(init.indexOf('    window.onbeforeunload ='), init.indexOf("    let platform =")), api.context);
+    const shim = source('tauri/shim.js');
+    vm.runInContext(shim.slice(shim.indexOf('  const closeWindow ='), shim.indexOf("  window.addEventListener('DOMContentLoaded'", shim.indexOf('  const closeWindow ='))), api.context);
+    api.D.commands.CLS(session.me);
+    assert.deepEqual(prompts, [spawned ? 'Quit Dyalog APL. Are you sure?' : 'Disconnect from interpreter. Are you sure?']);
+    assert.equal(api.sent.length, 0); assert.equal(destroys, 0);
+    assert.equal(api.D.ide.closing, undefined, 'Cancel leaves the Session usable');
+    answer = true; api.D.commands.CLS(session.me);
+    assert.deepEqual(plain(api.sent), spawned ? [['Exit', { code: 0 }]]
+      : [['Disconnect', { message: 'User shutdown request' }]]);
+    if (spawned) {
+      assert.equal(destroys, 0, 'spawned sessions wait for the interpreter to disconnect');
+      api.D.ide.connected = 0;
+      api.context.window.close();
+    }
+    assert.equal(destroys, 1);
+    assert.equal(prompts.length, 2, 'the final disconnected close does not ask again');
+  }
+});
+
+test('busy Mac Tauri Session cannot replay a canceled Close chord after the prompt returns', () => {
+  for (const tauri of [true, false]) {
+    const api = load(true, {}, tauri); api.remap({});
+    const se = { taBuffer: [] }; let capture;
+    const text = source('src/se.js');
+    const start = text.indexOf('      se.taCb = se.taCb || me.onKeyDown');
+    const end = text.indexOf('    } else {', start);
+    vm.runInNewContext(text.slice(start, end), {
+      se, D: api.D, monaco: api.monaco, window: api.context.window,
+      me: { onKeyDown(callback) { capture = callback; return { dispose() {} }; } },
+    });
+    const chord = letter => ({ keyCode: api.monaco.KeyCode[`Key${letter.toUpperCase()}`],
+      browserEvent: { key: letter, ctrlKey: false, altKey: false, metaKey: true, shiftKey: false } });
+    capture(chord('w'));
+    assert.equal(se.taBuffer.length, tauri ? 0 : 1, 'the already executed Close must not be queued again');
+    se.taBuffer.length = 0;
+    api.remap({ CLS: ['Cmd+Y'] });
+    capture(chord('y'));
+    assert.equal(se.taBuffer.length, tauri ? 0 : 1, 'custom Close uses its effective binding');
+    se.taBuffer.length = 0;
+    capture(chord('w'));
+    assert.deepEqual(plain(se.taBuffer), [chord('w').browserEvent], 'the old default retains normal typeahead');
+    se.taBuffer.length = 0;
+    api.remap({ CLS: [] }); capture(chord('y'));
+    const textKey = { browserEvent: { key: 'a' } };
+    const pfKey = { browserEvent: { key: 'F8' } };
+    capture(textKey); capture(pfKey);
+    assert.deepEqual(plain(se.taBuffer), [chord('y').browserEvent, 'a', pfKey.browserEvent],
+      'unbound Close, ordinary text and PF keys retain normal typeahead');
+  }
+});
 
 const newMac = { FX: ['Cmd+S'], SI: ['Ctrl+C'], SC: ['Cmd+F'], RP: ['Cmd+Option+F'],
   QCP: ['Cmd+Shift+P'], TGC: ['Cmd+/'], RD: ['Shift+Option+F', 'NumPad_Divide'], WI: [] };
@@ -267,7 +380,8 @@ test('busy Session typeahead excludes the effective Strong Interrupt binding wit
   const start = text.indexOf('      se.taCb = se.taCb || me.onKeyDown');
   const end = text.indexOf('    } else {', start);
   vm.runInNewContext(text.slice(start, end), {
-    se, D: api.D, monaco: api.monaco, me: { onKeyDown(callback) { capture = callback; return { dispose() {} }; } },
+    se, D: api.D, monaco: api.monaco, window: api.context.window,
+    me: { onKeyDown(callback) { capture = callback; return { dispose() {} }; } },
   });
   const key = (code, value, modifiers = {}) => ({ keyCode: api.monaco.KeyCode[code],
     browserEvent: { key: value, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...modifiers } });

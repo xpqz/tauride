@@ -139,8 +139,11 @@ Tauride again opens a session window in the running one (single-instance
 plugin). Session k's window has id k * 1e6 + 1 (label `main` for the
 first), and its helper windows (preferences, dialog, status, floating
 editors, About, ...) ids in its range, so helpers route their messages to
-their own session window and close with it. Quitting ends a session; the
-app exits when its last session window closes. Window titles follow the
+their own session window and close with it. Closing a session window ends that
+session; on macOS, Command-W does this when the Session pane has text focus,
+using the same confirmation and interpreter shutdown as the window's close button.
+Command-Q quits all sessions. The macOS app stays open after its last session
+window closes; on other platforms the app exits. Window titles follow the
 page's `document.title` (the session caption).
 
 On macOS, Observe Session, Allow Control and Show Trace/Edit Toolbar act on
