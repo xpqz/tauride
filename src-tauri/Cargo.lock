@@ -5361,7 +5361,7 @@ dependencies = [
 
 [[package]]
 name = "tauride"
-version = "4.8.3"
+version = "4.8.4"
 dependencies = [
  "base64 0.23.1",
  "block2",

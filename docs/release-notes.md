@@ -1,6 +1,6 @@
 # Tauride release notes
 
-Cumulative changes since the fork of Dyalog Ride 4.8, through 13 October 2026 and [PR #142](https://github.com/xpqz/tauride/pull/142). This covers merged `main`, including changes after the 4.8.3 installer release. [Full change history](https://github.com/xpqz/tauride/compare/307003ef...fab90d4a).
+Cumulative changes since the fork of Dyalog Ride 4.8, through Tauride 4.8.4 (13 October 2026), including [PR #142](https://github.com/xpqz/tauride/pull/142). [Full change history](https://github.com/xpqz/tauride/compare/307003ef...fab90d4a).
 
 ## Desktop and distribution
 
