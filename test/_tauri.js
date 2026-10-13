@@ -4,6 +4,7 @@ const path = require('node:path');
 const net = require('node:net');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const { StringDecoder } = require('node:string_decoder');
 
 const root = path.resolve(__dirname, '..');
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,6 +35,7 @@ function isolatedEnv(userData, port, options = {}, inherited = process.env) {
   Object.assign(env, {
     XDG_CONFIG_HOME: userData,
     APPDATA: userData,
+    ENABLE_CEF: inherited.ENABLE_CEF === undefined ? '0' : inherited.ENABLE_CEF,
     LOG_FILE: path.join(userData, 'dyalog*.dlf'),
     TAURI_WEBDRIVER_PORT: String(port),
     TAURI_UI_TEST_STDIN: '1',
@@ -53,22 +55,25 @@ async function freePort() {
   return port;
 }
 
-async function waitForStatus(port, child, timeout = 30000) {
+async function waitForStatus(port, child, timeout = 30000, checkFailure = () => {}) {
   const deadline = Date.now() + timeout;
   let lastStatus = 'no status response';
   while (Date.now() < deadline) {
+    checkFailure();
     if (child.exitCode !== null || child.signalCode !== null) throw new Error('Tauride exited before WebDriver became ready');
     try {
       const response = await fetch(`http://127.0.0.1:${port}/status`, { signal: AbortSignal.timeout(1000) });
       const body = await response.text();
       lastStatus = `HTTP ${response.status}: ${body.slice(0, 500)}`;
-      if (response.ok && JSON.parse(body).value.ready) return;
+      if (response.ok && JSON.parse(body).value.ready) { checkFailure(); return; }
     } catch (error) {
       const cause = error.cause || error;
       lastStatus = `${error.message}${cause.code ? ` (${cause.code})` : ''}`;
     }
+    checkFailure();
     await delay(100);
   }
+  checkFailure();
   throw new Error(`Tauride WebDriver did not become ready on port ${port}; build with --features ui-tests; last status: ${lastStatus}`);
 }
 
@@ -136,15 +141,13 @@ function snapshotScript() {
     catch (error) { done({ ok: false, error: error.message || String(error) }); }`;
 }
 
-async function readStartupSnapshot(port, timeoutMs = 10000) {
-  const bound = Math.max(1, Math.min(10000, Math.floor(timeoutMs)));
-  const snapshot = await directEval(port, snapshotScript(), bound, bound);
+function validateStartupSnapshot(snapshot) {
   if (!snapshot || typeof snapshot.documentReady !== 'string' || typeof snapshot.ride !== 'boolean'
     || typeof snapshot.windowManager !== 'boolean' || typeof snapshot.splashVisible !== 'boolean'
     || !Number.isSafeInteger(snapshot.activeTabs) || snapshot.activeTabs < 0
     || !(snapshot.session === null || snapshot.session && typeof snapshot.session.promptType === 'number'
       && typeof snapshot.session.model === 'boolean')) {
-    throw new Error('Invalid startup snapshot from DirectEval');
+    throw new Error('Invalid startup snapshot from WebDriver');
   }
   return snapshot;
 }
@@ -165,6 +168,9 @@ class TauriApplication {
     this.client = null;
     this.child = null;
     this.startupStartedAt = Date.now();
+    this.startupStderr = '';
+    this.startupStderrDecoder = new StringDecoder('utf8');
+    this.nativeDialogSignal = new Promise(resolve => { this.reportNativeDialog = resolve; });
     this.markStartupPhase('not started');
   }
 
@@ -180,13 +186,42 @@ class TauriApplication {
       phaseElapsedMs: Date.now() - this.startupPhaseAt,
       pid: this.child && this.child.pid || null, running: this.isRunning(),
       exitCode: this.child && this.child.exitCode, signalCode: this.child && this.child.signalCode,
+      nativeDialog: this.nativeDialog || null,
       lastFrontendAtMs: this.lastFrontendAtMs ?? null, lastFrontend: this.lastFrontend || null };
   }
 
-  readStartupSnapshot(timeoutMs) { return readStartupSnapshot(this.driverPort, timeoutMs); }
+  observeStartupStderr(data) {
+    if (this.startupPhase === 'ready' || this.nativeDialog) return;
+    this.startupStderr = (this.startupStderr + this.startupStderrDecoder.write(data));
+    let newline;
+    while ((newline = this.startupStderr.indexOf('\n')) >= 0) {
+      const line = this.startupStderr.slice(0, newline);
+      this.startupStderr = this.startupStderr.slice(newline + 1);
+      if (line.length > 20000 || !line.startsWith('[ui-test-dialog] ')) continue;
+      let dialog;
+      try { dialog = JSON.parse(line.slice('[ui-test-dialog] '.length)); } catch (_) { continue; }
+      if (!dialog || typeof dialog.message !== 'string') continue;
+      this.nativeDialog = dialog;
+      this.nativeDialogError = new Error(`Unexpected native dialog during startup: ${dialog.message}`
+        + (dialog.detail ? `\n${dialog.detail}` : ''));
+      this.reportNativeDialog(this.nativeDialogError);
+      this.startupStderr = '';
+      return;
+    }
+    this.startupStderr = this.startupStderr.slice(-20000);
+  }
 
-  async readFrontendSnapshot(timeoutMs) {
-    const snapshot = await this.readStartupSnapshot(timeoutMs);
+  checkStartupDialog() {
+    if (this.nativeDialogError) throw this.nativeDialogError;
+  }
+
+  async startupRead(read) {
+    this.checkStartupDialog();
+    return Promise.race([Promise.resolve().then(read), this.nativeDialogSignal.then(error => { throw error; })]);
+  }
+
+  async readFrontendSnapshot() {
+    const snapshot = validateStartupSnapshot(await this.startupRead(() => this.client.execute(frontendSnapshot)));
     this.lastFrontend = snapshot;
     this.lastFrontendAtMs = Date.now() - this.startupStartedAt;
     return snapshot;
@@ -195,7 +230,8 @@ class TauriApplication {
   async waitForFrontend(predicate, message, timeout = 30000) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      const snapshot = await this.readFrontendSnapshot(Math.min(10000, deadline - Date.now()));
+      this.checkStartupDialog();
+      const snapshot = await this.readFrontendSnapshot();
       if (Date.now() < deadline && predicate(snapshot)) return;
       await delay(Math.max(0, Math.min(100, deadline - Date.now())));
     }
@@ -241,20 +277,23 @@ class TauriApplication {
       let spawnError;
       this.child.once('error', (error) => { spawnError = error; });
       for (const stream of [this.child.stdout, this.child.stderr]) {
-        stream.on('data', (data) => { this.output = (this.output + data).slice(-24000); });
+        stream.on('data', (data) => {
+          this.output = (this.output + data).slice(-24000);
+          if (stream === this.child.stderr) this.observeStartupStderr(data);
+        });
       }
       await delay(0);
       if (spawnError) throw spawnError;
       this.markStartupPhase('WebDriver status readiness');
-      await waitForStatus(port, this.child, this.options.timeout);
+      await waitForStatus(port, this.child, this.options.timeout, () => this.checkStartupDialog());
       const { remote } = require('webdriverio');
       this.markStartupPhase('WebDriver session creation');
-      this.client = await remote({
+      this.client = await this.startupRead(() => remote({
         hostname: '127.0.0.1', port, path: '/',
         capabilities: { browserName: 'wry', 'wdio:tauriServiceOptions': { windowLabel: 'main' } },
         connectionRetryCount: 0, connectionRetryTimeout: 10000,
         waitforTimeout: 10000, logLevel: 'silent',
-      });
+      }));
       this.markStartupPhase('frontend readiness');
       await this.waitForFrontend(state => state.ride && state.windowManager && state.documentReady === 'complete',
         'Tauride main webview did not load');
@@ -301,14 +340,15 @@ class TauriApplication {
   }
 
   async cleanup() {
-    if (this.isRunning() && this.client) {
+    if (this.isRunning() && this.nativeDialog && this.child.stdin) this.child.stdin.end();
+    if (this.isRunning() && this.client && !this.nativeDialog) {
       try { await this.client.execute(() => window.__TAURI_INTERNALS__.invoke('quit_all')); } catch (_) { /* Closing the webview can end the command. */ }
     }
     const wait = async (ms) => {
       const deadline = Date.now() + ms;
       while (this.isRunning() && Date.now() < deadline) await delay(50);
     };
-    if (this.client) await wait(5000);
+    if (this.client) await wait(this.nativeDialog ? 2000 : 5000);
     if (this.isRunning() && this.child.stdin) {
       this.child.stdin.end();
       await wait(2000);
@@ -344,4 +384,4 @@ async function readClipboard() {
 }
 TauriApplication.prototype.readClipboard = readClipboard;
 
-module.exports = { TauriApplication, resolveDyalog, binaryPath, isolatedEnv, waitForStatus, readClipboard, sampleNativeProcess, frontendSnapshot, readStartupProbe, readStartupSnapshot };
+module.exports = { TauriApplication, resolveDyalog, binaryPath, isolatedEnv, waitForStatus, readClipboard, sampleNativeProcess, frontendSnapshot, readStartupProbe };

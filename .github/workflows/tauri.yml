@@ -67,6 +67,12 @@ jobs:
           RIDE_TEST_BINARY: src-tauri/target/ui-tests/debug/tauride
         run: xvfb-run --auto-servernum dbus-run-session -- npm run test:connection
 
+      - name: Tauri interpreter startup failure regression
+        if: runner.os == 'Linux'
+        env:
+          RIDE_TEST_BINARY: src-tauri/target/ui-tests/debug/tauride
+        run: xvfb-run --auto-servernum dbus-run-session -- node tools/test-tauri.js test/startup-failure.js
+
       # Runs beforeBuildCommand (npm run css && node tauri/stage.js) first.
       # tauri.bundle.conf.json turns bundling on for CI only.
       - name: Build

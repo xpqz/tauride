@@ -33,6 +33,37 @@ fn buttons(a: &Value) -> Vec<String> {
         .unwrap_or_else(|| vec!["OK".into()])
 }
 
+#[cfg(feature = "ui-tests")]
+fn message_trace(a: &Value) -> Value {
+    fn bounded(text: &str, limit: usize) -> String {
+        let mut end = text.len().min(limit);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let mut result = text[..end].to_owned();
+        if end < text.len() {
+            result.push('…');
+        }
+        result
+    }
+    let text = |key, limit| bounded(a.get(key).and_then(Value::as_str).unwrap_or(""), limit);
+    let labels: Vec<String> = a.get("buttons").and_then(Value::as_array).into_iter().flatten()
+        .filter_map(Value::as_str).take(8).map(|label| bounded(label, 64)).collect();
+    serde_json::json!({
+        "window": a.get("window").and_then(Value::as_u64),
+        "type": text("type", 32), "title": text("title", 256),
+        "message": text("message", 1024), "detail": text("detail", 1024),
+        "buttons": if labels.is_empty() { vec!["OK".into()] } else { labels },
+        "defaultId": a.get("defaultId").and_then(Value::as_u64),
+        "cancelId": a.get("cancelId").and_then(Value::as_u64)
+    })
+}
+
+#[cfg(feature = "ui-tests")]
+fn trace_message(a: &Value) {
+    eprintln!("[ui-test-dialog] {}", message_trace(a));
+}
+
 /// showMessageBox options: type, title, message, detail, buttons, defaultId,
 /// cancelId, checkboxLabel, checkboxChecked. Returns {response,
 /// checkboxChecked}; closing the dialog answers cancelId.
@@ -83,6 +114,8 @@ pub fn message<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
     if debug {
         eprintln!("[dialog] message box running");
     }
+    #[cfg(feature = "ui-tests")]
+    trace_message(a);
     let r = d.run();
     if debug {
         eprintln!("[dialog] message box answered {r:?}");
@@ -204,6 +237,8 @@ pub fn message<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
     c.pszVerificationText = check.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
 
     let (mut pressed, mut checked) = (0i32, 0i32);
+    #[cfg(feature = "ui-tests")]
+    trace_message(a);
     let hr = unsafe { TaskDialogIndirect(&c, &mut pressed, std::ptr::null_mut(), &mut checked) };
     if hr < 0 {
         return Err(sync::err("EIO", format!("TaskDialogIndirect failed: {hr:#x}")));
@@ -310,6 +345,8 @@ pub fn message<R: Runtime>(_app: &AppHandle<R>, a: &Value) -> sync::Result {
             b.setState(if a.get("checkboxChecked").and_then(Value::as_bool).unwrap_or(false) { 1 } else { 0 });
         }
     }
+    #[cfg(feature = "ui-tests")]
+    trace_message(a);
     let r = alert.runModal();
     let response = (r - NSAlertFirstButtonReturn).max(0) as u64;
     let checked = alert.suppressionButton().map_or(false, |b| b.state() == 1);
@@ -324,4 +361,42 @@ pub fn message<R: Runtime>(_app: &AppHandle<R>, _a: &Value) -> sync::Result {
 #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn file<R: Runtime>(_app: &AppHandle<R>, _a: &Value) -> sync::Result {
     Err(sync::err("ENOSYS", "native file dialogs are only implemented on Linux, macOS and Windows"))
+}
+
+#[cfg(all(test, feature = "ui-tests"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_trace_whitelists_modal_options_and_preserves_diagnostic_text() {
+        let trace = message_trace(&json!({
+            "window": 7, "type": "error", "title": "Startup", "message": "Unable to connect",
+            "detail": "Interpreter exited\nwith status 1", "buttons": ["Retry", "Cancel"],
+            "defaultId": 0, "cancelId": 1, "password": "never log", "environment": { "SECRET": "never log" }
+        }));
+        assert_eq!(trace, json!({
+            "window": 7, "type": "error", "title": "Startup", "message": "Unable to connect",
+            "detail": "Interpreter exited\nwith status 1", "buttons": ["Retry", "Cancel"], "defaultId": 0, "cancelId": 1
+        }));
+        assert!(!trace.to_string().contains("never log"));
+        assert_eq!(message_trace(&json!({}))["buttons"], json!(["OK"]));
+    }
+
+    #[test]
+    fn message_trace_bounds_unicode_and_serialized_control_characters() {
+        let trace = message_trace(&json!({
+            "title": "⍳".repeat(1000), "type": "error".repeat(100),
+            "message": "\u{1}".repeat(10000), "detail": "⍺".repeat(10000),
+            "buttons": vec!["x".repeat(1000); 20],
+            "window": "unexpected".repeat(10000)
+        }));
+        assert!(trace["title"].as_str().unwrap().len() <= 259);
+        assert!(trace["message"].as_str().unwrap().len() <= 1027);
+        assert!(trace["detail"].as_str().unwrap().len() <= 1027);
+        assert_eq!(trace["buttons"].as_array().unwrap().len(), 8);
+        assert!(trace["buttons"].as_array().unwrap().iter().all(|button| button.as_str().unwrap().len() <= 67));
+        assert!(trace["window"].is_null());
+        assert!(trace.to_string().len() < 16000);
+        assert!(!trace.to_string().contains('\n'));
+    }
 }

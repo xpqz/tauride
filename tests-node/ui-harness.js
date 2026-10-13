@@ -16,7 +16,7 @@ test('test app environment isolates preferences and interpreter logs without cha
     });
     assert.deepEqual(env, {
       PATH: '/usr/bin', HOME: '/home/user', XDG_CONFIG_HOME: '/tmp/test-profile',
-      APPDATA: '/tmp/test-profile', LOG_FILE: path.join('/tmp/test-profile', 'dyalog*.dlf'),
+      APPDATA: '/tmp/test-profile', ENABLE_CEF: '0', LOG_FILE: path.join('/tmp/test-profile', 'dyalog*.dlf'),
       TAURI_WEBDRIVER_PORT: '4567', TAURI_UI_TEST_STDIN: '1',
     });
   }
@@ -206,11 +206,11 @@ test('startup diagnostics cache the last successful frontend snapshot when the n
   const app = new TauriApplication({ src: 'cn' });
   const snapshot = { documentReady: 'complete', ride: true, windowManager: true,
     splashVisible: false, activeTabs: 1, session: { promptType: 1, model: true } };
-  app.readStartupSnapshot = async () => snapshot;
+  app.client = { execute: async () => snapshot };
   app.markStartupPhase('frontend readiness');
   assert.deepEqual(await app.readFrontendSnapshot(), snapshot);
   app.markStartupPhase('splash readiness');
-  app.readStartupSnapshot = async () => { throw new Error('execute callback timed out'); };
+  app.client.execute = async () => { throw new Error('execute callback timed out'); };
   await assert.rejects(app.readFrontendSnapshot(), /execute callback timed out/);
   const state = app.startupState();
   assert.equal(state.phase, 'splash readiness');
@@ -353,8 +353,8 @@ test('failure-only direct probe HTTP abort bounds a stalled diagnostic endpoint'
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 });
 
-async function withDirectEvalFixture(scenario, action) {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'tauride-direct-fixture-'));
+async function withStartupFixture(scenario, action) {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'tauride-startup-fixture-'));
   const binary = path.join(fixture, 'fixture-app');
   const events = path.join(fixture, 'requests.jsonl');
   fs.writeFileSync(binary, `#!${process.execPath}
@@ -373,11 +373,18 @@ async function withDirectEvalFixture(scenario, action) {
       if (req.url === '/status') return send(res, 200, { value: { ready: true } });
       if (req.url === '/session') return send(res, 200, { value: { sessionId: 'fixture', capabilities: { browserName: 'wry' } } });
       if (req.method === 'GET' && req.url === '/session/fixture/window') return send(res, 200, { value: 'main' });
-      if (req.url === '/wdio/eval') {
+      if (req.url === '/wdio/eval' || req.url.endsWith('/execute/sync') && !String(body.script).includes('quit_all')) {
+        const direct = req.url === '/wdio/eval';
+        if (scenario.nativeDialog && !direct) {
+          const line = '[ui-test-dialog] ' + JSON.stringify(scenario.nativeDialog) + '\\n';
+          process.stderr.write(line.slice(0, 17));
+          setTimeout(() => process.stderr.write(line.slice(17)), 10);
+          return;
+        }
         const index = reads++;
-        if (scenario.stall && body.timeout_ms !== 1500) return;
-        if (scenario.error && body.timeout_ms !== 1500) return send(res, 500, { error: scenario.error });
-        if (scenario.malformed && body.timeout_ms !== 1500) return send(res, 200, { value: scenario.malformed });
+        if (scenario.stall && !direct) return;
+        if (scenario.error && !direct) return send(res, 500, { value: { error: 'javascript error', message: scenario.error } });
+        if (scenario.malformed && !direct) return send(res, 200, { value: scenario.malformed });
         const state = (scenario.states || [])[index] || { documentReady: 'complete', ride: true,
           windowManager: true, splashVisible: false, activeTabs: 1, promptType: 1, model: true };
         const session = { promptType: state.promptType, me: { getModel: () => { if (scenario.scriptError) throw new Error(scenario.scriptError); return state.model ? {} : null; },
@@ -390,8 +397,10 @@ async function withDirectEvalFixture(scenario, action) {
           getComputedStyle: () => ({ display: state.splashVisible ? 'block' : 'none', visibility: 'visible' }) };
         try {
           const fn = vm.runInNewContext('(function(){' + body.script + '})', context);
-          fn(result => { record({ snapshot: state }); send(res, result.ok ? 200 : 500, result.ok ? { value: result.value } : { error: result.error }); });
-        } catch (error) { send(res, 500, { error: error.message }); }
+          record({ snapshot: state, direct });
+          if (direct) fn(result => send(res, result.ok ? 200 : 500, result.ok ? { value: result.value } : { error: result.error }));
+          else send(res, 200, { value: fn(...(body.args || [])) });
+        } catch (error) { send(res, 500, direct ? { error: error.message } : { value: { error: 'javascript error', message: error.message } }); }
         return;
       }
       if (req.url.endsWith('/execute/sync') && String(body.script).includes('quit_all')) {
@@ -408,7 +417,7 @@ async function withDirectEvalFixture(scenario, action) {
     });
     server.listen(Number(process.env.TAURI_WEBDRIVER_PORT), '127.0.0.1');
     process.stdin.resume();
-    process.stdin.on('end', () => process.exit(0));
+    process.stdin.on('end', () => { record({ ownershipEOF: true }); process.exit(0); });
   `, { mode: 0o755 });
   const previous = process.env.RIDE_TEST_BINARY;
   process.env.RIDE_TEST_BINARY = binary;
@@ -425,12 +434,13 @@ async function withDirectEvalFixture(scenario, action) {
   }
 }
 
-test('startup uses supported DirectEval while ordinary frontend reads remain stalled', { skip: process.platform === 'win32' }, async () => {
-  await withDirectEvalFixture({}, async (app, events) => {
+test('startup uses ordinary WebDriver snapshots and quit with no DirectEval readiness workaround', { skip: process.platform === 'win32' }, async () => {
+  await withStartupFixture({}, async (app, events) => {
     await app.start();
     assert.equal(app.startupPhase, 'ready');
     assert.equal(app.isRunning(), true);
-    assert.equal(events().filter(e => e.path === '/wdio/eval').length, 4);
+    assert.equal(events().filter(e => e.snapshot && !e.direct).length, 4);
+    assert.equal(events().filter(e => e.path === '/wdio/eval').length, 0);
     assert.equal(events().some(e => e.ordinaryReadHeld), false);
     await app.stop();
     assert.equal(app.isRunning(), false);
@@ -448,7 +458,7 @@ test('startup polls only false readiness and preserves all four readiness gates'
     { ...ready, activeTabs: 0 }, ready,
     { ...ready, promptType: 0 }, { ...ready, model: false }, ready,
   ];
-  await withDirectEvalFixture({ states }, async (app, events) => {
+  await withStartupFixture({ states }, async (app, events) => {
     await app.start();
     assert.equal(events().filter(e => e.snapshot).length, states.length);
     assert.equal(events().some(e => e.ordinaryReadHeld), false);
@@ -460,14 +470,14 @@ test('startup polls only false readiness and preserves all four readiness gates'
 for (const scenario of [{ error: 'fixture HTTP execution failed' }, { scriptError: 'fixture model getter failed' },
   { malformed: { documentReady: 'complete' } }]) {
   test(`startup ${scenario.error ? 'HTTP failure' : scenario.scriptError ? 'script failure' : 'malformed snapshot'} fails without readiness retries and cleans up`, { skip: process.platform === 'win32' }, async () => {
-    await withDirectEvalFixture(scenario, async (app, events) => {
+    await withStartupFixture(scenario, async (app, events) => {
       await assert.rejects(app.start(), scenario.error ? /fixture HTTP execution failed/ : scenario.scriptError ? /fixture model getter failed/ : /Invalid startup snapshot/);
       assert.equal(app.isRunning(), false);
       assert.equal(fs.existsSync(app.userData), false);
       const reads = events().filter(e => e.path === '/wdio/eval');
-      assert.equal(reads.length, 2, 'One failed startup read and one failure-only diagnostic probe');
-      assert.equal(reads[0].timeout, 10000);
-      assert.equal(reads[1].timeout, 1500);
+      assert.equal(reads.length, 1, 'Only the failure-only diagnostic probe uses DirectEval');
+      assert.equal(reads[0].timeout, 1500);
+      assert.equal(events().filter(e => e.path && e.path.endsWith('/execute/sync') && !e.quit).length, 1);
       assert.equal(events().some(e => e.ordinaryReadHeld), false);
     });
   });
@@ -476,55 +486,83 @@ for (const scenario of [{ error: 'fixture HTTP execution failed' }, { scriptErro
 test('startup phase deadline rejects false readiness instead of weakening its guard', async () => {
   const app = new TauriApplication({ src: 'se' });
   let reads = 0;
-  const bounds = [];
-  app.readFrontendSnapshot = async timeout => { reads += 1; bounds.push(timeout); return { activeTabs: 0 }; };
+  app.readFrontendSnapshot = async () => { reads += 1; return { activeTabs: 0 }; };
   const started = Date.now();
   await assert.rejects(app.waitForFrontend(state => state.activeTabs > 0, 'IDE did not become ready', 60), /IDE did not become ready/);
   assert.ok(reads > 0);
-  assert.ok(bounds.every(value => value <= 60 && value > 0));
   assert.ok(Date.now() - started < 500);
 });
 
-test('startup transport abort bounds stalled DirectEval without retrying the read', async () => {
-  const { readStartupSnapshot } = require('../test/_tauri');
-  let requests = 0;
-  const server = http.createServer(() => { requests += 1; });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const started = Date.now();
-  try {
-    await assert.rejects(readStartupSnapshot(server.address().port, 500), /timeout|aborted/i);
-    assert.equal(requests, 1);
-    assert.ok(Date.now() - started < 2500);
-  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
-});
-
-
 test('connection startup uses only document and splash gates without a Session', { skip: process.platform === 'win32' }, async () => {
-  await withDirectEvalFixture({ connection: true }, async (app, events) => {
+  await withStartupFixture({ connection: true }, async (app, events) => {
     await app.start();
     assert.equal(app.startupPhase, 'ready');
     assert.equal(app.lastFrontend.session, null);
     assert.equal(app.lastFrontend.activeTabs, 0);
-    assert.equal(events().filter(e => e.path === '/wdio/eval').length, 2);
+    assert.equal(events().filter(e => e.snapshot && !e.direct).length, 2);
+    assert.equal(events().filter(e => e.path === '/wdio/eval').length, 0);
     assert.equal(events().some(e => e.ordinaryReadHeld), false);
   });
 });
 
-test('stalled startup retains actual timeout cause and writable phase diagnostics before cleanup', { skip: process.platform === 'win32' }, async () => {
-  const { readStartupSnapshot } = require('../test/_tauri');
-  await withDirectEvalFixture({ stall: true }, async (app, events) => {
-    app.readStartupSnapshot = () => readStartupSnapshot(app.driverPort, 500);
+
+test('native startup dialog preempts a held ordinary read and exits through its ownership pipe', { skip: process.platform === 'win32' }, async () => {
+  const nativeDialog = { title: 'Error', message: 'Interpreter exited with code 23', detail: 'fixture failure', buttons: ['OK'] };
+  await withStartupFixture({ nativeDialog }, async (app, events) => {
+    const started = Date.now();
     await assert.rejects(app.start(), error => {
-      assert.match(error.message, /timeout|aborted/i);
+      assert.match(error.message, /Interpreter exited with code 23/);
       assert.match(error.message, /Startup phase: frontend readiness/);
-      assert.match(error.message, /Startup diagnostics: /);
-      assert.equal(error.name, 'TimeoutError');
-      assert.equal(error.cause.name, 'TimeoutError');
-      assert.equal(fs.existsSync(error.startupDiagnosticsDirectory), true);
+      assert.match(error.message, /Startup diagnostics:/);
+      const evidence = JSON.parse(fs.readFileSync(path.join(error.startupDiagnosticsDirectory, 'startup.json'), 'utf8'));
+      assert.deepEqual(evidence.nativeDialog, nativeDialog);
+      assert.equal(evidence.running, true);
       return true;
     });
+    assert.ok(Date.now() - started < 4000, 'Alert failure does not wait for a blocked 10-second WebDriver request');
     assert.equal(app.isRunning(), false);
     assert.equal(fs.existsSync(app.userData), false);
-    assert.equal(events().filter(e => e.path === '/wdio/eval').length, 2);
+    assert.equal(events().filter(e => e.path && e.path.endsWith('/execute/sync') && !e.quit).length, 1);
+    assert.equal(events().some(e => e.quit), false, 'Modal cleanup does not dispatch blocked JavaScript');
+    assert.equal(events().some(e => e.ownershipEOF), true);
   });
+});
+
+test('startup dialog parsing preserves split UTF-8 and ignores alerts after ready', async () => {
+  const app = new TauriApplication();
+  app.markStartupPhase('session prompt readiness');
+  const dialog = { title: '⍺', message: 'Interpreter exited with code 23', detail: '⍳ failure', buttons: ['OK'] };
+  const line = Buffer.from('[ui-test-dialog] ' + JSON.stringify(dialog) + '\n');
+  const split = line.indexOf(Buffer.from('⍺')) + 1;
+  app.observeStartupStderr(line.subarray(0, split));
+  assert.equal(app.nativeDialog, undefined);
+  app.observeStartupStderr(line.subarray(split));
+  assert.deepEqual(app.nativeDialog, dialog);
+  const ready = new TauriApplication();
+  ready.markStartupPhase('ready');
+  ready.observeStartupStderr(line);
+  assert.equal(ready.nativeDialog, undefined);
+});
+
+test('CEF defaults off in test children and preserves explicit interpreter overrides', () => {
+  assert.equal(isolatedEnv('/tmp/profile', 4567, {}, {}).ENABLE_CEF, '0');
+  assert.equal(isolatedEnv('/tmp/profile', 4567, {}, { ENABLE_CEF: '1' }).ENABLE_CEF, '1');
+  assert.equal(isolatedEnv('/tmp/profile', 4567, {}, { ENABLE_CEF: '0' }).ENABLE_CEF, '0');
+});
+
+test('startup alert survives coalesced large stderr chunks while unfinished lines stay bounded', () => {
+  const app = new TauriApplication();
+  app.markStartupPhase('IDE tab readiness');
+  const dialog = { title: '\u0001'.repeat(256), message: '\u0001'.repeat(1024),
+    detail: '\u0001'.repeat(1024), buttons: Array(8).fill('\u0001'.repeat(64)), type: '\u0001'.repeat(32) };
+  const line = '[ui-test-dialog] ' + JSON.stringify(dialog) + '\n';
+  assert.ok(Buffer.byteLength(line) > 17000 && Buffer.byteLength(line) < 20000);
+  app.observeStartupStderr(Buffer.from('earlier log\n' + line + 'later unrelated log'.repeat(4000) + '\n'));
+  assert.deepEqual(app.nativeDialog, dialog);
+  const unfinished = new TauriApplication();
+  unfinished.markStartupPhase('frontend readiness');
+  unfinished.observeStartupStderr(Buffer.from('unrelated'.repeat(10000)));
+  assert.ok(unfinished.startupStderr.length <= 20000);
+  unfinished.observeStartupStderr(Buffer.from('\n' + line));
+  assert.deepEqual(unfinished.nativeDialog, dialog);
 });
