@@ -59,7 +59,7 @@ nativeTest('simple native confirmation leaves JavaScript responsive until Escape
   t.is(await c.execute(() => window.nativeServiceAnswer.response), 1);
 });
 
-nativeTest('native file picker leaves JavaScript responsive and cancels without paths', async t => {
+nativeTest('native file picker stays responsive and native Cancel returns no paths', async t => {
   const { app } = t.context; const c = app.client; const offset = app.output.length;
   await c.execute(() => {
     window.nativeServiceAnswer = null;
@@ -68,7 +68,7 @@ nativeTest('native file picker leaves JavaScript responsive and cancels without 
   });
   await shown(t, '[ui-test-file]', offset);
   t.is(await c.execute(() => window.nativeServiceAnswer), null);
-  await keys(c, Key.Escape);
+  await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_cancel_file_dialog'));
   await c.waitUntil(() => c.execute(() => window.nativeServiceAnswer !== null), { timeout: 10000 });
   t.deepEqual(await c.execute(() => window.nativeServiceAnswer), { canceled: true, filePaths: [] });
 });
@@ -151,6 +151,12 @@ nativeTest('Session consent cancels safely then closes only its owning interpret
   await shown(t, '[ui-test-dialog]', offset, owner);
   await c.switchToWindow(owner);
   t.true(await c.execute(() => !!D.ide.closePromptPending), 'owner JavaScript remains responsive during consent');
+  await c.switchToWindow(observer); await closeOwner();
+  t.true((await c.getWindowHandles()).includes(owner), 'repeated native close cannot bypass pending consent');
+  t.true(await processes.alive(ownerProcess));
+  await c.switchToWindow(owner);
+  t.true(await c.execute(() => !!D.ide.closePromptPending));
+  t.is(app.output.slice(offset).split('[ui-test-dialog]').length - 1, 1, 'pending close requests share one confirmation');
   await c.switchToWindow(observer); await answerOwner(Key.Escape);
   await c.switchToWindow(owner);
   await c.waitUntil(() => c.execute(() => !D.ide.closePromptPending), { timeout: 10000 });

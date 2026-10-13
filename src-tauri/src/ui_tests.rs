@@ -200,6 +200,35 @@ fn special_key(value: char) -> Option<(Key, bool)> {
 }
 
 #[tauri::command]
+pub async fn ui_test_cancel_file_dialog(app: AppHandle, window: WebviewWindow, target_label: Option<String>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::ClassType;
+        use objc2_foundation::NSObjectProtocol;
+        let target = if let Some(label) = target_label {
+            app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?
+        } else { window };
+        let owner = target.clone();
+        return on_main_thread(&target, move || {
+            let marker = objc2::MainThreadMarker::new().expect("Tauri main thread");
+            let application = objc2_app_kit::NSApplication::sharedApplication(marker);
+            let key = application.keyWindow().ok_or("No native file picker is focused")?;
+            let pointer = owner.ns_window().map_err(input_error)?;
+            let parent = unsafe { &*(pointer as *const objc2_app_kit::NSWindow) };
+            if !application.isActive() || !key.sheetParent().is_some_and(|sheet_parent| std::ptr::eq(&*sheet_parent, parent))
+                || !key.isKindOfClass(objc2_app_kit::NSSavePanel::class()) {
+                return Err("The focused native file picker does not belong to the target window".into());
+            }
+            let panel = unsafe { &*(objc2::rc::Retained::as_ptr(&key) as *const objc2_app_kit::NSSavePanel) };
+            unsafe { panel.cancel(None); }
+            Ok(())
+        }).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = (app, window, target_label); Err("Native file picker cancellation test is only supported on macOS".into()) }
+}
+
+#[tauri::command]
 pub async fn ui_test_keys(app: AppHandle, window: WebviewWindow, keys: Vec<String>, target_label: Option<String>) -> Result<(), String> {
     let _lock = INPUT.lock().await;
     let target = if let Some(label) = target_label {
