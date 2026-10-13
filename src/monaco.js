@@ -9,4 +9,17 @@ self.MonacoEnvironment = {
     return new Worker(new URL(`${name}.worker.js`, base));
   },
 };
+// Model defaults can be reapplied when editor preferences change.
+monaco.editor.onDidCreateModel((model) => {
+  const preserveSyntaxColours = () => {
+    if (model.getOptions().bracketPairColorizationOptions.enabled) {
+      model.updateOptions({
+        bracketColorizationOptions: { enabled: false, independentColorPoolPerBracketType: false },
+      });
+    }
+  };
+  const listener = model.onDidChangeOptions(preserveSyntaxColours);
+  model.onWillDispose(() => listener.dispose());
+  preserveSyntaxColours();
+});
 window.monaco = monaco;

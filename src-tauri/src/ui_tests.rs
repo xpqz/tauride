@@ -7,6 +7,10 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
     let label = match command {
         "CVH" => "Clear Visible History",
         "TTB" => "Show Trace/Edit Toolbar",
+        "LBR" => "Show Language Bar",
+        "SBR" => "Show Status Bar",
+        "WRP" => "Line Wrapping in Session",
+        "PRF" => "Preferences...",
         "AGO" => "Observe Session",
         "AGC" => "Allow Control",
         _ => "",
@@ -19,7 +23,9 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
         } else {
             None
         };
-        if item.id().as_ref().ends_with(&format!(":{command}")) || (!label.is_empty() && text.as_deref() == Some(label)) {
+        let matches_label = text.as_deref() == Some(label)
+            || (command == "PRF" && text.as_deref() == Some("Settings…"));
+        if item.id().as_ref().ends_with(&format!(":{command}")) || (!label.is_empty() && matches_label) {
             return Ok(Some(item));
         }
         if let Some(submenu) = item.as_submenu() {
@@ -31,14 +37,31 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
     Ok(None)
 }
 
+fn menu_item_labels<R: Runtime>(items: Vec<MenuItemKind<R>>) -> Result<Vec<String>, String> {
+    let mut labels = Vec::new();
+    for item in items {
+        let text = if let Some(menu_item) = item.as_menuitem() {
+            Some(menu_item.text().map_err(|e| e.to_string())?)
+        } else if let Some(menu_item) = item.as_check_menuitem() {
+            Some(menu_item.text().map_err(|e| e.to_string())?)
+        } else { None };
+        if let Some(text) = text { labels.push(format!("{}={text:?}", item.id().as_ref())); }
+        if let Some(submenu) = item.as_submenu() {
+            labels.extend(menu_item_labels(submenu.items().map_err(|e| e.to_string())?)?);
+        }
+    }
+    Ok(labels)
+}
+
 fn installed_menu_command_item<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<MenuItemKind<R>, String> {
-    if !["SC", "SA", "CVH", "TTB", "AGO", "AGC", "FX", "SI", "RP", "QCP", "TGC", "RD",
+    if !["SC", "SA", "LBR", "SBR", "WRP", "PRF", "CVH", "TTB", "AGO", "AGC", "FX", "SI", "RP", "QCP", "TGC", "RD",
         "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA",
         "BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH", "RWO", "RWL", "RWC", "RWW", "RWFO",
         "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5", "RWF6", "RWF7", "RWF8", "RWF9", "RWQ", "RWH"].contains(&command) { return Err("Unsupported test menu command".into()); }
     let menu = app.menu().ok_or("No application menu")?;
     let items = menu.items().map_err(|e| e.to_string())?;
-    menu_command_item(items, command)?.ok_or_else(|| format!("No application menu item for {command}"))
+    if let Some(item) = menu_command_item(items.clone(), command)? { return Ok(item); }
+    Err(format!("No application menu item for {command}; installed: {}", menu_item_labels(items)?.join(", ")))
 }
 
 #[tauri::command]
