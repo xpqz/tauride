@@ -576,20 +576,31 @@ D.Ed.prototype = {
   onClose() {
     const ed = this;
     const { me } = ed;
+    if (ed.closePromptPending) return;
     const v = me.getValue();
     if (ed.tc || (v === ed.oText && `${ed.getStops()}` === `${ed.oStop}`)) {
       ed.EP(me);
     } else {
+      ed.closePromptPending = true;
       setTimeout(() => {
+        if (ed.ide.wins[ed.id] !== ed || !me.getModel() || !ed.ide.connected || ed.ide.dead) {
+          delete ed.closePromptPending;
+          return;
+        }
         window.focus();
-        D.util.optionsDialog({
-          title: 'Save?',
-          options: ['Yes', 'No', 'Cancel'],
+        const pending = D.util.optionsDialog({
+          title: 'Save?', options: ['Yes', 'No', 'Cancel'],
           text: `The object "${ed.name}" has changed.\nDo you want to save the changes?`,
         }, (r) => {
+          delete ed.closePromptPending;
+          if (ed.ide.wins[ed.id] !== ed || !me.getModel() || !ed.ide.connected || ed.ide.dead) return;
           if (r === 0) ed.EP(me);
           else if (r === 1) ed.QT(me);
           else ed.focus();
+        });
+        if (pending && typeof pending.catch === 'function') pending.catch(error => {
+          delete ed.closePromptPending;
+          console.error(error);
         });
       }, 10);
     }

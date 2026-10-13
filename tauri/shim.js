@@ -683,6 +683,14 @@
       return { response: fallbackMessageBox(opts), checkboxChecked: false };
     }
   };
+  const nativeMessageBoxAsync = (w, o) => {
+    const [win, opts] = dialogArgs(w, o);
+    return invoke('native_message', { options: { ...opts, window: win ? win.id : currentId() } });
+  };
+  const nativeFileDialogAsync = (w, o, save) => {
+    const [win, opts] = dialogArgs(w, o);
+    return invoke('native_file', { options: { ...opts, save, window: win ? win.id : currentId() } });
+  };
   const showMessageBoxSync = (w, o) => nativeMessageBox(w, o).response;
   const nativeFileDialog = (w, o, save) => {
     const [win, opts] = dialogArgs(w, o);
@@ -857,9 +865,9 @@
     static getApplicationMenu() { return null; }
   }
   const shell = {
-    openExternal: (url) => invoke('open_url', { url }),
-    openPath: (p) => invoke('open_url', { url: p }).then(() => ''),
-    showItemInFolder: (p) => invoke('open_url', { url: path.dirname(p) }),
+    openExternal: (url) => invoke('native_open', { target: url, kind: 'url' }),
+    openPath: (p) => invoke('native_open', { target: p, kind: 'path' }).then(() => ''),
+    showItemInFolder: (p) => invoke('native_open', { target: p, kind: 'reveal' }),
   };
   const clipboard = {
     writeText: (t) => navigator.clipboard.writeText(t),
@@ -873,18 +881,14 @@
     clipboard,
     dialog: {
       showMessageBoxSync,
-      showMessageBox: (w, o) => Promise.resolve(nativeMessageBox(w, o)),
-      showErrorBox: (title, content) => nativeMessageBox({ type: 'error', title, message: title, detail: content }),
+      showMessageBox: nativeMessageBoxAsync,
+      showErrorBox: (title, content) => nativeMessageBoxAsync({ type: 'error', title, message: title, detail: content }),
       showOpenDialogSync: (w, o) => nativeFileDialog(w, o, false),
-      showOpenDialog: (w, o) => {
-        const filePaths = nativeFileDialog(w, o, false);
-        return Promise.resolve({ canceled: !filePaths, filePaths: filePaths || [] });
-      },
+      showOpenDialog: (w, o) => nativeFileDialogAsync(w, o, false)
+        .then(filePaths => ({ canceled: !filePaths, filePaths: filePaths || [] })),
       showSaveDialogSync: (w, o) => (nativeFileDialog(w, o, true) || [])[0],
-      showSaveDialog: (w, o) => {
-        const filePath = (nativeFileDialog(w, o, true) || [])[0];
-        return Promise.resolve({ canceled: !filePath, filePath });
-      },
+      showSaveDialog: (w, o) => nativeFileDialogAsync(w, o, true)
+        .then(paths => ({ canceled: !paths, filePath: paths ? paths[0] : undefined })),
     },
     app: {
       getPath: (n) => ({

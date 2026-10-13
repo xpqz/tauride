@@ -1,6 +1,7 @@
 mod agent;
 mod dialog;
 mod menu;
+mod native_services;
 mod net;
 mod proc;
 mod ssh;
@@ -25,9 +26,13 @@ fn log(level: String, msg: String) {
 
 #[cfg(feature = "ui-tests")]
 #[tauri::command]
-fn ui_test_window_state<R: Runtime>(app: AppHandle<R>, label: String) -> Result<Value, String> {
+async fn ui_test_window_state(app: AppHandle, label: String) -> Result<Value, String> {
     let w = app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?;
     let size = w.inner_size().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    let sheet_focused = ui_tests::owned_sheet_focused(&w).await?;
+    #[cfg(not(target_os = "macos"))]
+    let sheet_focused = false;
     Ok(json!({
         "label": label,
         "title": w.title().map_err(|e| e.to_string())?,
@@ -35,25 +40,10 @@ fn ui_test_window_state<R: Runtime>(app: AppHandle<R>, label: String) -> Result<
         "minimized": w.is_minimized().map_err(|e| e.to_string())?,
         "focused": w.is_focused().map_err(|e| e.to_string())?,
         "devtoolsOpen": w.is_devtools_open(),
+        "sheetFocused": sheet_focused,
         "width": size.width,
         "height": size.height,
     }))
-}
-
-/// shell.openExternal: hand a URL or path to the desktop's opener.
-#[tauri::command]
-fn open_url(url: String) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    let mut cmd = std::process::Command::new("xdg-open");
-    #[cfg(target_os = "macos")]
-    let mut cmd = std::process::Command::new("open");
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", ""]);
-        c
-    };
-    cmd.arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Electron's app.getPath('userData') for this product, so the Tauri build
@@ -210,6 +200,8 @@ pub fn run() {
             });
         }));
     builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .plugin(ride_plugin())
         .register_uri_scheme_protocol("ridefile", |_ctx, req| local_file(&req))
         .register_uri_scheme_protocol("ridesync", |ctx, req| {
@@ -245,11 +237,15 @@ pub fn run() {
             #[cfg(feature = "ui-tests")]
             ui_tests::ui_test_keys,
             #[cfg(feature = "ui-tests")]
+            ui_tests::ui_test_cancel_file_dialog,
+            #[cfg(feature = "ui-tests")]
             ui_tests::ui_test_move_to,
             #[cfg(feature = "ui-tests")]
             ui_tests::ui_test_menu_command,
             log,
-            open_url,
+            native_services::native_open,
+            native_services::native_message,
+            native_services::native_file,
             win::win_op,
             win::session_new,
             win::quit_all,

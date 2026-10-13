@@ -207,9 +207,15 @@ const Console = console;
     // Tauri on macOS: Cmd-Q quits every session, not just this window's, and
     // asks once rather than once per session.
     if (!D.quit && window.__RIDE__ && D.mac) {
+      let quitPending = false;
       D.quit = () => {
+        if (quitPending) return;
         if (D.prf.sqp() && D.ide && D.ide.connected) {
-          $.confirm('Quit Tauride and all its sessions. Are you sure?', document.title, (x) => { if (x) D.el.app.quit(); });
+          quitPending = true;
+          $.confirm('Quit Tauride and all its sessions. Are you sure?', document.title, (x) => {
+            quitPending = false;
+            if (x) D.el.app.quit();
+          }).catch(error => { quitPending = false; console.error(error); });
         } else {
           D.el.app.quit();
         }
@@ -219,24 +225,31 @@ const Console = console;
     window.onbeforeunload = (e) => {
       if (D.ide && D.ide.connected && !D.ide.closing) {
         e.returnValue = false;
+        const ide = D.ide;
+        if (ide.closePromptPending) return;
+        ide.closePromptPending = true;
         setTimeout(() => {
-          let q = true;
-          if (D.prf.sqp() && !window.__rideQuitting && !(D.el && process.env.NODE_ENV === 'test')) {
-            const msg = D.spawned ? 'Quit Dyalog APL.' : 'Disconnect from interpreter.';
-            $.confirm(`${msg} Are you sure?`, document.title, (x) => { q = x; });
-          }
-          if (q) {
-            D.ide.closing = true;
-            D.ide.w3500 && D.ide.w3500.close();
+          const finish = (answer) => {
+            delete ide.closePromptPending;
+            if (!answer || D.ide !== ide || !ide.connected || ide.dead) return;
+            ide.closing = true;
+            ide.w3500 && ide.w3500.close();
             if (D.spawned) {
               D.send('Exit', { code: 0 });
-              // Wait for the disconnect message
             } else {
               D.send('Disconnect', { message: 'User shutdown request' });
-              D.ide.connected = 0;
+              ide.connected = 0;
               window.close();
             }
-          }
+          };
+          if (D.prf.sqp() && !window.__rideQuitting && !(D.el && process.env.NODE_ENV === 'test')) {
+            const msg = D.spawned ? 'Quit Dyalog APL.' : 'Disconnect from interpreter.';
+            const confirmation = $.confirm(`${msg} Are you sure?`, document.title, finish);
+            if (confirmation && typeof confirmation.catch === 'function') confirmation.catch(error => {
+              delete ide.closePromptPending;
+              console.error(error);
+            });
+          } else finish(true);
         }, 10);
         return;
       }
