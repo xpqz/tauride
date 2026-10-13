@@ -1,12 +1,13 @@
 # Tauride release notes
 
-Cumulative changes since the fork of Dyalog Ride 4.8, through 13 October 2026 and [PR #140](https://github.com/xpqz/tauride/pull/140). This covers merged `main`, including changes after the 4.8.3 installer release. [Full change history](https://github.com/xpqz/tauride/compare/307003ef...bcddf734).
+Cumulative changes since the fork of Dyalog Ride 4.8, through 13 October 2026 and [PR #142](https://github.com/xpqz/tauride/pull/142). This covers merged `main`, including changes after the 4.8.3 installer release. [Full change history](https://github.com/xpqz/tauride/compare/307003ef...fab90d4a).
 
 ## Desktop and distribution
 
 - Replaced Electron and its packaging tools with Tauri 2, retaining local, TCP, TLS and SSH interpreter connections, workspace drag-and-drop, floating editors and the bundled APL font. Active extension compatibility APIs remain available.
 - Added native desktop integration and installers for Apple silicon macOS, Windows x64 and Linux x64, plus a separately packaged browser-only Ride bundle.
 - Sessions share one application process with separate windows. Closing a session cleans up its spawned local interpreter; macOS Cmd-Q closes all sessions with one confirmation.
+- Removed the startup splash and deferred Preferences, interpreter dialogs and Status Output until first use. Sessions start with one webview instead of four; queued requests and replies retain their session ownership. Five-run Mac debug-build comparisons showed about 30% lower observed readiness times, including test-harness overhead ([measurements and limitations](prs/141.md)).
 
 ## Session, menus and keyboard
 
@@ -38,6 +39,6 @@ Cumulative changes since the fork of Dyalog Ride 4.8, through 13 October 2026 an
 
 - Added opt-in, per-session desktop agent observation and control through a local CLI/MCP interface: execute, inspect, edit, save, interrupt and step through the tracer. Transcripts and session markings distinguish agent input; optional Run/Deny confirmations control actions.
 - Disconnecting or revoking control cancels pending agent actions. Canceled confirmation prompts cannot reappear when hovered, and stale buttons cannot authorize a fresh request.
-- Ported the Electron UI suite to real Tauri webviews and expanded coverage of resizing, native input, menus, syntax colours and interpreter cleanup. At this revision, all 296 unit tests and 95 native macOS UI tests pass; desktop builds and browser smoke tests pass in CI.
+- Ported the Electron UI suite to real Tauri webviews and expanded coverage of resizing, native input, menus, syntax colours and interpreter cleanup. Validation for PR #142 passed 305 unit tests and 104 native macOS UI tests; desktop builds and browser smoke tests also passed in CI.
 
 See the [keyboard guide](keyboard_shortcuts.md), [Tauride guide](../tauri/README.md) and [UI testing guide](ui-testing.md) for configuration and platform details.
