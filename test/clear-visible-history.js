@@ -389,9 +389,9 @@ nativeTest('native View clear follows the focused session after its menu is refr
   await c.execute(() => D.ide.wins[0].loadLine('      first-draft-86'));
   const beforePreferences = await session(c);
   t.true(beforePreferences.text.includes('first-before-preferences-86'));
+  await c.execute(() => D.commands.PRF());
   await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)),
     { timeout: 10000, timeoutMsg: 'First session Preferences did not connect' });
-  await c.execute(() => D.commands.PRF());
   const preferences = await c.execute(() => D.prf_bw.win.label);
   await c.switchToWindow(preferences);
   await c.waitUntil(async () => c.execute(() => !I.prf_dlg.hidden),

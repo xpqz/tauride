@@ -16,10 +16,10 @@ async function mainEditorState(c) {
 
 async function openPreferences(c) {
   const main = await c.getWindowHandle();
+  await c.execute(() => D.commands.PRF());
   await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)),
     { timeout: 10000, timeoutMsg: 'Preferences window did not connect' });
   const label = await c.execute(() => D.prf_bw.win.label);
-  await c.execute(() => D.commands.PRF());
   await c.switchToWindow(label);
   await c.waitUntil(async () => c.execute(() => !I.prf_dlg.hidden),
     { timeout: 10000, timeoutMsg: 'Preferences did not open' });
@@ -139,7 +139,7 @@ nativeTest('Select All in one session leaves another session’s Preferences sel
   const secondId = await c.execute(() => D.wm.newSession({ RIDE_SPAWN: D.lastSpawnedExe }));
   t.truthy(secondId, 'second session opened');
   await c.switchToWindow(`w${secondId}`);
-  await c.waitUntil(async () => c.execute(() => !!(D.ide && D.ide.wins[0] && D.prf_bw && D.prf_bw.socket)),
+  await c.waitUntil(async () => c.execute(() => !!(D.ide && D.ide.wins[0] && D.ide.wins[0].me)),
     { timeout: 30000, timeoutMsg: 'Second session did not connect' });
   const { main: foregroundMain } = await openPreferences(c);
   await showTab(c, 'title');

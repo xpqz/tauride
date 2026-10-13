@@ -205,15 +205,15 @@ test('abrupt worker termination closes its app ownership pipe', { skip: process.
 test('startup diagnostics cache the last successful frontend snapshot when the next command stalls', async () => {
   const app = new TauriApplication({ src: 'cn' });
   const snapshot = { documentReady: 'complete', ride: true, windowManager: true,
-    splashVisible: false, activeTabs: 1, session: { promptType: 1, model: true } };
+    splashVisible: false, connectionVisible: false, activeTabs: 1, session: { promptType: 1, model: true } };
   app.client = { execute: async () => snapshot };
   app.markStartupPhase('frontend readiness');
   assert.deepEqual(await app.readFrontendSnapshot(), snapshot);
-  app.markStartupPhase('splash readiness');
+  app.markStartupPhase('connection readiness');
   app.client.execute = async () => { throw new Error('execute callback timed out'); };
   await assert.rejects(app.readFrontendSnapshot(), /execute callback timed out/);
   const state = app.startupState();
-  assert.equal(state.phase, 'splash readiness');
+  assert.equal(state.phase, 'connection readiness');
   assert.deepEqual(state.lastFrontend, snapshot);
   assert.equal(state.pid, null);
   assert.equal(state.running, false);
@@ -254,7 +254,7 @@ test('startup diagnostics retain bounded evidence and sample only the live owned
 test('sampling errors annotate startup failure without replacing its original message', async () => {
   const app = new TauriApplication({ src: 'cn' });
   app.child = { pid: 12345, exitCode: null, signalCode: null };
-  app.markStartupPhase('splash readiness');
+  app.markStartupPhase('connection readiness');
   app.output = 'x'.repeat(30000);
   app.sampleNativeProcess = async () => { throw new Error('sample permission denied'); };
   const failure = new Error('element request 118 timed out');
@@ -392,9 +392,12 @@ async function withStartupFixture(scenario, action) {
         const context = { window: { __RIDE__: state.ride ? {} : null, D: {
           wm: state.windowManager ? {} : null, ide: scenario.connection ? null : { connected: true, wins: { 0: session } } } },
           document: { readyState: state.documentReady,
-            getElementById: id => id === 'splash' ? ({ hidden: !state.splashVisible, getClientRects: () => state.splashVisible ? [{}] : [] }) : null,
+            getElementById: id => id === 'splash'
+              ? ({ hidden: !state.splashVisible, getClientRects: () => state.splashVisible ? [{}] : [] })
+              : id === 'cn' ? ({ hidden: !scenario.connection || state.connectionVisible === false,
+                getClientRects: () => scenario.connection && state.connectionVisible !== false ? [{}] : [] }) : null,
             querySelectorAll: selector => selector === '.dlg' ? [] : Array(scenario.connection ? 0 : state.activeTabs).fill({}) },
-          getComputedStyle: () => ({ display: state.splashVisible ? 'block' : 'none', visibility: 'visible' }) };
+          getComputedStyle: () => ({ display: 'block', visibility: 'visible' }) };
         try {
           const fn = vm.runInNewContext('(function(){' + body.script + '})', context);
           record({ snapshot: state, direct });
@@ -439,7 +442,7 @@ test('startup uses ordinary WebDriver snapshots and quit with no DirectEval read
     await app.start();
     assert.equal(app.startupPhase, 'ready');
     assert.equal(app.isRunning(), true);
-    assert.equal(events().filter(e => e.snapshot && !e.direct).length, 4);
+    assert.equal(events().filter(e => e.snapshot && !e.direct).length, 3);
     assert.equal(events().filter(e => e.path === '/wdio/eval').length, 0);
     assert.equal(events().some(e => e.ordinaryReadHeld), false);
     await app.stop();
@@ -449,12 +452,11 @@ test('startup uses ordinary WebDriver snapshots and quit with no DirectEval read
   });
 });
 
-test('startup polls only false readiness and preserves all four readiness gates', { skip: process.platform === 'win32' }, async () => {
+test('startup polls only false readiness and preserves frontend, tab and prompt gates', { skip: process.platform === 'win32' }, async () => {
   const ready = { documentReady: 'complete', ride: true, windowManager: true,
     splashVisible: false, activeTabs: 1, promptType: 1, model: true };
   const states = [
     { ...ready, ride: false }, { ...ready, windowManager: false }, { ...ready, documentReady: 'loading' }, ready,
-    { ...ready, splashVisible: true }, ready,
     { ...ready, activeTabs: 0 }, ready,
     { ...ready, promptType: 0 }, { ...ready, model: false }, ready,
   ];
@@ -493,13 +495,16 @@ test('startup phase deadline rejects false readiness instead of weakening its gu
   assert.ok(Date.now() - started < 500);
 });
 
-test('connection startup uses only document and splash gates without a Session', { skip: process.platform === 'win32' }, async () => {
-  await withStartupFixture({ connection: true }, async (app, events) => {
+test('connection startup waits for the connection screen without a Session', { skip: process.platform === 'win32' }, async () => {
+  const ready = { documentReady: 'complete', ride: true, windowManager: true,
+    splashVisible: false, activeTabs: 0, promptType: 0, model: false };
+  await withStartupFixture({ connection: true, states: [ready, { ...ready, connectionVisible: false }, ready] }, async (app, events) => {
     await app.start();
     assert.equal(app.startupPhase, 'ready');
     assert.equal(app.lastFrontend.session, null);
     assert.equal(app.lastFrontend.activeTabs, 0);
-    assert.equal(events().filter(e => e.snapshot && !e.direct).length, 2);
+    assert.equal(app.lastFrontend.connectionVisible, true);
+    assert.equal(events().filter(e => e.snapshot && !e.direct).length, 3);
     assert.equal(events().filter(e => e.path === '/wdio/eval').length, 0);
     assert.equal(events().some(e => e.ordinaryReadHeld), false);
   });

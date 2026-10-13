@@ -151,16 +151,55 @@
     });
   };
 
-  D.IPC_Server = function IPCServer() {
+  D.IPC_Server = function IPCServer(factories) {
     // start IPC server
-    let dlgLoaded;
-    let prfLoaded;
-    let statLoaded;
-    const winsLoaded = [
-      new Promise((r) => { dlgLoaded = r; }),
-      new Promise((r) => { prfLoaded = r; }),
-      new Promise((r) => { statLoaded = r; }),
-    ];
+    const helpers = { prf: 'prf_bw', dialog: 'dlg_bw', status: 'stw_bw' };
+    const pending = {};
+    D.ensureHelper = (kind) => {
+      if (!factories || !factories[kind]) return Promise.reject(new Error(`Unknown helper: ${kind}`));
+      if (pending[kind]) return pending[kind].promise;
+      const state = {};
+      state.promise = new Promise((resolve, reject) => {
+        state.resolve = resolve;
+        state.reject = reject;
+      });
+      pending[kind] = state;
+      const fail = (error) => {
+        if (pending[kind] !== state) return;
+        delete pending[kind];
+        if (D[helpers[kind]] === state.helper) delete D[helpers[kind]];
+        clearTimeout(state.timer);
+        state.reject(error instanceof Error ? error : new Error(String(error)));
+        state.helper && state.helper.win.destroy();
+      };
+      try {
+        state.helper = factories[kind](fail);
+        D[helpers[kind]] = state.helper;
+        state.helper.win.ready.catch(fail);
+        state.helper.win.onClosed(() => {
+          if (pending[kind] === state && !state.connected) fail(new Error(`${kind} helper closed before connecting`));
+          else if (pending[kind] === state) {
+            delete pending[kind];
+            if (D[helpers[kind]] === state.helper) delete D[helpers[kind]];
+          }
+        });
+        state.timer = setTimeout(() => fail(new Error(`${kind} helper did not connect`)), 15000);
+      } catch (error) { fail(error); }
+      return state.promise;
+    };
+    const connected = (kind, socket) => {
+      const state = pending[kind];
+      if (!state || state.connected || !socket || socket.label !== state.helper.win.label) return false;
+      state.helper.socket = socket;
+      state.connected = true;
+      clearTimeout(state.timer);
+      state.resolve(state.helper);
+      return true;
+    };
+    const matches = (kind, socket) => {
+      const state = pending[kind];
+      return !!(state && socket && socket.label === state.helper.win.label);
+    };
     D.pwins = [];
     D.pendingEditors = [];
     D.ipc.config.id = 'ride_master';
@@ -170,30 +209,35 @@
     D.ipc.serve(() => {
       const srv = D.ipc.server;
       srv.on('prfCreated', (data, socket) => {
-        D.prf_bw.socket = socket;
-        prfLoaded(true);
+        if (!matches('prf', socket)) return;
+        Object.keys(D.prf).forEach(k => srv.emit(socket, 'prf', [k, D.prf[k]()]));
+        connected('prf', socket);
       });
       srv.on('prfShow', x => D.prf_ui(x));
-      srv.on('prfClose', () => {
+      srv.on('prfClose', (data, socket) => {
+        if (!matches('prf', socket)) return;
         D.prf_bw.win.hide();
         D.ide && D.ide.focusMRUWin();
       });
       srv.on('statCreated', (data, socket) => {
-        D.stw_bw.socket = socket;
+        if (!matches('status', socket)) return;
         srv.emit(socket, 'setTheme', D.theme);
-        statLoaded(true);
+        D.ide && srv.emit(socket, 'caption', D.ide.caption);
+        connected('status', socket);
       });
-      srv.on('statClose', () => {
+      srv.on('statClose', (data, socket) => {
+        if (!matches('status', socket)) return;
         D.prf.statusWindow(0);
       });
       srv.on('dialogCreated', (data, socket) => {
-        D.dlg_bw.socket = socket;
+        if (!matches('dialog', socket)) return;
         srv.emit(socket, 'setTheme', D.theme);
-        dlgLoaded(true);
+        connected('dialog', socket);
       });
-      srv.on('dialogClose', ([t, r]) => {
-        D.util.replyDialog(t, r);
+      srv.on('dialogClose', ([t, r], socket) => {
+        if (!matches('dialog', socket) || !D.util.isCurrentDialog(t)) return;
         D.dlg_bw.win.hide();
+        D.util.replyDialog(t, r);
         D.ide && D.ide.focusMRUWin();
       });
       srv.on('browserCreated', (bwId, socket) => {
@@ -209,7 +253,16 @@
         w && w.finishClearStops && w.finishClearStops(request, count);
       });
       srv.on('socket.disconnected', (socket) => {
-        [...D.pwins, ...Object.values(D.ide.wins)]
+        Object.keys(helpers).forEach((kind) => {
+          if (!matches(kind, socket)) return;
+          const state = pending[kind];
+          delete pending[kind];
+          clearTimeout(state.timer);
+          if (D[helpers[kind]] === state.helper) delete D[helpers[kind]];
+          state.helper.win.destroy();
+          if (!state.connected) state.reject(new Error(`${kind} helper disconnected`));
+        });
+        [...D.pwins, ...Object.values(D.ide ? D.ide.wins : {})]
           .filter((w) => w.socket === socket).forEach((w) => w.cancelClearStops());
       });
       srv.on('Edit', data => D.ide.Edit(data));
@@ -267,8 +320,7 @@
       srv.on('OWS', () => D.commands.OWS());
       srv.on('RIDE', ([type, payload]) => D.send(type, payload));
     });
-    D.ipc.server.start();
-    return winsLoaded;
+    return D.ipc.server.start();
   };
   D.IPC_LinkEditor = function IPCLinkEditor(pe) {
     pe && D.pendingEditors.push(pe);

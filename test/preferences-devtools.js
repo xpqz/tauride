@@ -15,8 +15,9 @@ async function devToolsOpen(c) {
 test('physical F12 opens Preferences DevTools without opening Session DevTools', async t => {
   const c = t.context.app.client;
   const main = await c.getWindowHandle();
+  await c.execute(() => D.commands.PRF());
   await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)), { timeout: 10000 });
-  const preferences = await c.execute(() => { D.commands.PRF(); return D.prf_bw.win.label; });
+  const preferences = await c.execute(() => D.prf_bw.win.label);
   await c.switchToWindow(preferences);
   await (await c.$('#prf_dlg')).waitForDisplayed();
   t.false(await devToolsOpen(c));

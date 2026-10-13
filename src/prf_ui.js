@@ -43,9 +43,11 @@
   }
   function ok() { apply() && cancel(); }
   D.prf_ui = function PrfUI(tab) {
-    if (D.prf_bw) {
-      D.ipc.server.emit(D.prf_bw.socket, 'show', tab);
-      D.prf_bw.win.show();
+    if (D.ensureHelper) {
+      D.ensureHelper('prf').then((helper) => {
+        D.ipc.server.emit(helper.socket, 'show', tab);
+        helper.win.show();
+      }).catch(error => $.err(error.message, 'Preferences'));
       return !1;
     }
     if (D.ide && D.ide.floating) {

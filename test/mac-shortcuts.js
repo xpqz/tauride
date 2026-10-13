@@ -169,8 +169,8 @@ nativeTest('Mac Control-C interrupts the focused busy session and respects remov
   t.is(await c.execute(() => window.shortcutSends.filter(x => x === 'StrongInterrupt').length), 1,
     'Find input does not interrupt');
   await keys(c, Key.Escape);
-  await wait(c, () => !!(D.prf_bw && D.prf_bw.socket));
   await keys(c, Key.Command, ',');
+  await wait(c, () => !!(D.prf_bw && D.prf_bw.socket));
   const helper = await c.execute(() => D.prf_bw.win.label);
   await c.switchToWindow(helper);
   await wait(c, () => !I.prf_dlg.hidden);
@@ -190,8 +190,8 @@ nativeTest('Preferences can rebind Fix for a floating editor and reset it to the
   await captureSends(c);
   await c.execute(token => D.ide.wins[token].me.getModel().setValue('r←macKeys121\nr←84'), id);
   await c.switchToWindow(main);
-  await wait(c, () => !!(D.prf_bw && D.prf_bw.socket));
   await c.execute(() => D.prf_ui('shc'));
+  await wait(c, () => !!(D.prf_bw && D.prf_bw.socket));
   const helper = await c.execute(() => D.prf_bw.win.label);
   await c.switchToWindow(helper);
   await wait(c, () => !I.prf_dlg.hidden && !document.getElementById('shc').hidden);

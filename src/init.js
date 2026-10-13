@@ -114,75 +114,40 @@ const Console = console;
         D.ipc.config.appspace = qp.appid;
         document.body.className += ' floating-window';
         D.IPC_Prf();
-        I.splash.hidden = 1;
       } else if (qp.type === 'editor') {
         D.ipc.config.appspace = qp.appid;
         document.body.className += ' floating-window';
         D.IPC_Client(+qp.winId);
-        I.splash.hidden = 1;
       } else {
-        const winsLoaded = D.IPC_Server();
-        const appid = D.ipc.config.appspace;
-        let w = D.wm.create({
-          show: false,
-          parent: D.wm.main(),
-          alwaysOnTop: false,
-          fullscreen: false,
-          fullscreenable: false,
-          minWidth: 790,
-          minHeight: 600,
-          webPreferences: {
-            contextIsolation: false,
-            enableRemoteModule: true,
-            nodeIntegration: true,
-            enableDeprecatedPaste: true,
-          },
-        }, `${loc}?type=prf&appid=${appid}`);
-        D.prf_bw = { id: w.id, win: w };
-        w = D.wm.create({
-          show: false,
-          parent: D.wm.main(),
-          alwaysOnTop: false,
-          fullscreen: false,
-          fullscreenable: false,
-          modal: true,
-          width: 400,
-          height: 350,
-          resizable: false,
-          minimizable: false,
-          maximizable: false,
-          webPreferences: {
-            contextIsolation: false,
-            enableRemoteModule: true,
-            nodeIntegration: true,
-            enableDeprecatedPaste: true,
-          },
-        }, `file://${__dirname}/dialog.html?appid=${appid}`);
-        D.dlg_bw = { id: w.id, win: w };
-        w = D.wm.create({
-          show: false,
-          parent: D.wm.main(),
-          alwaysOnTop: false,
-          fullscreen: false,
-          fullscreenable: false,
-          modal: false,
-          width: 600,
-          height: 400,
-          resizable: true,
-          minimizable: true,
-          maximizable: true,
-          webPreferences: {
-            contextIsolation: false,
-            enableRemoteModule: true,
-            nodeIntegration: true,
-          },
-        }, `file://${__dirname}/status.html?appid=${appid}`);
-        D.stw_bw = { id: w.id, win: w };
-        D.wm.main().focus();
-        Promise.all(winsLoaded).then(() => {
-          I.splash.hidden = 1;
-          nodeRequire(`${__dirname}/src/cn`)();
-        });
+        const helper = (options, url, fail) => {
+          const win = D.wm.create({
+            show: false,
+            parent: D.wm.main(),
+            alwaysOnTop: false,
+            fullscreen: false,
+            fullscreenable: false,
+            onError: fail,
+            webPreferences: {
+              contextIsolation: false,
+              enableRemoteModule: true,
+              nodeIntegration: true,
+              enableDeprecatedPaste: true,
+            },
+            ...options,
+          }, url);
+          return { id: win.id, win };
+        };
+        Promise.resolve(D.IPC_Server({
+          prf: fail => helper({ minWidth: 790, minHeight: 600 },
+            `${loc}?type=prf&appid=${D.ipc.config.appspace}`, fail),
+          dialog: fail => helper({ modal: true, width: 400, height: 350,
+            resizable: false, minimizable: false, maximizable: false },
+          `file://${__dirname}/dialog.html?appid=${D.ipc.config.appspace}`, fail),
+          status: fail => helper({ modal: false, width: 600, height: 400,
+            resizable: true, minimizable: true, maximizable: true },
+          `file://${__dirname}/status.html?appid=${D.ipc.config.appspace}`, fail),
+        })).then(() => nodeRequire(`${__dirname}/src/cn`)())
+          .catch(error => $.err(error.message, 'Connection'));
       }
     } else {
       const ws = new WebSocket((loc.protocol === 'https:' ? 'wss://' : 'ws://') + loc.host);
@@ -202,7 +167,6 @@ const Console = console;
       const ide = new D.IDE();
       D.ide2 = ide;
       ws.onclose = () => { ide.die(); };
-      I.splash.hidden = 1;
     }
     // Tauri on macOS: Cmd-Q quits every session, not just this window's, and
     // asks once rather than once per session.

@@ -534,7 +534,13 @@ D.IDE = function IDE(opts = {}) {
   D.prf.statusWindow(0);
   D.prf.statusWindow((x) => {
     // Only the main window owns the status window.
-    D.stw_bw && (x ? D.stw_bw.win.show() : D.stw_bw.win.hide());
+    if (x && D.ensureHelper) {
+      D.ensureHelper('status').then((helper) => {
+        if (D.ide === ide && !ide.dead && D.prf.statusWindow()) helper.win.show();
+      }).catch(error => $.err(error.message, 'Status Output'));
+    } else if (D.stw_bw) {
+      x ? D.stw_bw.win.show() : D.stw_bw.win.hide();
+    }
     D.ide && D.ide.focusMRUWin();
     updMenu();
   });
@@ -1051,7 +1057,10 @@ D.IDE = function IDE(opts = {}) {
     ReplyTreeList(x) { ide.wse.replyTreeList(x); },
     StatusOutput(x) {
       if (!D.el) return;
-      D.ipc.server.emit(D.stw_bw.socket, 'add', x);
+      const ready = D.ensureHelper ? D.ensureHelper('status') : Promise.resolve(D.stw_bw);
+      ready.then((helper) => {
+        if (D.ide === ide && !ide.dead) D.ipc.server.emit(helper.socket, 'add', x);
+      }).catch(error => $.err(error.message, 'Status Output'));
       !D.prf.statusWindow() && D.prf.autoStatus() && D.prf.statusWindow(1);
     },
     ReplyGetLog(x) {
@@ -1221,6 +1230,7 @@ D.IDE.prototype = {
     const ide = this;
     if (ide.dead) return;
     ide.dead = 1;
+    D.util && D.util.cancelDialogs && D.util.cancelDialogs(ide);
     ide.connected = 0;
     ide.threadId = undefined;
     if (!ide.floating) ide.updTitle();

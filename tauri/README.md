@@ -150,6 +150,15 @@ Command-Q quits all sessions. The macOS app stays open after its last session
 window closes; on other platforms the app exits. Window titles follow the
 page's `document.title` (the session caption).
 
+The connection page starts after the session IPC server is listening. Each
+session creates its Preferences, interpreter dialog and Status Output windows
+when first needed, then reuses them. The first request waits for that helper's
+IPC registration; simultaneous requests share its creation. Interpreter
+dialogs are shown in request order, and status output is delivered in order
+even when the Status Output window stays hidden. A helper that fails to create
+or connect can be retried on the next request. Closing a session closes its
+helpers. The frontend has no splash overlay.
+
 On macOS, Observe Session, Allow Control and Show Trace/Edit Toolbar act on
 whichever session or floating editor/tracer has native focus. Floating windows
 propagate the preference to their owning session through the existing IPC path.
