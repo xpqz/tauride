@@ -35,8 +35,6 @@ const J = {};
     16, 17, 18, 19, 20, 22, 24, 26, 28, 32, 36, 42, 48];
   if (typeof nodeRequire !== 'undefined') {
     D.el = nodeRequire('@electron/remote');
-    D.elm = D.el.require('@electron/remote/main');
-    D.elw = D.el.getGlobal('elw');
     D.ipc = nodeRequire('node-ipc').default;
     D.ipc.config.logInColor = false;
     D = $.extend(D, nodeRequire('@electron/remote').getGlobal('D'));

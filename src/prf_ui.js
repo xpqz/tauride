@@ -65,8 +65,8 @@
           cancel();
           return !1;
         }
-        if (k === 'F12') {
-          D.el.getCurrentWebContents().toggleDevTools();
+        if (k === 'F12' && D.wm) {
+          D.wm.current().toggleDevTools();
           return !1;
         }
         return !0;

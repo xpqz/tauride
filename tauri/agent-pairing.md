@@ -105,7 +105,7 @@ newline-delimited JSON frames (`{id, session, request, ...}` /
 `{id, result | error}` and unsolicited `{event}` frames). `agent.rs` only
 moves frames between the socket and the session webview (`emit_to` /
 `invoke`), as `net.rs` does for Ride's own sockets; the logic is in the
-frontend tap (`src/agent.js`, gated on `window.__RIDE__` so Electron is
+frontend tap (`src/agent.js`, gated on `window.__RIDE__` so browser-only Ride is
 untouched). Windows gets a loopback TCP port with a token in a 0600 file.
 
 Claude Code attaches through a thin MCP stdio adapter (`tools/tauride-mcp`)
@@ -241,7 +241,7 @@ carry `ReplyGetSIStack`.
 
 **Hooks.** The tap wraps `D.recv` and `D.send` once `D.ide` exists and
 re-wraps if either is reassigned (both are reassigned on connect). It is
-loaded only under `window.__RIDE__`; the Electron build never sees it.
+loaded only under `window.__RIDE__`; the browser-only build never sees it.
 
 **CLI / MCP adapter.** `tools/tauride-mcp` (Node, no dependencies):
 `tauride-mcp [--session main | --socket path] status | exec <text> |

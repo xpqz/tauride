@@ -4,7 +4,7 @@
 
 If you're about to push out a new docs release, check the following first:
 
-1. Are the version statements in the "installation.md" page still valid? If the version of Electron has been bumped, this page must be checked.
+1. Are the version statements in the "installation.md" page still valid? Check the Tauri runtime requirements and the installer formats produced by the current release workflow.
 
 
 ## Build process

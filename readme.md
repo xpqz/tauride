@@ -1,45 +1,39 @@
-# Ride
+# Tauride
 
-Ride is a cross-platform IDE for [Dyalog](https://www.dyalog.com) APL. It also allows remote access. See the [full documentation](https://dyalog.github.io/ride).
+Tauride is an unofficial fork of [Dyalog Ride](https://github.com/Dyalog/ride), a cross-platform IDE for local and remote [Dyalog APL](https://www.dyalog.com) interpreters. The desktop app uses Tauri 2. A separate browser-only bundle can be served by Dyalog as zero-footprint Ride.
 
 ![Screenshot](/screenshot.png?raw=true)
 
-## Getting started
+## Install
 
-**Option 1:** Download and install the
-[latest release](https://github.com/Dyalog/ride/releases/latest) from this
-repository.
+Download an installer from the [Tauride releases](https://github.com/xpqz/tauride/releases/latest): a DMG for Apple silicon Macs, an EXE or MSI for Windows x64, or a DEB, RPM or AppImage for Linux x64. See [installation instructions](docs/installation.md).
 
-**Option 2:** Build Ride from source:
+## Develop
 
-Install [Git](https://git-scm.com/downloads) and [NodeJS v18.17.0](https://nodejs.org/download/release/v18.17.0/)
+Install Git, Node.js 22 or later, Rust stable and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/).
 
-    git clone https://github.com/dyalog/ride --depth=1
-    cd ride
-    npm i              # download dependencies
-    npm run css        # compile css
-    npm run dev        # compile css and start Ride
-    npm start          # start Ride (without building native apps)
-    npm run build dist # compile css and build native apps under _/ride${version}/
-    npm run clean      # cleans your build directory
+```sh
+git clone https://github.com/xpqz/tauride.git
+cd tauride
+npm ci
+npm start
+```
 
-`npm run build dist` builds for all platforms. 
+The pinned Tauri CLI is installed by `npm ci`. `npm start` and `npm run dev` stage the frontend and run the desktop development app. `npm run build` builds the release app for the current host. To produce an installer, pass the bundle configuration and the host's format, for example on macOS:
 
-You can also build platforms separately:
+```sh
+npm run build -- --config src-tauri/tauri.bundle.conf.json --bundles dmg
+```
 
-    npm run build {CODE}
+`npm run css` compiles styles. `npm run clean` removes generated frontend output. The browser bundle is built separately with `npm run build:zf`; the archive unpacks as `RIDEapp/` for an interpreter installation.
 
-where `{CODE}` is one of
+## Test
 
-|CODE|OS       |ARCH  |
-|----|---------|------|
-|w   | win32   |ia32  |
-|l   | linux   |x64   |
-|o   | darwin  |x64   |
-|oa  | darwin  |arm64 |
-|m   | mas     |x64   |
-|ma  | mas     |arm64 |
-|a   | linux   |armv7l|
+```sh
+npm run test:unit
+npm test
+```
 
+The native suite builds its own test app and needs Dyalog on PATH or `RIDE_TEST_DYALOG`, plus an unlocked desktop for native input. See [native UI testing](docs/ui-testing.md) and the [architecture and development guide](tauri/README.md).
 
-(`#` starts a comment)
+The upstream [Ride documentation](https://dyalog.github.io/ride) describes shared interpreter and editor features. Tauride-specific installation, builds and native integrations are documented in this repository.

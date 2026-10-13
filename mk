@@ -1,163 +1,63 @@
 #!/usr/bin/env node
-// instead of a Makefile
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { generateLicenses, browserPackages } = require('./generate-licenses');
 
 process.chdir(__dirname);
-const rq = require;
-const fs = rq('fs');
-const path = rq('path');
-const { execSync } = rq('child_process');
-const async = rq('async');
-const { generateLicenses } = rq('./generate-licenses');
-const sh = x => execSync(x, { encoding: 'utf8' }).replace(/[\r\n]/g, ''); // exec in shell
-const rf = x => fs.readFileSync(x, 'utf8'); // read file
-const wf = (x, y) => fs.writeFileSync(x, y); // write file
-const mv = (x, y) => fs.renameSync(x, y); // move/rename file
-const md = (x) => { if (!fs.existsSync(x)) { md(path.dirname(x)); fs.mkdirSync(x); } }; // mkdir -p
-const rm = (x) => {
-  let s;
-  try { s = fs.lstatSync(x); } catch (_) { /**/ }
-  if (s) {
-    if (s.isDirectory()) {
-      fs.readdirSync(x).map(y => rm(`${x}/${y}`));
-      fs.rmdirSync(x);
-    } else { fs.unlinkSync(x); }
-  }
-};
-const pj = JSON.parse(rf('package.json'));
-// v:version string - "x.y.z" where z is the number of commits since the beginning of the project
-const v = `${pj.version.replace(/\.0$/, '')}.${sh('git rev-list --count HEAD')}`;
-const isDyalogBuild = /^dyalog/.test(pj.name);
-const tasks = { };
+const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+const rm = file => fs.rmSync(file, { recursive: true, force: true });
+let version;
 
-let buildDone = 0;
-const b = (f) => {
-  if (buildDone) { f(); return; }
-  md('_'); wf('_/version', v); console.info(`v${v}`);
-  rq('./tools/build-monaco')();
-  const vi = {
-    versionInfo: {
-      version: v,
-      date: sh('git show -s HEAD --pretty=format:%ci'),
-      rev: sh('git rev-parse HEAD'),
-    },
-  };
-  wf('_/version.js', `D=${JSON.stringify(vi)}`);
-  buildDone = 1; f();
-};
+function build() {
+  if (version) return;
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  version = `${pkg.version.replace(/\.0$/, '')}.${git('rev-list', '--count', 'HEAD')}`;
+  fs.mkdirSync('_', { recursive: true });
+  fs.writeFileSync('_/version', version);
+  require('./tools/build-monaco')();
+  fs.writeFileSync('_/version.js', `D=${JSON.stringify({ versionInfo: {
+    version, date: git('show', '-s', 'HEAD', '--pretty=format:%ci'), rev: git('rev-parse', 'HEAD'),
+  } })}`);
+  generateLicenses('_/ThirdPartyNotices.txt');
+  console.info(`v${version}`);
+}
 
-const incl = new RegExp('^$'
-  + '|^/(D\\.png|favicon.*|[^/]*\\.html|main\\.js|package\\.json)$'
-  + '|^/(src|lib|node_modules|_)(/|$)'
-  + '|^/style($|/(fonts|img)|.*\\.css$)');
-// Monaco is bundled into _/monaco; only jquery and toastr load from node_modules.
-const excl = p => /node_modules\/monaco-editor(\/|$)/.test(p)
-  || /toastr\/(?!build($|\/toastr.min))/.test(p)
-  || /jquery\/(?!dist($|\/jquery\.min\.js))/.test(p)
-  || /node_modules\/.*\/node_gyp_bins/.test(p)
-  || /node_modules\/\.bin/.test(p)
-  || /\/test/.test(p)
-  || /\.map$/.test(p);
-const pkg = (x, y, f) => {
-  const version = isDyalogBuild ? process.env.APPVERSION : v;
-  const tmpdir = `/tmp/ridebuild_${version}_${rq('os').userInfo().username}`;
-  rq('@electron/packager')({
-    dir: '.',
-    platform: x,
-    arch: y,
-    tmpdir,
-    out: `_/${pj.name}`,
-    overwrite: true,
-    'download.cache': 'cache',
-    icon: 'D',
-    ignore: p => (!incl.test(p) && !(x === 'win32' && /^\/windows-ime(\/set-ime.exe|$)/.test(p))) || excl(p),
-    appBundleId: `com.dyalog.${pj.name}`,
-    appCopyright: `(c) 2014-${new Date().getFullYear()} Dyalog Ltd`,
-    appVersion: version,
-    buildVersion: version,
-    appCategoryType: 'public.app-category.developer-tools',
-    extendInfo: isDyalogBuild ? 'CI/packagescripts/osx/Info.plist' : null,
-    win32metadata: { // ends up in Windows Explorer's right click > Properties
-      CompanyName: 'Dyalog Ltd',
-      FileDescription: 'Cross-platform IDE for Dyalog APL',
-      OriginalFilename: `${pj.productName}.exe`,
-      ProductName: 'Ride',
-      InternalName: 'Ride',
-    },
-  }).then(() => {
-    const d = `_/${pj.name}/${pj.productName}-${x}-${y}`;
-    rm(`${d}/version`);
-    fs.existsSync(`${d}/LICENSE`) && mv(`${d}/LICENSE`, `${d}/LICENSE.electron`);
-    generateLicenses(`${d}/ThirdPartyNotices.txt`);
-    f();
-  }, e => f(e));
-};
+const include = /^$|^\/(D\.png|favicon[^/]*|[^/]*\.html|licence)$|^\/(src|lib)(\/|$)|^\/_$|^\/_\/version\.js$|^\/_\/monaco(\/|$)|^\/style($|\/(fonts|img)|.*\.css$)|^\/node_modules$|^\/node_modules\/(jquery|toastr)(\/|$)/;
+const exclude = file => /toastr\/(?!build($|\/toastr.min))/.test(file)
+  || /jquery\/(?!dist($|\/jquery\.min\.js))/.test(file) || /\.map$/.test(file);
 
-const l = (f) => { b(e => (e ? f(e) : pkg('linux', 'x64', f))); };
-const la= (f) => { b(e => (e ? f(e) : pkg('linux', 'arm64', f))); };
-const w = (f) => { b(e => (e ? f(e) : pkg('win32', 'ia32', f))); };
-const o = (f) => { b(e => (e ? f(e) : pkg('darwin', 'x64', f))); };
-const oa= (f) => { b(e => (e ? f(e) : pkg('darwin', 'arm64', f))); };
-const m = (f) => { b(e => (e ? f(e) : pkg('mas', 'x64', f))); };
-const ma= (f) => { b(e => (e ? f(e) : pkg('mas', 'arm64', f))); };
-const a = (f) => { b(e => (e ? f(e) : pkg('linux', 'armv7l', f))); };
-const d = (f) => { async.series([l, w, o, a], (e) => { f(e); }); };
-
-const c = (f) => { rm('_'); rm('/tmp/ridebuild'); f(); };
-
-// zero-footprint Ride: the tree an interpreter serves from [DYALOG]/RIDEapp
-// when started with RIDE_INIT=HTTP:*:<port>. The pages keep their paths, so
-// node_modules holds just jquery and toastr; Monaco lives in _/monaco.
-// main.js and package.json belong to Electron.
-const zfIncl = new RegExp('^$'
-  + '|^/(D\\.png|favicon.*|[^/]*\\.html)$'
-  + '|^/(src|lib)(/|$)'
-  + '|^/_$|^/_/version\\.js$|^/_/monaco(/|$)'
-  + '|^/style($|/(fonts|img)|.*\\.css$)'
-  + '|^/node_modules$|^/node_modules/(jquery|toastr)(/|$)');
-const zf = (f) => {
-  b((e) => {
-    if (e) { f(e); return; }
-    const out = '_/zf';
-    rm(out);
-    const cp = (p) => { // p:path from the project root, starting with /
-      if (!zfIncl.test(p) || excl(p)) return;
-      if (fs.statSync(`.${p}`).isDirectory()) fs.readdirSync(`.${p}`).forEach(y => cp(`${p}/${y}`));
-      else { md(path.dirname(`${out}${p}`)); fs.copyFileSync(`.${p}`, `${out}${p}`); }
-    };
-    cp('');
-    const zip = `tauride-zf-${v}.zip`;
-    rm(`_/${zip}`);
-    // zip follows the symlink, so the archive unpacks as RIDEapp/, the name
-    // the interpreter looks for under [DYALOG]
-    fs.symlinkSync('zf', '_/RIDEapp');
-    try { execSync(`zip -qr ${zip} RIDEapp`, { cwd: '_' }); } finally { fs.unlinkSync('_/RIDEapp'); }
-    console.info(`_/${zip}`);
-    f();
-  });
-};
-
-tasks.b = b; tasks.build = b;
-tasks.l = l; tasks.linux = l;
-tasks.la = la; tasks.linuxarm = la;
-tasks.w = w; tasks.win = w;
-tasks.o = o; tasks.osx = o;
-tasks.oa=oa; tasks.osxarm = oa;
-tasks.m = m; tasks.mas = m;
-tasks.ma=ma; tasks.masarm = ma;
-tasks.a = a; tasks.arm = a;
-tasks.d = d; tasks.dist = d;
-tasks.c = c; tasks.clean = c;
-tasks.zf = zf; tasks.zerofootprint = zf;
-
-async.each(
-  process.argv.length > 2 ? process.argv.slice(2) : ['build'],
-  (x, f) => {
-    if (tasks[x]) {
-      tasks[x](f);
+function zerofootprint() {
+  build();
+  const out = '_/zf';
+  rm(out);
+  const copy = file => {
+    if (!include.test(file) || exclude(file)) return;
+    if (fs.statSync(`.${file}`).isDirectory()) {
+      fs.readdirSync(`.${file}`).forEach(name => copy(`${file}/${name}`));
     } else {
-      process.stderr.write(`ERROR: no task named ${JSON.stringify(x)}\n`);
-      process.exit(1);
+      const destination = `${out}${file}`;
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(`.${file}`, destination);
     }
-  },
-  (e) => { if (e) throw e; }
-);
+  };
+  copy('');
+  generateLicenses(`${out}/ThirdPartyNotices.txt`, { packages: browserPackages });
+  const zip = `tauride-zf-${version}.zip`;
+  rm(`_/${zip}`);
+  fs.symlinkSync('zf', '_/RIDEapp');
+  try { execFileSync('zip', ['-qr', zip, 'RIDEapp'], { cwd: '_' }); }
+  finally { fs.unlinkSync('_/RIDEapp'); }
+  console.info(`_/${zip}`);
+}
+
+function clean() {
+  rm('_');
+  version = undefined;
+}
+
+const tasks = { b: build, build, zf: zerofootprint, zerofootprint, c: clean, clean };
+for (const task of process.argv.length > 2 ? process.argv.slice(2) : ['build']) {
+  if (!Object.prototype.hasOwnProperty.call(tasks, task)) throw new Error(`No task named ${JSON.stringify(task)}`);
+  tasks[task]();
+}

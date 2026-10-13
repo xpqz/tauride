@@ -177,8 +177,14 @@ pub fn win_op<R: Runtime>(app: AppHandle<R>, label: String, op: String, arg: Opt
         "eval" => w.eval(&arg),
         "print" => w.print(),
         "toggleDevTools" => {
-            if w.is_devtools_open() { w.close_devtools() } else { w.open_devtools() }
-            Ok(())
+            if w.is_devtools_open() {
+                w.close_devtools();
+                // Closing the inspector leaves the webview without native keyboard focus.
+                w.as_ref().set_focus()
+            } else {
+                w.open_devtools();
+                Ok(())
+            }
         }
         "navigate" => {
             let url = w.url().map_err(|e| e.to_string())?.join(&arg).map_err(|e| e.to_string())?;

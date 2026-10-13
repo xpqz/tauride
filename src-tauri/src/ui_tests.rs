@@ -171,6 +171,7 @@ fn special_key(value: char) -> Option<(Key, bool)> {
         '\u{e006}' | '\u{e007}' => (Key::Return, false),
         '\u{e00c}' => (Key::Escape, false),
         '\u{e032}' => (Key::F2, false),
+        '\u{e03c}' => (Key::F12, false),
         '\u{e003}' => (Key::Backspace, false),
         '\u{e004}' => (Key::Tab, false),
         _ => return None,
@@ -286,6 +287,13 @@ pub async fn ui_test_move_to(window: WebviewWindow, x: f64, y: f64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webdriver_function_keys_are_native_clicks() {
+        assert_eq!(special_key('\u{e032}'), Some((Key::F2, false)));
+        assert_eq!(special_key('\u{e03c}'), Some((Key::F12, false)));
+        assert_eq!(special_key('\u{e03d}'), Some((Key::Meta, true)));
+    }
 
     #[test]
     #[cfg(target_os = "macos")]
