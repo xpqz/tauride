@@ -38,8 +38,21 @@ pub async fn native_message<R: Runtime>(app: AppHandle<R>, options: Value) -> Re
         let (tx, rx) = oneshot::channel();
         let handle = app.clone();
         app.run_on_main_thread(move || {
-            let result = parent(&handle, &options).and_then(|_| crate::dialog::message(&handle, &options).map_err(|error| error.to_string()));
-            let _ = tx.send(result);
+            #[cfg(target_os = "macos")]
+            {
+                match parent(&handle, &options) {
+                    Ok(Some(window)) => crate::dialog::message_async(&window, &options, move |result| {
+                        let _ = tx.send(result.map_err(|error| error.to_string()));
+                    }),
+                    Ok(None) => { let _ = tx.send(Err("Native dialog owner is no longer available".into())); },
+                    Err(error) => { let _ = tx.send(Err(error)); }
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let result = parent(&handle, &options).and_then(|_| crate::dialog::message(&handle, &options).map_err(|error| error.to_string()));
+                let _ = tx.send(result);
+            }
         }).map_err(|error| error.to_string())?;
         return rx.await.map_err(|_| "Native dialog closed without a response".to_string())?;
     };

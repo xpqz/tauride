@@ -117,14 +117,22 @@ fn input_error(error: impl std::fmt::Display) -> String {
 }
 
 async fn focused(window: &WebviewWindow) -> Result<bool, String> {
+    #[cfg(not(target_os = "macos"))]
     if !window.is_focused().map_err(input_error)? { return Ok(false); }
     #[cfg(target_os = "macos")]
     {
         let (send, receive) = tokio::sync::oneshot::channel();
+        let target = window.clone();
         window.run_on_main_thread(move || {
             let marker = objc2::MainThreadMarker::new().expect("Tauri main thread");
-            let active = objc2_app_kit::NSApplication::sharedApplication(marker).isActive();
-            let _ = send.send(active);
+            let app = objc2_app_kit::NSApplication::sharedApplication(marker);
+            let owned = target.ns_window().ok().is_some_and(|pointer| {
+                let parent = unsafe { &*(pointer as *const objc2_app_kit::NSWindow) };
+                app.keyWindow().is_some_and(|key| {
+                    std::ptr::eq(&*key, parent) || key.sheetParent().is_some_and(|sheet_parent| std::ptr::eq(&*sheet_parent, parent))
+                })
+            });
+            let _ = send.send(app.isActive() && owned);
         }).map_err(input_error)?;
         return receive.await.map_err(input_error);
     }

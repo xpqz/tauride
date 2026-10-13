@@ -312,9 +312,9 @@ pub fn file<R: Runtime>(app: &AppHandle<R>, a: &Value) -> sync::Result {
 /// checkboxLabel as the suppression checkbox. Return and Escape answer
 /// defaultId and cancelId.
 #[cfg(target_os = "macos")]
-pub fn message<R: Runtime>(_app: &AppHandle<R>, a: &Value) -> sync::Result {
+fn mac_alert(a: &Value) -> Result<objc2::rc::Retained<objc2_app_kit::NSAlert>, Value> {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle};
+    use objc2_app_kit::{NSAlert, NSAlertStyle};
     use objc2_foundation::NSString;
     let mtm = MainThreadMarker::new().ok_or_else(|| sync::err("EIO", "message boxes must run on the main thread"))?;
     let labels = buttons(a);
@@ -349,6 +349,13 @@ pub fn message<R: Runtime>(_app: &AppHandle<R>, a: &Value) -> sync::Result {
             b.setState(if a.get("checkboxChecked").and_then(Value::as_bool).unwrap_or(false) { 1 } else { 0 });
         }
     }
+    Ok(alert)
+}
+
+#[cfg(target_os = "macos")]
+pub fn message<R: Runtime>(_app: &AppHandle<R>, a: &Value) -> sync::Result {
+    use objc2_app_kit::NSAlertFirstButtonReturn;
+    let alert = mac_alert(a)?;
     #[cfg(feature = "ui-tests")]
     trace_message(a);
     let r = alert.runModal();
@@ -356,6 +363,36 @@ pub fn message<R: Runtime>(_app: &AppHandle<R>, a: &Value) -> sync::Result {
         else { cancellation_index(a) };
     let checked = alert.suppressionButton().map_or(false, |b| b.state() == 1);
     Ok(json!({ "response": response, "checkboxChecked": checked }))
+}
+
+#[cfg(target_os = "macos")]
+pub fn message_async<R: Runtime>(window: &tauri::WebviewWindow<R>, options: &Value,
+    reply: impl FnOnce(sync::Result) + 'static) {
+    use std::{cell::RefCell, rc::Rc};
+    use objc2_app_kit::{NSAlertFirstButtonReturn, NSWindow};
+    let alert = match mac_alert(options) {
+        Ok(alert) => alert,
+        Err(error) => { reply(Err(error)); return; }
+    };
+    let pointer = match window.ns_window() {
+        Ok(pointer) => pointer,
+        Err(error) => { reply(Err(sync::err("EIO", error.to_string()))); return; }
+    };
+    let parent = unsafe { &*(pointer as *const NSWindow) };
+    let retained = Rc::new(RefCell::new(Some(alert.clone())));
+    let cancel = cancellation_index(options);
+    let callback = RefCell::new(Some(reply));
+    let completion = block2::RcBlock::new(move |result| {
+        let alert = retained.borrow_mut().take().expect("native alert completes once");
+        let response = if result >= NSAlertFirstButtonReturn { (result - NSAlertFirstButtonReturn) as i64 } else { cancel };
+        let checked = alert.suppressionButton().is_some_and(|button| button.state() == 1);
+        if let Some(reply) = callback.borrow_mut().take() {
+            reply(Ok(json!({ "response": response, "checkboxChecked": checked })));
+        }
+    });
+    #[cfg(feature = "ui-tests")]
+    trace_message(options);
+    alert.beginSheetModalForWindow_completionHandler(parent, Some(&completion));
 }
 
 #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]

@@ -1,9 +1,23 @@
 const test = require('ava');
 const { Key } = require('webdriverio');
-const { tfw, keys } = require('./_utils');
+const { keys } = require('./_utils');
+const { TauriApplication } = require('./_tauri');
+const processes = require('./_processes');
 
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
-tfw.init({ src: 'se', interpreter: true });
+test.beforeEach(async t => {
+  t.context.app = new TauriApplication({ src: 'se', interpreter: true });
+  await t.context.app.start();
+  const pid = await t.context.app.client.execute(() => {
+    if (!D.spawned) throw new Error('Native dialog test requires an owned interpreter');
+    return Number(D.remoteIdentification.pid);
+  });
+  t.context.owned = await processes.track(pid);
+});
+test.afterEach.always(async t => {
+  try { if (t.context.app) await t.context.app.stop(); }
+  finally { if (t.context.owned) await processes.cleanup(t.context.owned); }
+});
 
 async function shown(t, marker, offset) {
   await t.context.app.client.waitUntil(() => t.context.app.output.slice(offset).includes(marker), { timeout: 10000 });
