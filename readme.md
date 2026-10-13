@@ -2,6 +2,8 @@
 
 Tauride is an unofficial fork of [Dyalog Ride](https://github.com/Dyalog/ride), a cross-platform IDE for local and remote [Dyalog APL](https://www.dyalog.com) interpreters. The desktop app uses Tauri 2. A separate browser-only bundle can be served by Dyalog as zero-footprint Ride.
 
+See the [release notes](docs/release-notes.md) for changes since the Ride fork.
+
 ![Screenshot](/screenshot.png?raw=true)
 
 ## Install
