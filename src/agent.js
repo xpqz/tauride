@@ -211,7 +211,10 @@ if (window.__RIDE__) {
         clearTimeout(timer);
         signal.removeEventListener('abort', cancel);
         resolve(yes);
-        $toast && toastr.clear($toast, { force: true });
+        if ($toast) {
+          $toast.off('mouseenter mouseleave').stop(true, true);
+          toastr.clear($toast, { force: true });
+        }
       };
       const cancel = () => answer(false);
       signal.addEventListener('abort', cancel, { once: true });
