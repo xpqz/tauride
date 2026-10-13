@@ -105,14 +105,15 @@
       if (D.el) {
         const { bwId } = D.ide.focusedWin;
         const bw = (bwId ? D.wm.get(bwId) : D.wm.main()).native;
-        const r = D.el.dialog.showMessageBoxSync(bw, {
+        const options = {
           message: text,
           title: x.title || '',
           buttons: x.options || [''],
-          cancelId: -1,
+          cancelId: window.__RIDE__ ? (x.options || []).findIndex(label => /^cancel$/i.test(label)) : -1,
           type: ['warning', 'info', 'question', 'error'][x.type - 1],
-        });
-        f(r);
+        };
+        if (window.__RIDE__) return D.el.dialog.showMessageBox(bw, options).then(result => f(result.response));
+        f(D.el.dialog.showMessageBoxSync(bw, options));
       } else {
         text = text.replace(/\r?\n/g, '<br>');
         I.gd_title_text.textContent = x.title || '';
@@ -297,22 +298,28 @@
       setTimeout(() => { fb.focus(); }, 1);
     },
   };
-  $.alert = (m, t, f) => { // m:message,t:title,f:callback
-    D.el ? D.el.dialog.showMessageBoxSync(D.wm.main().native, { message: m, title: t, buttons: ['OK'] }) : alert(m);
+  $.alert = (m, t, f) => {
+    const options = { message: m, title: t, buttons: ['OK'] };
+    if (D.el && window.__RIDE__) return D.el.dialog.showMessageBox(D.wm.main().native, options).then(() => { f && f(); });
+    D.el ? D.el.dialog.showMessageBoxSync(D.wm.main().native, options) : alert(m);
     f && f();
   };
   $.err = (m, t, f) => {
     if (typeof t === 'function') { f = t; t = ''; }
-    t = t || 'Error';
-    D.el ? D.el.dialog.showMessageBoxSync(
-      D.wm.current().native,
-      { type: 'error', message: m, title: t, buttons: ['OK'] },
-    ) : alert(m);
+    const options = { type: 'error', message: m, title: t || 'Error', buttons: ['OK'] };
+    if (D.el && window.__RIDE__) return D.el.dialog.showMessageBox(D.wm.current().native, options).then(() => { f && f(); });
+    D.el ? D.el.dialog.showMessageBoxSync(D.wm.current().native, options) : alert(m);
     f && f();
   };
   $.confirm = (m, t, f) => {
-    f(D.el ? 1 - D.el.dialog.showMessageBoxSync(D.wm.main().native, {
-      message: m, title: t, type: 'question', buttons: ['Yes', 'No'], cancelId: 1,
-    }) : +confirm(m));
+    const options = { message: m, title: t, type: 'question', buttons: ['Yes', 'No'], cancelId: 1 };
+    if (D.el && window.__RIDE__) return D.el.dialog.showMessageBox(D.wm.main().native, options).then(result => {
+      const answer = +(result.response === 0);
+      f && f(answer);
+      return answer;
+    });
+    const answer = D.el ? +(D.el.dialog.showMessageBoxSync(D.wm.main().native, options) === 0) : +confirm(m);
+    f && f(answer);
+    return answer;
   };
 }

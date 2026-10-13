@@ -30,8 +30,9 @@ test('Electron and trace preserve original listing', () => {
   assert.equal(execution(lines, true, true)[0], lines[0]);
 });
 function dialogs(ide = { saveRequests: new Map() }) {
+  ide.connected = true;
   const shown = []; const sent = [];
-  const D = { send: (name, x) => sent.push(x), util: { optionsDialog: (x, answer) => { shown.push(x); answer(0); } } };
+  const D = { ide, send: (name, x) => sent.push(x), util: { optionsDialog: (x, answer) => { shown.push(x); answer(0); } } };
   const handler = vm.runInNewContext(`({${extract('    OptionsDialog(x) {', '    StringDialog(x) {')}}).OptionsDialog`, { ide, D });
   return { ide, shown, sent, handler };
 }

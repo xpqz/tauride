@@ -971,6 +971,7 @@ D.IDE = function IDE(opts = {}) {
         return;
       }
       D.util.optionsDialog(x, (r) => {
+        if (D.ide !== ide || !ide.connected || ide.dead || (input && ide.inputOperation !== input)) return;
         if (input) input.reply = r;
         D.send('ReplyOptionsDialog', { index: r, token: x.token });
       });
@@ -982,6 +983,7 @@ D.IDE = function IDE(opts = {}) {
     },
     TaskDialog(x) {
       D.util.taskDialog(x, (r) => {
+        if (D.ide !== ide || !ide.connected || ide.dead) return;
         D.send('ReplyTaskDialog', { index: r, token: x.token });
       });
     },
@@ -1376,18 +1378,7 @@ D.IDE.prototype = {
         if (ed.tc || (me.getValue() === ed.oText && `${ed.getStops()}` === `${ed.oStop}`)) {
           ed.EP(me);
         } else {
-          setTimeout(() => {
-            window.focus();
-            const r = D.el.dialog.showMessageBoxSync(D.wm.current().native, {
-              title: 'Save?',
-              buttons: ['Yes', 'No', 'Cancel'],
-              cancelId: -1,
-              message: `The object "${ed.name}" has changed.\nDo you want to save the changes?`,
-            });
-            if (r === 0) ed.EP(me);
-            else if (r === 1) ed.QT(me);
-            return '';
-          }, 10);
+          ed.onClose();
         }
       });
     }

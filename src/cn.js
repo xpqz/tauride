@@ -205,6 +205,7 @@
     }
     return hasCreated;
   };
+  let savePending;
   const save = () => {
     const names = $('.name', q.favs).toArray().map((x) => x.innerText);
     const dups = names.filter((a, i) => names.indexOf(a) !== i);
@@ -219,18 +220,24 @@
       );
       return;
     }
+    if (savePending) return savePending;
+    const write = () => {
+      const b = [...q.favs.children]
+        .map((x) => x.cnData);
+      try {
+        fs.writeFileSync(cnFile, JSON.stringify(b));
+        D.conns_modified = +fs.statSync(cnFile).mtime;
+      } catch (e) {
+        toastr.error(`${e.name}: ${e.message}`, 'Save failed');
+      }
+    };
     if (fs.existsSync(cnFile) && ((+fs.statSync(cnFile).mtime) !== D.conns_modified)) {
-      const r = $.confirm('Connections file has been modified, do you want to overwrite with your changes?');
-      if (!r) return;
+      savePending = Promise.resolve($.confirm('Connections file has been modified, do you want to overwrite with your changes?'))
+        .then(answer => { if (answer) write(); })
+        .finally(() => { savePending = null; });
+      return savePending;
     }
-    const b = [...q.favs.children]
-      .map((x) => x.cnData);
-    try {
-      fs.writeFileSync(cnFile, JSON.stringify(b));
-      D.conns_modified = +fs.statSync(cnFile).mtime;
-    } catch (e) {
-      toastr.error(`${e.name}: ${e.message}`, 'Save failed');
-    }
+    return write();
   };
   const favText = (x) => x.name || 'unnamed';
   const favDOM = (x) => {
@@ -943,13 +950,15 @@
     q.rootcertsdir_cb.onclick = () => {
       q.rootcertsdir_cb.checked && q.rootcertsdir.focus();
     };
-    const browse = (x, title, props) => {
-      const v = D.el.dialog.showOpenDialogSync({
+    const browse = async (x, title, props) => {
+      const owner = sel;
+      const options = {
         title,
         defaultPath: x.value,
         properties: props || [],
-      });
-      if (v) {
+      };
+      const v = window.__RIDE__ ? (await D.el.dialog.showOpenDialog(options)).filePaths : D.el.dialog.showOpenDialogSync(options);
+      if (v && v.length && x.isConnected && sel === owner) {
         [x.value] = v;
         D.util.elastic(x);
         $(x).change();
