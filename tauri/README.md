@@ -198,13 +198,15 @@ mid-transfer can leave the temporary in the remote interpreter's `⎕SE`.
 
 Two channels connect the webview to Rust:
 
-- **Synchronous**: Ride calls `fs.readFileSync`, `dialog.showMessageBoxSync`
-  and the like synchronously. The shim answers them with synchronous XHR to
+- **Synchronous**: compatibility calls such as `fs.readFileSync` and
+  `dialog.showMessageBoxSync` remain synchronous. The shim answers them with synchronous XHR to
   a custom `ridesync://` scheme (`http://ridesync.localhost` on Windows,
   where WebView2 preflights the POST), which Rust serves on the main thread.
-- **Asynchronous**: sockets, processes and windows use Tauri commands and
-  events (`ride-net`, `ride-proc`, `ride-ssh`, `ride-ipc`, `ride-menu`,
-  `ride-page-load`).
+- **Asynchronous**: sockets, processes, windows and native services use
+  Tauri commands and events (`ride-net`, `ride-proc`, `ride-ssh`, `ride-ipc`,
+  `ride-menu`, `ride-page-load`). Desktop errors and confirmations use
+  asynchronous native dialogs, presented as window-owned sheets on macOS;
+  file pickers and URL/path opening also use asynchronous commands.
 
 A second scheme, `ridefile://`, serves local files to windows Ride points at
 a `file://` URL outside the app (3500⌶ writes its HTML to a temp file).

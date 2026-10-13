@@ -14,7 +14,7 @@
     "test:build": "node tools/test-tauri.js --build-only",
     "test:connection": "node tools/test-tauri.js test/cn.js --match=cn-app-starts-ok --match=cn-fav-*",
     "monaco": "node tools/build-monaco.js",
-    "test:ui-qa": "node tools/test-tauri.js test/preferences-devtools.js test/window-layout.js test/session-lifecycle.js test/highlighting.js test/menu-actions.js test/connection-sizing.js test/mac-session-close.js test/monaco.js test/native-menu-routing.js test/output-menus.js",
+    "test:ui-qa": "node tools/test-tauri.js test/startup-failure.js test/preferences-devtools.js test/window-layout.js test/session-lifecycle.js test/highlighting.js test/menu-actions.js test/connection-sizing.js test/mac-session-close.js test/monaco.js test/native-menu-routing.js test/output-menus.js",
     "stage": "npm run css && node tauri/stage.js",
     "build:zf": "npm run css && node mk zf"
   },
