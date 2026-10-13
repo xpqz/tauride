@@ -144,6 +144,7 @@ function snapshotScript() {
 function validateStartupSnapshot(snapshot) {
   if (!snapshot || typeof snapshot.documentReady !== 'string' || typeof snapshot.ride !== 'boolean'
     || typeof snapshot.windowManager !== 'boolean' || typeof snapshot.splashVisible !== 'boolean'
+    || typeof snapshot.connectionVisible !== 'boolean'
     || !Number.isSafeInteger(snapshot.activeTabs) || snapshot.activeTabs < 0
     || !(snapshot.session === null || snapshot.session && typeof snapshot.session.promptType === 'number'
       && typeof snapshot.session.model === 'boolean')) {
@@ -297,9 +298,10 @@ class TauriApplication {
       this.markStartupPhase('frontend readiness');
       await this.waitForFrontend(state => state.ride && state.windowManager && state.documentReady === 'complete',
         'Tauride main webview did not load');
-      this.markStartupPhase('splash readiness');
-      await this.waitForFrontend(state => !state.splashVisible, 'Tauride splash did not close');
-      if (this.options.src !== 'cn') {
+      if (this.options.src === 'cn') {
+        this.markStartupPhase('connection readiness');
+        await this.waitForFrontend(state => state.connectionVisible, 'Tauride connection screen did not appear');
+      } else {
         this.markStartupPhase('IDE tab readiness');
         await this.waitForFrontend(state => state.activeTabs > 0, 'Tauride IDE tab did not appear');
         this.markStartupPhase('session prompt readiness');

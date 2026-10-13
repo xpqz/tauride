@@ -1,6 +1,8 @@
 {
 // a kitchen sink for small generic functions and jQuery plugins
   const dlgCb = {}; // dialog callbacks
+  const helperDialogs = [];
+  let activeHelperDialog;
   let zCtr = 100; // css z-index counter
   D.util = {
     dict(x) {
@@ -145,10 +147,8 @@
       }
     },
     stringDialog(x, f) {
-      if (D.dlg_bw) {
-        dlgCb[x.token] = f;
-        D.ipc.server.emit(D.dlg_bw.socket, 'show', x);
-        D.dlg_bw.win.show();
+      if (D.ensureHelper) {
+        D.util.queueDialog(x, f, x.defaultValue || null);
         return;
       }
       const value = x.defaultValue || null;
@@ -197,6 +197,7 @@
       setTimeout(() => { inp.focus(); }, 1);
     },
     replyDialog(t, r) {
+      if (activeHelperDialog && activeHelperDialog.x.token !== t) return;
       const f = dlgCb[t];
       if (f) {
         if (r.questionkey) {
@@ -204,8 +205,51 @@
           conf[r.questionkey] = r.index;
           D.prf.confirmations(conf);
         }
-        f(r.index);
         delete dlgCb[t];
+        activeHelperDialog = null;
+        try { f(r.index); } finally { D.util.nextDialog(); }
+      }
+    },
+    isCurrentDialog(t) { return !!(activeHelperDialog && activeHelperDialog.x.token === t); },
+    queueDialog(x, f, cancel) {
+      helperDialogs.push({ x, f, cancel, owner: D.ide && !D.ide.dead ? D.ide : null });
+      D.util.nextDialog();
+    },
+    nextDialog() {
+      if (activeHelperDialog || !helperDialogs.length) return;
+      const request = helperDialogs.shift();
+      activeHelperDialog = request;
+      D.ensureHelper('dialog').then((helper) => {
+        if (activeHelperDialog !== request) return;
+        if (request.owner && (request.owner.dead || D.ide !== request.owner)) {
+          activeHelperDialog = null;
+          D.util.nextDialog();
+          return;
+        }
+        dlgCb[request.x.token] = request.f;
+        D.ipc.server.emit(helper.socket, 'show', request.x);
+        helper.win.show();
+      }).catch((error) => {
+        if (activeHelperDialog !== request) return;
+        activeHelperDialog = null;
+        delete dlgCb[request.x.token];
+        const live = !request.owner || (!request.owner.dead && D.ide === request.owner);
+        try {
+          if (live) request.f(request.cancel);
+        } finally {
+          try { if (live) $.err(error.message, 'Dialog'); } finally { D.util.nextDialog(); }
+        }
+      });
+    },
+    cancelDialogs(owner) {
+      for (let i = helperDialogs.length - 1; i >= 0; i -= 1) {
+        if (helperDialogs[i].owner === owner) helperDialogs.splice(i, 1);
+      }
+      if (activeHelperDialog && activeHelperDialog.owner === owner) {
+        delete dlgCb[activeHelperDialog.x.token];
+        activeHelperDialog = null;
+        D.dlg_bw && D.dlg_bw.win.hide();
+        D.util.nextDialog();
       }
     },
     taskDialog(x, f) {
@@ -235,10 +279,8 @@
           f(index);
         });
         return;
-      } else if (D.dlg_bw) {
-        dlgCb[x.token] = f;
-        D.ipc.server.emit(D.dlg_bw.socket, 'show', x);
-        D.dlg_bw.win.show();
+      } else if (D.ensureHelper) {
+        D.util.queueDialog(x, f, -1);
         return;
       }
       const { esc } = D.util;

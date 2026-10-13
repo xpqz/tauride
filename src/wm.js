@@ -3,7 +3,7 @@
 // Browser Ride keeps its in-page UI without a desktop window adapter.
 // D.wm.create takes window options and a URL, or a function
 // from the new window's id to its URL; a window handle has
-// show, hide, focus, close, setTitle, setContentBounds, setContentSize,
+// show, hide, focus, close, destroy, setTitle, setContentBounds, setContentSize,
 // setMinSize, navigate, print, toggleDevTools, onClosed(f), and the promises
 // contentBounds(), isFocused(), exists() and eval(js). handle.native identifies
 // the parent window for desktop dialogs.
@@ -125,6 +125,10 @@
       // The page handles beforeunload before native close (src-tauri/src/win.rs).
       close() { this.do('close', () => this.ww.close()); }
 
+      destroy() {
+        this.ww.destroy().catch(() => this.ready.then(() => this.ww.destroy()).catch(report('destroy')));
+      }
+
       setTitle(t) { this.do('setTitle', () => this.ww.setTitle(t)); }
 
       setContentBounds({ x, y, width, height }) {
@@ -212,7 +216,12 @@
         });
         creating.set(label, new Promise((resolve) => {
           ww.once('tauri://created', () => { creating.delete(label); resolve(); });
-          ww.once('tauri://error', ({ payload }) => { report(`${label} create`)(payload); creating.delete(label); resolve(); });
+          ww.once('tauri://error', ({ payload }) => {
+            report(`${label} create`)(payload);
+            o.onError && o.onError(payload);
+            creating.delete(label);
+            resolve();
+          });
         }));
         // macOS orders a child window in front when it is attached to its
         // parent, even if it was created invisible.

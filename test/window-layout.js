@@ -143,8 +143,9 @@ for (const helper of ['Preferences', 'About']) {
     const main = await c.getWindowHandle();
     let label;
     if (helper === 'Preferences') {
+      await c.execute(() => D.commands.PRF());
       await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)), { timeout: 10000 });
-      label = await c.execute(() => { D.commands.PRF(); return D.prf_bw.win.label; });
+      label = await c.execute(() => D.prf_bw.win.label);
     } else {
       const before = await c.getWindowHandles();
       await c.execute(() => D.commands.ABT());

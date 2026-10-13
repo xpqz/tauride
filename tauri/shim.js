@@ -304,6 +304,7 @@
         this.clients.add(from);
         EventEmitter.prototype.emit.call(this, event, data, { label: from });
       });
+      return this._un;
     }
     emit(socket, event, data) { ipcSend(socket.label, { event, data }); }
     broadcast(event, data) { this.clients.forEach((label) => ipcSend(label, { event, data })); }

@@ -12,7 +12,7 @@
     "build": "tauri build",
     "clean": "node ./mk c",
     "test:build": "node tools/test-tauri.js --build-only",
-    "test:connection": "node tools/test-tauri.js test/cn.js --match=cn-app-starts-ok --match=cn-fav-*",
+    "test:connection": "node tools/test-tauri.js test/cn.js test/lazy-connection.js --match=cn-app-starts-ok --match=cn-fav-* --match=\"connection screen opens Preferences*\"",
     "monaco": "node tools/build-monaco.js",
     "test:ui-qa": "node tools/test-tauri.js test/startup-failure.js test/preferences-devtools.js test/window-layout.js test/session-lifecycle.js test/highlighting.js test/menu-actions.js test/connection-sizing.js test/mac-session-close.js test/monaco.js test/native-menu-routing.js test/output-menus.js",
     "stage": "npm run css && node tauri/stage.js",

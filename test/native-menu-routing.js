@@ -220,9 +220,9 @@ nativeTest('native checkbox commands do nothing while a helper window has focus'
   await setPreferences(c, { AGC: true, AGO: true, TTB: true });
   await listenForMenuBarrier(c);
   await c.switchToWindow(first);
+  await c.execute(() => D.commands.PRF());
   await c.waitUntil(async () => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)),
     { timeout: 10000, timeoutMsg: 'Preferences did not connect' });
-  await c.execute(() => D.commands.PRF());
   const helper = await c.execute(() => D.prf_bw.win.label);
   await c.switchToWindow(helper);
   await c.waitUntil(async () => c.execute(() => !I.prf_dlg.hidden),

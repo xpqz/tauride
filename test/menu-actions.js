@@ -60,7 +60,6 @@ nativeTest('installed View commands update visible bars and Session wrapping', a
 nativeTest('installed Preferences command opens a helper that Cancel closes', async (t) => {
   const c = t.context.app.client;
   const session = await c.getWindowHandle();
-  await c.waitUntil(() => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)), { timeout: 10000 });
   await focus(c);
   let installed;
   try {
@@ -83,6 +82,7 @@ nativeTest('installed Preferences command opens a helper that Cancel closes', as
   }
   await c.execute(() => window.__TAURI_INTERNALS__.invoke('ui_test_menu_command',
     { command: 'PRF', expectedEnabled: true }));
+  await c.waitUntil(() => c.execute(() => !!(D.prf_bw && D.prf_bw.socket)), { timeout: 10000 });
   const helper = await c.execute(() => D.prf_bw.win.label);
   await c.switchToWindow(helper);
   await c.waitUntil(() => c.execute(() => !I.prf_dlg.hidden), { timeout: 10000 });

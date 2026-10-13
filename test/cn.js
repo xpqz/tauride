@@ -24,9 +24,18 @@ test(
     t.false(win.minimized);
     t.false(win.devtoolsOpen);
     t.true(win.visible);
-    const { width, height } = await app.client.getWindowRect();
-    t.true(width > 0);
-    t.true(height > 0);
+    let native;
+    try {
+      await app.client.waitUntil(async () => {
+        native = (await app.getWindowState()).find(w => w.label === 'main');
+        return native && native.visible && native.width > 0 && native.height > 0;
+      }, { timeout: 10000, timeoutMsg: 'Main window geometry did not become nonzero' });
+    } catch (error) {
+      error.message += `; last native state: ${JSON.stringify(native)}`;
+      throw error;
+    }
+    t.true(native.width > 0);
+    t.true(native.height > 0);
   },
 );
 
