@@ -24,6 +24,11 @@ fn simple_buttons(options: &Value) -> Option<Vec<String>> {
         || options.get("defaultId").is_some_and(|id| id.as_u64() != Some(0)) {
         return None;
     }
+    #[cfg(target_os = "macos")]
+    if labels.len() == 2 && labels[1] != "Cancel" {
+        // rfd custom buttons do not assign Escape; AppKit only recognizes Cancel.
+        return None;
+    }
     match labels.len() {
         1 if options.get("cancelId").is_none_or(|id| id.as_i64() == Some(0)) => Some(labels),
         2 if labels[0] != labels[1] && options.get("cancelId").and_then(Value::as_i64) == Some(1) => Some(labels),
@@ -155,6 +160,10 @@ mod tests {
             json!({ "buttons": ["OK"], "cancelId": -1 }),
             json!({ "buttons": ["Yes", "No"], "defaultId": 1, "cancelId": 1 }),
         ] { assert!(simple_buttons(&options).is_none()); }
+        assert_eq!(simple_buttons(&json!({ "buttons": ["Continue", "Cancel"], "cancelId": 1 })), Some(vec!["Continue".into(), "Cancel".into()]));
+        #[cfg(target_os = "macos")]
+        assert!(simple_buttons(&json!({ "buttons": ["Yes", "No"], "cancelId": 1 })).is_none());
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(simple_buttons(&json!({ "buttons": ["Yes", "No"], "cancelId": 1 })), Some(vec!["Yes".into(), "No".into()]));
     }
 

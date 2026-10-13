@@ -116,6 +116,20 @@ fn input_error(error: impl std::fmt::Display) -> String {
     format!("Native UI input failed: {error}. Unlock the desktop and grant Tauride input/accessibility permission.")
 }
 
+#[cfg(target_os = "macos")]
+pub async fn owned_sheet_focused(window: &WebviewWindow) -> Result<bool, String> {
+    let target = window.clone();
+    on_main_thread(window, move || {
+        let marker = objc2::MainThreadMarker::new().expect("Tauri main thread");
+        let app = objc2_app_kit::NSApplication::sharedApplication(marker);
+        let pointer = target.ns_window().map_err(input_error)?;
+        let parent = unsafe { &*(pointer as *const objc2_app_kit::NSWindow) };
+        Ok(app.isActive() && app.keyWindow().is_some_and(|key| {
+            key.isVisible() && key.sheetParent().is_some_and(|sheet_parent| std::ptr::eq(&*sheet_parent, parent))
+        }))
+    }).await
+}
+
 async fn focused(window: &WebviewWindow) -> Result<bool, String> {
     #[cfg(not(target_os = "macos"))]
     if !window.is_focused().map_err(input_error)? { return Ok(false); }

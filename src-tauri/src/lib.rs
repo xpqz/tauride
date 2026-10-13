@@ -26,9 +26,13 @@ fn log(level: String, msg: String) {
 
 #[cfg(feature = "ui-tests")]
 #[tauri::command]
-fn ui_test_window_state<R: Runtime>(app: AppHandle<R>, label: String) -> Result<Value, String> {
+async fn ui_test_window_state(app: AppHandle, label: String) -> Result<Value, String> {
     let w = app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?;
     let size = w.inner_size().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    let sheet_focused = ui_tests::owned_sheet_focused(&w).await?;
+    #[cfg(not(target_os = "macos"))]
+    let sheet_focused = false;
     Ok(json!({
         "label": label,
         "title": w.title().map_err(|e| e.to_string())?,
@@ -36,6 +40,7 @@ fn ui_test_window_state<R: Runtime>(app: AppHandle<R>, label: String) -> Result<
         "minimized": w.is_minimized().map_err(|e| e.to_string())?,
         "focused": w.is_focused().map_err(|e| e.to_string())?,
         "devtoolsOpen": w.is_devtools_open(),
+        "sheetFocused": sheet_focused,
         "width": size.width,
         "height": size.height,
     }))
