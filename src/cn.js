@@ -1,4 +1,4 @@
-// Connect page, loaded only when running in Electron
+// Desktop connection page.
 {
   let log;
   let $sel = $(); // $sel:selected item(s)
@@ -323,7 +323,7 @@
   };
   const initInterpreterConn = () => {
     hideDlgs();
-    nodeRequire('electron').ipcRenderer.send('save-win', false);
+    D.wm.saveLaunchState(false);
     let b = Buffer.alloc(0x100000);
     let ib = 0; // ib:offset in b
     let nb = 0; // nb:length in b
@@ -979,7 +979,7 @@
       w.setMinSize(minwidth, 400);
       w.contentBounds().then(({ height }) => w.setContentSize(newWidth, height));
       setTimeout(() => { I.cn.toggleMaximize(expanded ? winstate.launchWin.width : 0); }, 10);
-      nodeRequire('electron').ipcRenderer.send('save-win', true);
+      D.wm.saveLaunchState(true);
     };
     toggleConfig(winstate.launchWin.expanded);
     $(q.favs).list().sortable({

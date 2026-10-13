@@ -103,3 +103,21 @@ test('hidden content size requests apply the latest size after showing', async (
   await drain();
   assert.deepEqual(calls.slice(-3), [['max', null], ['min', [400, 400]], ['hide']]);
 });
+
+test('launch/session geometry reports use the native window adapter with the exact saved state', async () => {
+  const calls = [];
+  const D = {};
+  vm.runInNewContext(source, {
+    D,
+    window: { __RIDE__: { platform: 'macos' }, __TAURI__: {
+      webviewWindow: { WebviewWindow: class {} }, dpi: { LogicalSize: class {}, LogicalPosition: class {} },
+      event: { listen() {} },
+    }, __TAURI_INTERNALS__: { metadata: { currentWindow: { label: 'main' } },
+      invoke(command, args) { calls.push([command, args]); return Promise.resolve(); } } },
+  });
+  await D.wm.saveLaunchState(false);
+  await D.wm.saveLaunchState(true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ['save_win', { onLaunch: false }], ['save_win', { onLaunch: true }],
+  ]);
+});

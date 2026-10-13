@@ -1,13 +1,15 @@
 # CLAUDE.md
 
 Tauride is an unofficial fork of Dyalog's Ride (the IDE for Dyalog APL) that runs Ride's
-existing frontend in a Tauri 2 shell instead of Electron. The Electron build (`main.js`,
-`mk/`) still exists and must keep working. Its version follows Ride's latest release
-(4.8.x).
+frontend in a Tauri 2 desktop shell. The supported targets are Tauride desktop and
+browser-only Ride; there is no Electron build target. Its version follows Ride's
+latest release (4.8.x).
 
-- `index.html`, `src/*.js`, the other `*.html`: Ride's frontend, shared by both builds.
-  Changes here must not break Electron; Tauri-only behaviour is gated on
-  `window.__RIDE__` (set by the shim) and, for macOS, `D.mac`.
+- `index.html`, `src/*.js`, the other `*.html`: the shared desktop/browser frontend.
+  Preserve browser-only behavior. Native facilities are gated on `window.__RIDE__`
+  (set by the shim) and, for macOS, `D.mac`. Node/Electron-shaped APIs in the shim
+  remain part of desktop and `RIDE_JS` compatibility; they are not unused merely
+  because the Electron build target has been removed.
 - `tauri/shim.js`: the Node/Electron compatibility layer injected into every webview.
   `tauri/stage.js` builds `_/tauri-dist`, the directory the app serves.
 - `src-tauri/`: the Rust side (`win.rs`, `menu.rs`, `dialog.rs`, `net.rs`, `proc.rs`,
@@ -17,14 +19,17 @@ existing frontend in a Tauri 2 shell instead of Electron. The Electron build (`m
 
 ## Build and run
 
-    npm ci                      # first time; `npm install` rewrites package-lock.json,
-                                # so `git checkout package-lock.json` afterwards
-    npm run css && node tauri/stage.js
-    cd src-tauri && cargo build
-    cargo run                   # debug app; or `cargo tauri dev` / `cargo tauri build`
+    npm ci
+    npm start                   # stage and run the Tauri development app
+    npm run build               # stage and build the release app
+    npm run build:zf            # compile styles and build browser-only Ride
+
+Keep `package-lock.json` in step with dependency changes and validate with a clean
+`npm ci`. Shared build tasks in `mk` generate the version, bundle Monaco and package
+browser-only Ride.
 
 - The app serves `_/tauri-dist`, not the source tree. After editing anything under
-  `src/`, `lib/`, `style/` or the HTML files, run `node tauri/stage.js`. `shim.js` is
+  `src/`, `lib/`, `style/` or the HTML files, run `npm run stage`. `shim.js` is
   also compiled into the binary (`include_str!`), so it needs a `cargo build` too.
 - Useful environment: `RIDE_SPAWN=/usr/local/bin/dyalog` starts a session without the
   connect screen, `RIDE_TAURI_DEBUG=1` logs window and menu traffic, `RIDE_LOG`,
@@ -59,11 +64,10 @@ parent is 1 before killing anything: the Dyalog app's own sessions look the same
 ## Releases
 
 A `v*` tag push makes CI build every platform and publish a GitHub release with the
-installers. Installer names come from `package.json`, so bump the version in
-`package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` first, commit, then
+installers. Installer names use `productName` from `src-tauri/tauri.conf.json`;
+the version comes from `package.json`. Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` first, commit, then
 tag `vX.Y.Z` and push both. macOS builds are Apple silicon only and ad-hoc signed.
-`npx --yes @tauri-apps/cli@2.12.1 build --config src-tauri/tauri.bundle.conf.json
---bundles dmg` builds the same dmg locally.
+`npm run build -- --config src-tauri/tauri.bundle.conf.json --bundles dmg` builds the same dmg locally.
 
 ## Git
 

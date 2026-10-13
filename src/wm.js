@@ -1,16 +1,14 @@
 // Window management: create, find and drive Ride's windows.
-// Electron's BrowserWindow under Electron; Tauri's window API under Tauri,
-// where windows are addressed by label and queries are asynchronous.
-// D.wm.create takes Electron's BrowserWindow options and a URL, or a function
+// Tauri windows are addressed by label and queries are asynchronous.
+// Browser Ride keeps its in-page UI without a desktop window adapter.
+// D.wm.create takes window options and a URL, or a function
 // from the new window's id to its URL; a window handle has
 // show, hide, focus, close, setTitle, setContentBounds, setContentSize,
 // setMinSize, navigate, print, toggleDevTools, onClosed(f), and the promises
-// contentBounds(), isFocused(), exists() and eval(js). handle.native is what
-// Electron's dialog calls take as their parent window.
-// D.wm.main() is this session's window. D.wm.newSession(env) starts a new
-// session: under Electron another RIDE process with that environment, as
-// before; under Tauri another window in this process, taking env as its
-// environment overrides.
+// contentBounds(), isFocused(), exists() and eval(js). handle.native identifies
+// the parent window for desktop dialogs.
+// D.wm.main() is this session's window. D.wm.newSession(env) opens another
+// session window in this process with the supplied environment overrides.
 {
   const opt = (o, ks) => {
     const r = {};
@@ -45,8 +43,7 @@
       return s === '' || s.startsWith('?') ? `index.html${s}` : s;
     };
 
-    // A script meant for a new window waits for its page to load, as
-    // Electron's executeJavaScript does.
+    // A script meant for a new window waits for its page to load.
     const pageLoads = new Map();
     const pageLoad = (label) => {
       if (!pageLoads.has(label)) {
@@ -58,9 +55,7 @@
     };
     T.event.listen('ride-page-load', ({ payload: { label } }) => pageLoad(label).resolve());
 
-    // Calls on a window wait until Tauri has created it (D.wm.create
-    // returns at once), as Electron's BrowserWindow is usable as soon as it
-    // is constructed.
+    // Calls on a window wait until Tauri has created it; D.wm.create returns at once.
     const creating = new Map();
 
     // A Wayland compositor sets the size of a window it shows and ignores
@@ -105,7 +100,6 @@
         await this.ww.setMinSize(sz.min);
       }
 
-      // Electron's show() also focuses the window.
       show() {
         this.queued('show', async (sz) => {
           await this.ww.show();
@@ -128,8 +122,7 @@
 
       focus() { this.do('focus', () => this.ww.setFocus()); }
 
-      // Goes to the page first (src-tauri/src/win.rs), as Electron runs
-      // beforeunload.
+      // The page handles beforeunload before native close (src-tauri/src/win.rs).
       close() { this.do('close', () => this.ww.close()); }
 
       setTitle(t) { this.do('setTitle', () => this.ww.setTitle(t)); }
@@ -186,15 +179,15 @@
     }
 
     // A session's windows have ids in its range (src-tauri/src/win.rs):
-    // session k's window is k * 1e6 + 1. Ids follow one another, as
-    // Electron's do (floating editor windows are cascaded by id); the start
-    // differs per page load so that ids stay unique if a page reloads.
+    // session k's window is k * 1e6 + 1. Floating windows are cascaded by id;
+    // the start differs per page load so ids stay unique after a reload.
     const SESSION_SPAN = 1e6;
     const sessionBase = Math.floor(idOf(currentLabel()) / SESSION_SPAN) * SESSION_SPAN;
     let nextId = sessionBase + 2 + (Date.now() % 9000) * 100;
     let main;
     D.wm = {
       main: () => { main = main || new Win(sessionBase + 1); return main; },
+      saveLaunchState: (onLaunch) => invoke('save_win', { onLaunch: !!onLaunch }),
       newSession: (env) => invoke('session_new', { env: env || {} }).catch(report('new session')),
       current: () => new Win(idOf(currentLabel())),
       get: (id) => new Win(id),
@@ -238,72 +231,6 @@
               x: m.position.x / f, y: m.position.y / f, width: m.size.width / f, height: m.size.height / f,
             };
           });
-      },
-    };
-  } else if (D.el) {
-    class Win {
-      constructor(bw) { this.bw = bw; this.id = bw.id; this.native = bw; }
-
-      show() { this.bw.show(); }
-
-      hide() { this.bw.hide(); }
-
-      focus() { this.bw.focus(); }
-
-      close() { this.bw.close(); }
-
-      setTitle(t) { this.bw.setTitle(t); }
-
-      setContentBounds(b) { this.bw.setContentBounds(b); }
-
-      setContentSize(w, h) { this.bw.setContentSize(w, h); }
-
-      setMinSize(w, h) { this.bw.setMinimumSize(w, h); }
-
-      contentBounds() { return Promise.resolve(this.bw.getContentBounds()); }
-
-      isFocused() { return Promise.resolve(this.bw.isFocused()); }
-
-      exists() { return Promise.resolve(!this.bw.isDestroyed()); }
-
-      onClosed(f) { this.bw.on('closed', f); }
-
-      eval(js) { return this.bw.webContents.executeJavaScript(js); }
-
-      navigate(url) { this.bw.loadURL(url); }
-
-      print() { this.bw.webContents.print({ printBackground: true }); }
-
-      toggleDevTools() { this.bw.webContents.toggleDevTools(); }
-    }
-    let main;
-    D.wm = {
-      main: () => { main = main || new Win(D.el.getGlobal('elw')); return main; },
-      current: () => new Win(D.el.getCurrentWindow()),
-      get: (id) => new Win(D.el.BrowserWindow.fromId(id)),
-      create(o, url) {
-        const bw = new D.el.BrowserWindow({ ...o, parent: o.parent && o.parent.native });
-        D.elm.enable(bw.webContents);
-        if (o.title) bw.setTitle(o.title);
-        const target = typeof url === 'function' ? url(bw.id) : url;
-        if (/\/(about|log)\.html$/.test(target)) {
-          bw.webContents.on('context-menu', (event, params) => {
-            D.el.Menu.buildFromTemplate([
-              { role: 'copy', enabled: !!params.selectionText },
-              { label: 'Copy All', click: () => bw.webContents.executeJavaScript('window.diagnosticText.copyAll()') },
-              { label: 'Find', click: () => bw.webContents.executeJavaScript('window.diagnosticText.find()') },
-            ]).popup({ window: bw });
-          });
-        }
-        bw.loadURL(target);
-        return new Win(bw);
-      },
-      displayBounds: (r) => Promise.resolve(D.el.screen.getDisplayMatching(r).bounds),
-      newSession(env) {
-        const p = D.el.process.argv;
-        nodeRequire('child_process').spawn(p[0], p.slice(1), {
-          detached: true, stdio: ['ignore', 'ignore', 'ignore'], env: { ...process.env, ...env },
-        });
       },
     };
   }
