@@ -1,61 +1,30 @@
 # Installation
 
+Tauride is an unofficial fork of Ride with a [Tauri 2](https://tauri.app) desktop shell. Install it separately from Dyalog's official Ride. Download packages from the [Tauride releases page](https://github.com/xpqz/tauride/releases).
 
-!!!note
-    Ride is built on the [Electron](https://www.electronjs.org/) framework. To install this version of Ride, your platform must support the Electron major release 26. Consult Electron's [platform support documentation](https://github.com/electron/electron/tree/26-x-y?tab=readme-ov-file#platform-support) if in any doubt.
-
-    This version of Ride can connect to version 15.0 or later of the Dyalog interpreter.
-
-## Font and Keyboard Support
-
-If Dyalog is not installed on the machine that Ride is being installed on, then the APL385 Unicode font and keyboard mappings installed with Ride mean that they are available within Ride. However, to be able to enter APL glyphs outside Ride, see [APL Fonts and Keyboards](https://www.dyalog.com/apl-font-keyboard.htm).
-
-## Ride in the Browser
-
-The use of Ride from a browser requires no installation on the machine where Ride will run; all you need is a  modern browser. This is known as "zero-footprint Ride".
-
-!!!note
-    When installing Ride, if you select the default location suggested by the installer then APL can be launched as a Ride server without creating a [configuration file](sample_configuration_file.md).
-
-On non-Windows platforms, zero-footprint Ride is automatically installed to the default location (**[DYALOG]/RIDEapp**) when Dyalog is installed and no additional installation is necessary. On Windows, zero-footprint Ride needs separate installation.
-
-For details, see [Ride in the browser](ride_in_the_browser.md).
-
-## Linux
-
-Ride requires Debian 8, Fedora 24.04, or Ubuntu 14.04 (or later). Distributions built on top of the above should also work, provided that they have libnss version 3.26 or newer.
-
-1. Download the **.deb** or **.rpm** file (whichever is appropriate for your Linux distribution) from the [Ride releases page](https://github.com/Dyalog/ride/releases). If your Linux distribution does not support either **.deb** or **.rpm** files, then please contact support@dyalog.com.
-2. From the command line, use standard installation commands to install the package.
-
-A Ride shortcut is added to the desktop.
+The desktop installers contain the IDE; install Dyalog separately to start a local interpreter, or connect to a remote interpreter. Dyalog 15.0 or later is required. Connection settings and preferences retain their existing `Ride-4.8` storage location.
 
 ## macOS
 
-Ride requires macOS High Sierra (10.13) or later.
-
-Ride is the default UI for Dyalog on macOS and is installed at the same time as Dyalog (see the [Dyalog for macOS Installation and Configuration Guide](https://docs.dyalog.com/latest/Dyalog%20for%20macOS%20Installation%20and%20Configuration%20Guide.pdf)); no further installation is required.
-
-You can also install Ride as a separate, stand-alone, product, for example to work exclusively with remote APL interpreters:
-
-1. Download the **.pkg** file from the [Ride releases page](https://github.com/Dyalog/ride/releases).
-2. Double-click on Ride's **.pkg** file.
-3. Follow the instructions.
-
-Ride is added to the **Applications** directory (accessed by selecting **Applications** from the **Go** menu in the **Finder** menu bar, or by activating Spotlight with <kbd>⌘</kbd>+<kbd>Space</kbd> and typing Ride).
-
-Starting Ride will add Ride's icon to the temporary "Recently Used Apps" area to the right of the dock. To keep the Ride icon in the dock permanently, right-click on the icon and select `Options > Keep in Dock` from the drop-down list that appears.
+Download the Apple silicon **.dmg**, open it and drag **Tauride** into **Applications**. These releases are ad-hoc signed rather than notarized. If macOS blocks the app, use its **Privacy & Security** settings to allow the downloaded app after verifying its source.
 
 ## Windows
 
-Ride requires Windows 10 or later.
+Download the Windows x64 **.exe** (NSIS) or **.msi** installer and follow its prompts. Tauride uses Microsoft Edge WebView2; see the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) for runtime requirements.
 
-1. Download the **.zip** file from the [Ride releases page](https://github.com/Dyalog/ride/releases).
-2. Unzip the downloaded **.zip** file, placing the `setup_ride.exe` and `setup_ride.msi` files in the same location as each other.
-3. Double-click on the `setup_ride.exe` file.
-4. Follow the instructions.
+## Linux
 
-A Ride shortcut is added to the desktop
+Download the Linux x64 **.deb**, **.rpm** or **.AppImage** appropriate for your distribution. Install DEB and RPM packages using the distribution's package manager so it resolves dependencies. For AppImage, make the downloaded file executable before opening it.
+
+Tauride uses WebKitGTK 4.1. The Linux packages are built on Ubuntu 24.04; the older Electron Ride platform requirements do not describe these packages. See the [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux) when building from source.
+
+## Font and keyboard support
+
+Tauride bundles its APL font for use within the IDE. System-wide APL fonts and keyboard layouts are configured separately; see [APL Fonts and Keyboards](https://www.dyalog.com/apl-font-keyboard.htm). Tauride's prefix input and custom keyboard mappings remain available within the application.
+
+## Ride in the browser
+
+The separately published `tauride-zf-*.zip` contains the browser frontend, laid out as `RIDEapp/`. It is intended for an interpreter installation that serves zero-footprint Ride, rather than installation alongside the desktop app. See the [browser build instructions](https://github.com/xpqz/tauride/blob/main/tauri/README.md#zero-footprint-ride) and [Ride in the browser](ride_in_the_browser.md).
 
 ## Configuration (.ini) File
 

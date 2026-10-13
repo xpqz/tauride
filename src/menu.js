@@ -17,7 +17,7 @@ D.refreshOutputCommandMenu = () => {
 D.installMenu = function Menu(mx) {
   const updates = [];
   D.refreshMenuItems = () => { updates.forEach((update) => { update(); }); };
-  if (D.el && (!window.__RIDE__ || D.mac)) {
+  if (D.el && D.mac) {
     const pk = D.effectiveKeys();
     const k = {}; // k:a map of all keyboard shortcuts
     for (let i = 0; i < D.cmds.length; i++) {
@@ -69,8 +69,7 @@ D.installMenu = function Menu(mx) {
     };
     const m = new D.el.Menu();
     mx.forEach((y) => { m.append(render(y)); });
-    if (D.mac) D.el.Menu.setApplicationMenu(m);
-    else D.elw.setMenu(m);
+    D.el.Menu.setApplicationMenu(m);
   } else {
     const arg = mx;
     // DOM structure:

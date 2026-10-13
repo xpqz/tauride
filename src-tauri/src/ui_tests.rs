@@ -116,15 +116,37 @@ fn input_error(error: impl std::fmt::Display) -> String {
     format!("Native UI input failed: {error}. Unlock the desktop and grant Tauride input/accessibility permission.")
 }
 
+#[cfg(target_os = "macos")]
+pub async fn owned_sheet_focused(window: &WebviewWindow) -> Result<bool, String> {
+    let target = window.clone();
+    on_main_thread(window, move || {
+        let marker = objc2::MainThreadMarker::new().expect("Tauri main thread");
+        let app = objc2_app_kit::NSApplication::sharedApplication(marker);
+        let pointer = target.ns_window().map_err(input_error)?;
+        let parent = unsafe { &*(pointer as *const objc2_app_kit::NSWindow) };
+        Ok(app.isActive() && app.keyWindow().is_some_and(|key| {
+            key.isVisible() && key.sheetParent().is_some_and(|sheet_parent| std::ptr::eq(&*sheet_parent, parent))
+        }))
+    }).await
+}
+
 async fn focused(window: &WebviewWindow) -> Result<bool, String> {
+    #[cfg(not(target_os = "macos"))]
     if !window.is_focused().map_err(input_error)? { return Ok(false); }
     #[cfg(target_os = "macos")]
     {
         let (send, receive) = tokio::sync::oneshot::channel();
+        let target = window.clone();
         window.run_on_main_thread(move || {
             let marker = objc2::MainThreadMarker::new().expect("Tauri main thread");
-            let active = objc2_app_kit::NSApplication::sharedApplication(marker).isActive();
-            let _ = send.send(active);
+            let app = objc2_app_kit::NSApplication::sharedApplication(marker);
+            let owned = target.ns_window().ok().is_some_and(|pointer| {
+                let parent = unsafe { &*(pointer as *const objc2_app_kit::NSWindow) };
+                app.keyWindow().is_some_and(|key| {
+                    std::ptr::eq(&*key, parent) || key.sheetParent().is_some_and(|sheet_parent| std::ptr::eq(&*sheet_parent, parent))
+                })
+            });
+            let _ = send.send(app.isActive() && owned);
         }).map_err(input_error)?;
         return receive.await.map_err(input_error);
     }
@@ -171,10 +193,40 @@ fn special_key(value: char) -> Option<(Key, bool)> {
         '\u{e006}' | '\u{e007}' => (Key::Return, false),
         '\u{e00c}' => (Key::Escape, false),
         '\u{e032}' => (Key::F2, false),
+        '\u{e03c}' => (Key::F12, false),
         '\u{e003}' => (Key::Backspace, false),
         '\u{e004}' => (Key::Tab, false),
         _ => return None,
     })
+}
+
+#[tauri::command]
+pub async fn ui_test_cancel_file_dialog(app: AppHandle, window: WebviewWindow, target_label: Option<String>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::ClassType;
+        use objc2_foundation::NSObjectProtocol;
+        let target = if let Some(label) = target_label {
+            app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?
+        } else { window };
+        let owner = target.clone();
+        return on_main_thread(&target, move || {
+            let marker = objc2::MainThreadMarker::new().expect("Tauri main thread");
+            let application = objc2_app_kit::NSApplication::sharedApplication(marker);
+            let key = application.keyWindow().ok_or("No native file picker is focused")?;
+            let pointer = owner.ns_window().map_err(input_error)?;
+            let parent = unsafe { &*(pointer as *const objc2_app_kit::NSWindow) };
+            if !application.isActive() || !key.sheetParent().is_some_and(|sheet_parent| std::ptr::eq(&*sheet_parent, parent))
+                || !key.isKindOfClass(objc2_app_kit::NSSavePanel::class()) {
+                return Err("The focused native file picker does not belong to the target window".into());
+            }
+            let panel = unsafe { &*(objc2::rc::Retained::as_ptr(&key) as *const objc2_app_kit::NSSavePanel) };
+            unsafe { panel.cancel(None); }
+            Ok(())
+        }).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = (app, window, target_label); Err("Native file picker cancellation test is only supported on macOS".into()) }
 }
 
 #[tauri::command]
@@ -286,6 +338,13 @@ pub async fn ui_test_move_to(window: WebviewWindow, x: f64, y: f64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webdriver_function_keys_are_native_clicks() {
+        assert_eq!(special_key('\u{e032}'), Some((Key::F2, false)));
+        assert_eq!(special_key('\u{e03c}'), Some((Key::F12, false)));
+        assert_eq!(special_key('\u{e03d}'), Some((Key::Meta, true)));
+    }
 
     #[test]
     #[cfg(target_os = "macos")]

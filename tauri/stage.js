@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// Stages the files the Tauri webview loads into _/tauri-dist: the same set
-// mk's `incl` filter ships with Electron, minus node_modules other than the
-// trees the pages load. Those go to vendor/ (the Tauri CLI refuses a
+// Stages the files the Tauri webview loads into _/tauri-dist. Dependencies
+// loaded by the pages go to vendor/ (the Tauri CLI refuses a
 // frontendDist holding a node_modules folder) and the staged pages' paths
 // are rewritten to match.
 const fs = require('fs');
@@ -12,7 +11,7 @@ const out = path.join(root, '_', 'tauri-dist');
 
 const entries = [
   'index.html', 'about.html', 'dialog.html', 'status.html', 'log.html', 'empty.html',
-  'D.png', 'favicon.ico', 'favicon.png',
+  'D.png', 'favicon.ico', 'favicon.png', 'licence',
   'src', 'lib', 'style', '_/version.js', '_/monaco',
   'node_modules/jquery/dist',
   'node_modules/toastr/build',
@@ -47,6 +46,7 @@ require('child_process').execFileSync(process.execPath, ['mk', 'b'], { cwd: root
 
 fs.rmSync(out, { recursive: true, force: true });
 entries.forEach(copy);
+fs.copyFileSync(path.join(root, '_', 'ThirdPartyNotices.txt'), path.join(out, 'ThirdPartyNotices.txt'));
 
 // CommonJS modules the pages require(). The pages' CSP forbids eval, so
 // instead of evaluating fetched source, tauri/shim.js resolves require()

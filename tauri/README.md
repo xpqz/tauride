@@ -4,29 +4,33 @@ Tauride is an unofficial fork of Dyalog's Ride. Its version follows the latest
 Ride release (4.8.x); the name Tauride and the green icon keep it from being
 mistaken for the official Ride.
 
-This directory and `src-tauri/` run Ride's existing frontend in a
-[Tauri 2](https://tauri.app) shell instead of Electron. The frontend
-(`index.html`, `src/*.js`, the HTML dialogs) is unchanged apart from a few
-marked lines; what Electron and Node.js provided now comes from a small
-compatibility layer in the webview backed by Rust.
+This directory and `src-tauri/` run the desktop frontend in a
+[Tauri 2](https://tauri.app) shell. The other supported target is browser-only
+Ride. Desktop facilities use Tauri and Rust, with a compatibility layer for the
+Node/Electron-shaped APIs used by the frontend and `RIDE_JS` extensions.
 
 ## Build and run
 
-Prerequisites: Rust (stable), Node.js, `npm ci`, the Tauri CLI
-(`cargo install tauri-cli --locked`) and, on Linux, WebKitGTK 4.1 and GTK 3
-development files.
+Prerequisites: Rust stable, Node.js 22 or later and the
+[Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/).
+`npm ci` installs the pinned Tauri CLI and frontend/build dependencies.
 
-    cargo tauri build      # release binary: src-tauri/target/release/tauride
-    cargo tauri dev        # debug build, run from the source tree
+    npm start             # stage and run the desktop development app
+    npm run build         # release binary: src-tauri/target/release/tauride
+    npm run stage         # compile styles and stage frontend assets
+    npm run build:zf      # browser-only Ride archive
 
-Both first run `npm run css` and `node tauri/stage.js`, which copies the
-files the pages load into `_/tauri-dist` (the Electron build's `mk` filter,
-with the bundled Monaco editor and only the `node_modules` trees the pages use) and generates
+`npm start` and `npm run build` first compile styles and stage the frontend
+through Tauri's build hooks. `npm run stage` performs those steps without
+building the native app. The staging script copies the
+files the pages load into `_/tauri-dist`, with bundled Monaco and only the
+`node_modules` trees the pages use, and generates
 `tauri-modules.js` (see below). The staged dist and `tauri/shim.js` are
 embedded in the binary at compile time, so after a change to `src/`, `lib/`,
-`style/` or the HTML pages run `node tauri/stage.js` and then rebuild
-(`touch src-tauri/src/lib.rs` so cargo notices, then `cargo build` or
-`cargo tauri build`); a plain `cargo build` without restaging runs the old
+`style/` or the HTML pages run `npm run stage` and then rebuild
+(`touch src-tauri/src/lib.rs` so cargo notices, then
+`cargo build --manifest-path src-tauri/Cargo.toml` or `npm run build`);
+a plain Cargo build without restaging runs the old
 frontend. Ride's environment variables work as before:
 `RIDE_SPAWN=/usr/bin/dyalog`, `RIDE_CONNECT=host:port`, `RIDE_LOG`,
 `RIDE_JS`, `RIDE_EDITOR`, `RIDE_CONF`, `RIDE_PREFS`.
@@ -80,7 +84,7 @@ Use a separate target directory from ordinary builds. AVA arguments pass through
 
 ## Zero-footprint Ride
 
-`node mk zf` writes `_/zf`: the frontend laid out as Dyalog's `RIDEapp`
+`npm run build:zf` compiles styles and runs `node mk zf`, which writes `_/zf`: the frontend laid out as Dyalog's `RIDEapp`
 directory (`index.html` and the other pages at the root, `src/`, `lib/`,
 `style/`, `_/version.js`, `_/monaco/` (the editor, stylesheet and workers),
 and under `node_modules/` only jquery and toastr), zipped as
@@ -122,8 +126,8 @@ scripts. It provides the subset of Node and Electron Ride uses:
 | `child_process.spawn` | `proc.rs`: tokio processes |
 | `ssh2` | `ssh.rs`: russh (ring) |
 | `node-ipc` | Tauri events addressed to window labels (`emitTo`); the main window serves, the others are its clients; no handshake polling |
-| `BrowserWindow`, `getCurrentWindow`, `screen` | not emulated: Ride's code calls `src/wm.js` (below) |
-| `@electron/remote`: `getGlobal`, `app`, `shell`, `clipboard` | `winstate.rs` (main.js's window geometry), `open_url` |
+| Desktop windows and monitors | `src/wm.js` uses Tauri's window API (below) |
+| `@electron/remote`: `getGlobal`, `app`, `shell`, `clipboard` | `winstate.rs` (persistent window geometry), `open_url` |
 | `dialog.*Sync` | `dialog.rs`: GTK dialogs on Linux; task dialogs and the common item dialogs (rfd) on Windows |
 | `Menu.popup()` | `menu.rs`: native popup menus |
 
@@ -167,12 +171,11 @@ install the owning session's configured menu; other sessions cannot replace it.
 Windows and Linux keep their previous defaults until physical user testing can
 validate proposed platform mappings. See `docs/keyboard_shortcuts.md`.
 
-Windows: `src/wm.js` gives Ride's code one small window API (create, find,
-show/hide/focus/close, size, title, run a script, print, devtools) with two
-implementations: Electron's `BrowserWindow`, and Tauri's JS window API
-(`WebviewWindow`, monitors), where windows are addressed by label (`main`,
-`w<id>`) and queries are promises. Calls on a window wait until Tauri has
-created it. Content-size requests preserve fullscreen and maximized window
+Windows: `src/wm.js` gives the desktop frontend one window API (create, find,
+show/hide/focus/close, size, title, run a script, print, devtools) backed by
+Tauri's JS window API (`WebviewWindow`, monitors). Windows are addressed by
+label (`main`, `w<id>`) and queries are promises. Connection-page geometry is
+saved through `D.wm.saveLaunchState`; Preferences F12 targets its own window. Calls on a window wait until Tauri has created it. Content-size requests preserve fullscreen and maximized window
 geometry; ordinary windows retain the queued resize and hidden-window handling.
 A small plugin (`ride_plugin` in `lib.rs`) injects the shim into
 every webview, however its window was created, reports page loads, and
@@ -195,13 +198,15 @@ mid-transfer can leave the temporary in the remote interpreter's `⎕SE`.
 
 Two channels connect the webview to Rust:
 
-- **Synchronous**: Ride calls `fs.readFileSync`, `dialog.showMessageBoxSync`
-  and the like synchronously. The shim answers them with synchronous XHR to
+- **Synchronous**: compatibility calls such as `fs.readFileSync` and
+  `dialog.showMessageBoxSync` remain synchronous. The shim answers them with synchronous XHR to
   a custom `ridesync://` scheme (`http://ridesync.localhost` on Windows,
   where WebView2 preflights the POST), which Rust serves on the main thread.
-- **Asynchronous**: sockets, processes and windows use Tauri commands and
-  events (`ride-net`, `ride-proc`, `ride-ssh`, `ride-ipc`, `ride-menu`,
-  `ride-page-load`).
+- **Asynchronous**: sockets, processes, windows and native services use
+  Tauri commands and events (`ride-net`, `ride-proc`, `ride-ssh`, `ride-ipc`,
+  `ride-menu`, `ride-page-load`). Desktop errors and confirmations use
+  asynchronous native dialogs, presented as window-owned sheets on macOS;
+  file pickers and URL/path opening also use asynchronous commands.
 
 A second scheme, `ridefile://`, serves local files to windows Ride points at
 a `file://` URL outside the app (3500⌶ writes its HTML to a temp file).
@@ -333,7 +338,7 @@ and a function the agent saved as a `window` event with `event: save` and
   prompt's return; output from other threads (`&`) interleaves. Results are
   capped at 200 lines or 64 KB with `truncated: true`; the rest is in the
   transcript.
-- The whole feature is gated on `window.__RIDE__`; the Electron build does
+- The whole feature is gated on `window.__RIDE__`; the browser build does
   not have it.
 
 ## Status

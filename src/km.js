@@ -150,25 +150,28 @@
     TPL() {
       openURI(D.hlp.THIRDPARTY);
     },
-    OWS() {
+    async OWS() {
       if (D.el && D.ide.floating) {
         D.ipc.of.ride_master.emit('OWS');
         return;
       }
       if (D.el && D.isLocalInterpreter) {
-        const x = D.el.dialog.showOpenDialogSync(D.wm.main().native, {
+        const options = {
           title: 'Open file',
           filters: [],
           properties: ['openFile'],
-        });
-        if (!x) return;
+        };
+        const owner = D.ide;
+        const x = window.__RIDE__ ? (await D.el.dialog.showOpenDialog(D.wm.main().native, options)).filePaths
+          : D.el.dialog.showOpenDialogSync(D.wm.main().native, options);
+        if (!x || !x.length || D.ide !== owner || !owner.connected) return;
         const [v] = x;
         const qt = /\s/.test(v) ? '"' : '';
         if (/\.dws$/i.test(v)) {
           $.confirm(
             `Run Latent Expression of ${v.replace(/^.*[\\/]/, '')}?`,
             'Load Workspace',
-            (y) => D.ide.exec([`      )${(y ? '' : 'x')}load ${qt}${v}${qt}\n`], 0),
+            (y) => { if (D.ide === owner && owner.connected) owner.exec([`      )${(y ? '' : 'x')}load ${qt}${v}${qt}\n`], 0); },
           );
         } else {
           D.ide.exec([`      )ED ${qt}file://${v}${qt}\n`], 0);

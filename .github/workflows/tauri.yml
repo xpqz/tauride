@@ -30,9 +30,6 @@ jobs:
             name: macos-arm64
             bundles: dmg
     runs-on: ${{ matrix.os }}
-    env:
-      # Only the Electron build needs Electron itself.
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -76,7 +73,7 @@ jobs:
       # Runs beforeBuildCommand (npm run css && node tauri/stage.js) first.
       # tauri.bundle.conf.json turns bundling on for CI only.
       - name: Build
-        run: npx --yes @tauri-apps/cli@2.12.1 build --config src-tauri/tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
+        run: npm run build -- --config src-tauri/tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
 
       # The macOS app ships inside the dmg, so it has no bare binary.
       - if: matrix.bin
@@ -101,8 +98,6 @@ jobs:
   # Zero-footprint Ride: the tree an interpreter serves from [DYALOG]/RIDEapp.
   zf:
     runs-on: ubuntu-24.04
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v5
         with:
