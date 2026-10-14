@@ -104,6 +104,28 @@ test('hidden content size requests apply the latest size after showing', async (
   assert.deepEqual(calls.slice(-3), [['max', null], ['min', [400, 400]], ['hide']]);
 });
 
+test('connection cog uses content minima without legacy frame offsets', async () => {
+  const text = fs.readFileSync(path.join(__dirname, '../src/cn.js'), 'utf8');
+  const start = text.indexOf('    const toggleConfig =');
+  const end = text.indexOf('    toggleConfig(winstate.launchWin.expanded);', start);
+  assert.ok(start >= 0 && end > start);
+  const { win, calls } = load();
+  win.contentBounds = async () => ({ height: 700 });
+  const winstate = { launchWin: { width: 400, expandedWidth: 900, expanded: false } };
+  const toggle = vm.runInNewContext(`(() => {${text.slice(start, end)}; return toggleConfig;})()`, {
+    winstate, q: { rhs: {} }, $: () => ({ is: () => false }),
+    D: { wm: { main: () => win, saveLaunchState() {} } },
+    I: { cn: { toggleMaximize() {} } }, setTimeout(callback) { callback(); },
+  });
+  for (const expanded of [false, true, false]) {
+    calls.length = 0;
+    toggle(expanded);
+    await drain();
+    assert.deepEqual(calls[0], ['min', [expanded ? 885 : 400, 400]]);
+    assert.deepEqual(calls.at(-1), ['min', [expanded ? 885 : 400, 400]]);
+  }
+});
+
 test('launch/session geometry reports use the native window adapter with the exact saved state', async () => {
   const calls = [];
   const D = {};
