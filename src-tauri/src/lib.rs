@@ -33,6 +33,25 @@ async fn ui_test_window_state(app: AppHandle, label: String) -> Result<Value, St
     let sheet_focused = ui_tests::owned_sheet_focused(&w).await?;
     #[cfg(not(target_os = "macos"))]
     let sheet_focused = false;
+    #[cfg(target_os = "macos")]
+    let native_constraints = {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let target = w.clone();
+        w.run_on_main_thread(move || {
+            let result = target.ns_window().map_err(|e| e.to_string()).map(|pointer| {
+                let window = unsafe { &*(pointer as *const objc2_app_kit::NSWindow) };
+                let size = |s: objc2_foundation::NSSize| json!({ "width": s.width, "height": s.height });
+                json!({
+                    "contentMinSize": size(window.contentMinSize()),
+                    "contentMaxSize": size(window.contentMaxSize()),
+                })
+            });
+            let _ = send.send(result);
+        }).map_err(|e| e.to_string())?;
+        receive.await.map_err(|e| e.to_string())??
+    };
+    #[cfg(not(target_os = "macos"))]
+    let native_constraints = Value::Null;
     Ok(json!({
         "label": label,
         "title": w.title().map_err(|e| e.to_string())?,
@@ -43,6 +62,7 @@ async fn ui_test_window_state(app: AppHandle, label: String) -> Result<Value, St
         "sheetFocused": sheet_focused,
         "width": size.width,
         "height": size.height,
+        "nativeConstraints": native_constraints,
     }))
 }
 

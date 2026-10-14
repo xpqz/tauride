@@ -983,7 +983,7 @@
       const expanded = (show === undefined) ? !$(q.rhs).is(':visible') : !!show;
       const newWidth = expanded ? winstate.launchWin.expandedWidth : winstate.launchWin.width;
       winstate.launchWin.expanded = expanded;
-      const minwidth = winstate.dx + (expanded ? 885 : 400);
+      const minwidth = expanded ? 885 : 400;
       const w = D.wm.main();
       w.setMinSize(minwidth, 400);
       w.contentBounds().then(({ height }) => w.setContentSize(newWidth, height));

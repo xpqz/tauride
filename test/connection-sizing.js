@@ -37,6 +37,34 @@ async function toggle(c, expanded) {
   return settledLayout(c, result => result.expanded === expanded);
 }
 
+test('cn-normal-height-resizes-after-cog-toggles', async t => {
+  const c = t.context.app.client;
+  await (await c.$('#cn_neu')).click();
+  await settledLayout(c);
+  for (const expanded of [false, true, false]) {
+    const current = await layout(c);
+    if (current.expanded !== expanded) await toggle(c, expanded);
+    if (process.platform === 'darwin') {
+      const main = (await t.context.app.getWindowState()).find(w => w.label === 'main');
+      const minimum = main.nativeConstraints.contentMinSize;
+      t.is(minimum.height, 400, 'Cog leaves the native minimum content height at 400');
+      t.is(minimum.width, expanded ? 885 : 400, 'Cog sets the native minimum content width');
+    }
+    const rect = await c.getWindowRect();
+    await c.setWindowRect(null, null, rect.width, 500);
+    const shorter = await settledLayout(c);
+    await c.setWindowRect(null, null, rect.width, 650);
+    const taller = await settledLayout(c);
+    t.true(taller.height > shorter.height + 100, 'Native connection window grows vertically');
+    t.true(taller.viewportHeight > shorter.viewportHeight + 100, 'Connection viewport grows vertically');
+    await c.setWindowRect(null, null, rect.width, 500);
+    const shrunk = await settledLayout(c);
+    t.is(shrunk.height, shorter.height, 'Native connection window shrinks back');
+    t.is(shrunk.viewportHeight, shorter.viewportHeight, 'Connection viewport shrinks back');
+    t.is(shrunk.expanded, expanded);
+  }
+});
+
 for (const mode of ['fullscreen', 'maximized']) {
   test(`cn-cog-preserves-${mode}-size`, async t => {
     const c = t.context.app.client;
