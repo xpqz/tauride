@@ -29,7 +29,12 @@ async function fixture(t) {
   let script = fs.readFileSync(path.join(__dirname, '../src-tauri/tests/fixtures/fake-codex-app-server.py'), 'utf8');
   script = script.replace("thread_number = 0", "with open(__file__ + '.pids', 'a') as log:\n    log.write(str(os.getpid()) + '\\n')\nthread_number = 0");
   script = script.replace("prompt = params['input'][0]['text']", "prompt = params['input'][0]['text']\n        with open(__file__ + '.contexts', 'a') as log:\n            log.write(json.dumps(prompt) + '\\n')\n        if os.path.exists(__file__ + '.wait'):\n            os.unlink(__file__ + '.wait')\n            time.sleep(60)");
-  script = script.replaceAll('The array ranks differ. ', '<img src=x onerror=window.errorHelpInjected=true> ');
+  const firstDelta = '<img src=x onerror=window.errorHelpInjected=true> Check `⍴⍵` with\n``';
+  const secondDelta = '`apl\n⍳3\n<img src=x onerror=window.errorHelpInjected=true>\n```\nCheck the operands.';
+  // JSON string literals are valid Python strings for this fixture payload.
+  script = script.replace("delta='The array ranks differ. '", `delta=${JSON.stringify(firstDelta)}`);
+  script = script.replace("delta='Check the operands.'", `delta=${JSON.stringify(secondDelta)}`);
+  script = script.replace("'text': 'The array ranks differ. Check the operands.'", `'text': ${JSON.stringify(firstDelta + secondDelta)}`);
   fs.writeFileSync(executable, script, { mode: 0o700 });
   t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
   const c = t.context.app.client;
@@ -116,6 +121,25 @@ fixtureTest('native explanation preserves historical target, streams inert text,
     return panel.querySelector('.error-help-text').textContent.includes('<img src=x')
       && !panel.querySelector('img,script') && !window.errorHelpInjected;
   }));
+  const codeRendering = await c.execute(async () => {
+    const text = document.querySelector('#error-help .error-help-text');
+    const inline = text.querySelector('code');
+    const block = text.querySelector('pre code');
+    const loaded = await document.fonts.load('16px apl', '⍴⍵⍳');
+    return {
+      inline: inline && inline.textContent,
+      block: block && block.textContent,
+      fonts: [inline, block].map(node => node && getComputedStyle(node).fontFamily),
+      loaded: loaded.length > 0 && document.fonts.check('16px apl', '⍴⍵⍳'),
+    };
+  });
+  t.is(codeRendering.inline, '⍴⍵');
+  t.is(codeRendering.block, '⍳3\n<img src=x onerror=window.errorHelpInjected=true>\n');
+  codeRendering.fonts.forEach(font => t.regex(font, /\bapl\b/i));
+  t.true(codeRendering.loaded, 'the APL font loads for explanation code');
+  if (process.env.TAURIDE_ERROR_HELP_SCREENSHOT === '/tmp/tauride-error-code-render.png') {
+    fs.writeFileSync(process.env.TAURIDE_ERROR_HELP_SCREENSHOT, await c.takeScreenshot(), 'base64');
+  }
   await menuExplain(c); await complete(c);
   t.true(fake.contexts().at(-1).includes(latest.id), 'native Agent menu chooses the latest error');
   t.true((await client.request('status')).connected, 'companion leaves the existing MCP connection working');

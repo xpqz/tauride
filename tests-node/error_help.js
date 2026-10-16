@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { create } = require('../src/error_help');
+const { create, renderExplanation } = require('../src/error_help');
+const fakeDocument = () => {
+  const document = { createElement: tag => make(tag), createTextNode: text => make('#text', text) };
+  const make = (tag, text = '') => ({
+    tag, ownerDocument: document, children: [], value: text,
+    get textContent() { return this.value + this.children.map(n => n.textContent).join(''); },
+    set textContent(value) { this.value = value; this.children = []; },
+    appendChild(node) { this.children.push(node); return node; },
+  });
+  return document;
+};
 const setup = () => {
   const calls = []; let listener;
   const io = {
@@ -74,13 +84,16 @@ test('browser panel renders HTML-looking Codex output inertly and Escape restore
   const vm = require('node:vm'); const fs = require('node:fs');
   const nodes = []; let listener; let focused;
   const make = tag => {
-    const n = { tag, hidden: false, dataset: {}, attrs: {}, children: [], textContent: '',
+    const n = { tag, ownerDocument: document, hidden: false, dataset: {}, attrs: {}, children: [], value: '',
+      get textContent() { return this.value + this.children.map(x => x.textContent).join(''); },
+      set textContent(value) { this.value = value; this.children = []; },
       appendChild(x) { this.children.push(x); }, setAttribute(k, v) { this.attrs[k] = v; },
       addEventListener(k, fn) { this[k] = fn; }, focus() { focused = this; } };
     nodes.push(n); return n;
   };
   const original = { focus() { focused = original; } };
-  const document = { createElement: make, body: make('body'), activeElement: original };
+  const document = { createElement: make, createTextNode: text => ({ tag: '#text', textContent: text }), activeElement: original };
+  document.body = make('body');
   let requestId; let nativeFocus = 0;
   const D = { wm: { main: () => ({ focus() { nativeFocus += 1; } }) }, prf: { agentExecutable: () => '', agentModel: () => '' }, agent: {
     level: () => 'observe', errorContext: async () => ({ message: '<img src=x>', error: {} }), onErrorChange() {},
@@ -132,4 +145,37 @@ test('Retry preserves the displayed error when the latest error changes', async 
   io.context = async id => ({ id: id || 'newest', message: 'DOMAIN ERROR' });
   await c.retry();
   assert.equal(calls.filter(x => x[0] === 'companion_explain').at(-1)[1].context.id, 'first');
+});
+
+test('explanation renders screenshot APL spans as code and HTML as inert text', () => {
+  const element = fakeDocument().createElement('div');
+  renderExplanation(element, 'The name `foo` is undefined; try `⎕←foo`. `<img src=x onerror=bad>` <script>bad()</script>');
+  assert.deepEqual(element.children.filter(n => n.tag === 'code').map(n => n.textContent), ['foo', '⎕←foo', '<img src=x onerror=bad>']);
+  assert.equal(element.textContent, 'The name foo is undefined; try ⎕←foo. <img src=x onerror=bad> <script>bad()</script>');
+  assert.ok(element.children.every(n => ['#text', 'code'].includes(n.tag)));
+});
+test('streaming rerenders split delimiters without dropping unmatched or literal ticks', () => {
+  const element = fakeDocument().createElement('div');
+  const chunks = ['Try ', '`', '⎕←x', '`', ' and ``literal`` with `unfinished'];
+  let text = '';
+  chunks.forEach(chunk => {
+    text += chunk; renderExplanation(element, text);
+    assert.equal(element.textContent, text.includes('⎕←x`') ? text.replace('`⎕←x`', '⎕←x') : text);
+  });
+  assert.equal(element.children.filter(n => n.tag === 'code').length, 1);
+  renderExplanation(element, '`one\ntwo`');
+  assert.equal(element.textContent, '`one\ntwo`');
+});
+test('fenced code preserves indentation, newlines and HTML across split closing fences', () => {
+  const element = fakeDocument().createElement('div');
+  const opening = 'Correction:\n```apl\n  ⎕←x\n    `<img src=x>`\n';
+  [opening, `${opening}\u0060`, `${opening}\u0060\u0060`].forEach(text => {
+    renderExplanation(element, text);
+    assert.equal(element.textContent, text);
+  });
+  renderExplanation(element, `${opening}\u0060\u0060\u0060\nThen use \u0060x\u0060.`);
+  const pre = element.children.find(n => n.tag === 'pre');
+  assert.equal(pre.children[0].tag, 'code');
+  assert.equal(pre.textContent, '  ⎕←x\n    `<img src=x>`\n');
+  assert.equal(element.textContent, 'Correction:\n  ⎕←x\n    `<img src=x>`\nThen use x.');
 });

@@ -1,4 +1,44 @@
 (() => {
+  // Only code delimiters are interpreted; every other character stays inert text.
+  const renderExplanation = (element, value) => {
+    const doc = element.ownerDocument;
+    element.textContent = '';
+    const append = (parent, tag, text) => {
+      const node = tag ? doc.createElement(tag) : doc.createTextNode(text);
+      if (tag) node.textContent = text;
+      parent.appendChild(node);
+      return node;
+    };
+    const inline = (text) => {
+      let start = 0;
+      const ticks = /`+/g;
+      let opening = null; let match;
+      while ((match = ticks.exec(text))) {
+        if (match[0].length !== 1) opening = null;
+        else if (opening && !/[\r\n]/.test(text.slice(opening.index + 1, match.index))) {
+          append(element, null, text.slice(start, opening.index));
+          append(element, 'code', text.slice(opening.index + 1, match.index));
+          start = ticks.lastIndex; opening = null;
+        } else opening = match;
+      }
+      append(element, null, text.slice(start));
+    };
+    // Wait for a closing fence while streaming so unfinished delimiters remain visible.
+    const fences = /^```[^`\r\n]*\r?\n([\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm;
+    let start = 0; let match;
+    while ((match = fences.exec(value))) {
+      inline(value.slice(start, match.index));
+      const pre = append(element, 'pre', '');
+      append(pre, 'code', match[1]);
+      start = fences.lastIndex;
+    }
+    const tail = value.slice(start);
+    const unfinished = /^```[^`\r\n]*(?:\r?\n|$)/m.exec(tail);
+    if (unfinished) {
+      inline(tail.slice(0, unfinished.index));
+      append(element, null, tail.slice(unfinished.index));
+    } else inline(tail);
+  };
   const create = (io) => {
     let sequence = 0; let active = null; let unlisten = null; let selected; let barrier = null;
     let view = {
@@ -71,7 +111,7 @@
       explain, cancel, close, retry: () => explain(selected), state: () => view,
     };
   };
-  if (typeof module !== 'undefined' && module.exports) module.exports = { create };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { create, renderExplanation };
   if (typeof window === 'undefined' || !window.__RIDE__) return;
   let controller; let panel; let previousFocus;
   const install = () => {
@@ -82,7 +122,7 @@
     const title = document.createElement('h2'); title.id = 'error-help-title'; title.textContent = 'Explain this error'; panel.appendChild(title);
     const error = document.createElement('pre'); error.className = 'error-help-context'; panel.appendChild(error);
     const status = document.createElement('p'); status.setAttribute('role', 'status'); panel.appendChild(status);
-    const text = document.createElement('pre'); text.className = 'error-help-text'; text.setAttribute('aria-label', 'Explanation and suggested correction'); panel.appendChild(text);
+    const text = document.createElement('div'); text.className = 'error-help-text'; text.setAttribute('aria-label', 'Explanation and suggested correction'); panel.appendChild(text);
     const buttons = {};
     const action = (name, label, fn) => {
       const b = document.createElement('button'); b.type = 'button'; b.dataset.action = name; b.textContent = label;
@@ -101,7 +141,8 @@
       invoke,
       render(v) {
         const opening = panel.hidden && v.open;
-        panel.hidden = !v.open; status.textContent = v.status; text.textContent = v.text;
+        panel.hidden = !v.open; status.textContent = v.status;
+        renderExplanation(text, v.text);
         const message = v.context && (v.context.message || (v.context.error && v.context.error.message));
         error.textContent = v.context ? `${message || 'Selected error'}${v.context.stale ? '\nEarlier error — session state has changed.' : ''}` : '';
         panel.setAttribute('aria-busy', String(v.busy));
