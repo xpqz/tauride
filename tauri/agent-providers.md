@@ -45,6 +45,11 @@ lifecycle and the privacy rules are the same whichever provider answers.
 `Session` holds an optional boxed provider and its process identity instead
 of `Option<Server>`. Process settings (provider id and executable) form that
 identity: a change stops the old provider before starting the replacement.
+One registry lookup returns the selected descriptor and an unstarted provider
+instance together. Construction and dropping an unused instance must not touch
+an existing session child; only the instance installed for an explanation owns
+that process.
+
 Request settings (currently model) are passed to each explanation. A model
 change does not restart a warm process, matching today's `thread/start`
 behaviour. The setup cache uses the same process identity and ignores model.
@@ -59,6 +64,7 @@ type ProviderFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 trait Provider: Send {
     fn descriptor(&self) -> &Descriptor;
+    fn reusable(&self) -> bool;
     fn check(&mut self, timeout: Duration) -> ProviderFuture<'_, SetupStatus>;
     fn explain<'a>(
         &'a mut self,
@@ -100,7 +106,10 @@ This lets `terminate` call `start_kill` while an explanation owns the provider
 lock. `stop` is idempotent, kills the owned child and reaps it. Drop is the
 fallback for interrupted startup. A cold provider registers the current
 request's child, reaps and clears it on completion, and can succeed with an
-empty slot; absence of a child is not itself a failed explanation.
+empty slot; absence of a child is not itself a failed explanation. After a
+successful request, `Provider::reusable` decides whether Session retains the
+instance. Child presence and the `warm` descriptor are adapter concerns, not
+Session policy.
 
 Setup uses a separate provider instance and child slot, never the session's
 warm process. Its own bounded timeout and cleanup cover every result,
@@ -110,7 +119,8 @@ operate only on the session's explanation provider.
 
 Setup states keep their names (`missing`, `signin`, `ready`,
 `unavailable`); the provider supplies the message and its descriptor supplies
-the guidance, so `error_help.js` holds no provider-specific text.
+the guidance for `missing`, `signin` and `unavailable`, so `error_help.js` holds
+no provider-specific text. There is no unused `ready` guidance field.
 
 ### Rules every provider keeps
 
@@ -139,7 +149,9 @@ passes both before and after with its source unchanged. Mechanical test
 harness, mock, preference setter, DOM selector, renamed label and signature
 changes are allowed; list each edit and its reason in the PR document.
 Behavioural assertions must not be removed, weakened or have their expected
-values changed.
+values changed. Following the unchanged before/after extraction proof, final
+review explicitly replaces the capture test's hard-coded client version with
+`package.json`'s version; the protocol and prompt checks remain the same.
 
 ### `claude`
 
@@ -198,12 +210,12 @@ instead of promising read-only behaviour.
   per-request override.
 - The panel uses `name`, `docs_url` and state-specific `guidance` from the
   descriptor. Preferences uses `id`, `name` and `supports_model`; lifecycle
-  uses `warm`. Disclosure promises enforced read-only operation and no tools
+  uses `reusable`; the Codex adapter uses `warm` in its reuse decision. Disclosure promises enforced read-only operation and no tools
   only for `enforces_no_tools: true`, otherwise it explains the absence of
   that guarantee.
-- `AGE` keeps its command code. Its label becomes `Explain Last Error…` in
-  `cmds.js`, `init.js` and the default menu in `prf.js`; the panel title
-  names the provider. The native menu is built from the frontend's menu
+- `AGE` keeps its command code and the label `Explain Last Error…` in
+  `cmds.js` and the default menu in `prf.js`. The specific-error context menu
+  in `init.js` is `Explain This Error…`; the panel title names the provider. The native menu is built from the frontend's menu
   definition (`set_app_menu`), which the person may customise, so a label
   that changed with the provider would have to rewrite that definition.
 

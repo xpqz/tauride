@@ -370,7 +370,7 @@ transcript rotation at
 
 ## Explain errors with a provider
 
-With **Agent > Observe Session** or **Allow Control** enabled, choose **Agent > Explain Last Error…**, or right-click a captured error in the Session and choose **Explain Last Error…**. The same action is available on the associated stopped tracer line. The command is `AGE` in custom menus and keyboard mappings; it has no default shortcut. Errors that occurred before observation was enabled do not have a captured context.
+With **Agent > Observe Session** or **Allow Control** enabled, choose **Agent > Explain Last Error…**, or right-click a captured error in the Session and choose **Explain This Error…**. The same action is available on the associated stopped tracer line. The command is `AGE` in custom menus and keyboard mappings; it has no default shortcut. Errors that occurred before observation was enabled do not have a captured context.
 
 Tauride opens an explanation panel and streams a concise explanation and suggested correction from the selected explanation provider. Codex is currently the only available provider. **Cancel** stops the request; **Explain error** makes a fresh request for the selected error; **Copy error context** copies the diagnostic bundle. The companion does not apply changes or execute APL.
 

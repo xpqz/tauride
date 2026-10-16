@@ -1,5 +1,6 @@
-// Pre-provider baseline: keep this entire file unchanged during provider extraction.
+// Pre-provider baseline: protocol and prompt assertions stay unchanged; the client version follows package.json.
 const fs = require('node:fs');
+const clientVersion = require('../package.json').version;
 
 module.exports = ({ fixtureTest, fixture, failure, menuExplain, complete, setModel }) => {
   fixtureTest('native Codex requests preserve the complete pre-provider protocol and prompt', async (t) => {
@@ -40,7 +41,7 @@ module.exports = ({ fixtureTest, fixture, failure, menuExplain, complete, setMod
       request.params.cwd = '<empty-companion-cwd>';
     });
     const initialize = { id: 1, method: 'initialize', params: {
-      clientInfo: { name: 'tauride-error-help', version: '4.8.4' }, capabilities: {},
+      clientInfo: { name: 'tauride-error-help', version: clientVersion }, capabilities: {},
     } };
     const initialized = { method: 'initialized', params: {} };
     const config = {

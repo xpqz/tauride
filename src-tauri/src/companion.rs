@@ -24,7 +24,6 @@ type ProviderEmit<'a> = dyn FnMut(&str, String) -> Result<(), String> + Send + '
 pub struct SetupGuidance {
     missing: &'static str,
     signin: &'static str,
-    ready: &'static str,
     unavailable: &'static str,
 }
 
@@ -45,7 +44,6 @@ static CODEX: Descriptor = Descriptor {
     guidance: SetupGuidance {
         missing: "Install the Codex CLI, then run codex login in a terminal to sign in.",
         signin: "Run codex login in a terminal to sign in. Check your executable in Preferences if Codex cannot be reached.",
-        ready: "Codex is ready to explain errors.",
         unavailable: "Run codex login in a terminal to sign in. Check your executable in Preferences if Codex cannot be reached.",
     },
 };
@@ -59,11 +57,13 @@ struct Settings {
 fn configuration(
     provider: &str,
     settings: &Value,
-) -> Result<(&'static Descriptor, Settings), String> {
-    let descriptor = match provider {
-        "codex" => &CODEX,
-        _ => return Err("Unknown error explanation provider".into()),
-    };
+    child: Arc<Mutex<Option<Child>>>,
+) -> Result<(ConfiguredProvider, Settings), String> {
+    let entry = PROVIDERS
+        .iter()
+        .find(|entry| entry.descriptor.id == provider)
+        .ok_or("Unknown error explanation provider")?;
+    let descriptor = entry.descriptor;
     let invalid = || format!("Invalid {} configuration", descriptor.name);
     let object = settings.as_object().ok_or_else(invalid)?;
     if object
@@ -89,12 +89,12 @@ fn configuration(
     if !descriptor.supports_model && !settings.model.is_empty() {
         return Err(invalid());
     }
-    Ok((descriptor, settings))
+    Ok((entry.instance(&settings, child), settings))
 }
 
 #[tauri::command]
 pub fn companion_providers() -> Vec<&'static Descriptor> {
-    vec![&CODEX]
+    PROVIDERS.iter().map(|entry| entry.descriptor).collect()
 }
 
 struct Prompt {
@@ -129,6 +129,7 @@ fn prompt_parts() -> Prompt {
 
 trait Provider: Send {
     fn descriptor(&self) -> &'static Descriptor;
+    fn reusable(&self) -> bool;
     fn check(&mut self, timeout: Duration) -> ProviderFuture<'_, SetupStatus>;
     fn explain<'a>(
         &'a mut self,
@@ -147,6 +148,9 @@ struct CodexProvider {
 impl Provider for CodexProvider {
     fn descriptor(&self) -> &'static Descriptor {
         &CODEX
+    }
+    fn reusable(&self) -> bool {
+        self.descriptor().warm && self.server.is_some() && self.child.lock().unwrap().is_some()
     }
     fn check(&mut self, timeout: Duration) -> ProviderFuture<'_, SetupStatus> {
         Box::pin(check_setup(&self.executable, timeout))
@@ -200,21 +204,38 @@ impl Settings {
 }
 
 struct ConfiguredProvider {
+    descriptor: &'static Descriptor,
     identity: ProcessIdentity,
     provider: Box<dyn Provider>,
 }
-fn provider_instance(
+struct RegistryEntry {
     descriptor: &'static Descriptor,
-    settings: &Settings,
-    child: Arc<Mutex<Option<Child>>>,
-) -> ConfiguredProvider {
-    ConfiguredProvider {
-        identity: settings.process_identity(descriptor),
-        provider: Box::new(CodexProvider {
+    // Constructors are inert; dropping an unstarted instance must leave the shared child untouched.
+    create: fn(&Settings, Arc<Mutex<Option<Child>>>) -> Box<dyn Provider>,
+}
+
+static PROVIDERS: &[RegistryEntry] = &[RegistryEntry {
+    descriptor: &CODEX,
+    create: |settings, child| {
+        Box::new(CodexProvider {
             executable: settings.executable.clone(),
             child,
             server: None,
-        }),
+        })
+    },
+}];
+
+impl RegistryEntry {
+    fn instance(
+        &self,
+        settings: &Settings,
+        child: Arc<Mutex<Option<Child>>>,
+    ) -> ConfiguredProvider {
+        ConfiguredProvider {
+            descriptor: self.descriptor,
+            identity: settings.process_identity(self.descriptor),
+            provider: (self.create)(settings, child),
+        }
     }
 }
 
@@ -269,22 +290,23 @@ impl Session {
         &self,
         mut cancelled: watch::Receiver<bool>,
         completed: watch::Sender<bool>,
-        descriptor: &'static Descriptor,
+        candidate: ConfiguredProvider,
         settings: &Settings,
         prompt: &Prompt,
         mut emit: impl FnMut(&str, String) + Send,
     ) -> Result<(), String> {
+        let descriptor = candidate.descriptor;
         let mut provider = self.provider.lock().await;
         let result = tokio::select! {
             biased;
             _ = cancelled.changed() => Err("Explanation cancelled".into()),
             result = tokio::time::timeout(TURN_TIMEOUT, async {
-                if provider.as_ref().is_some_and(|s| s.identity != settings.process_identity(descriptor)) {
+                if provider.as_ref().is_some_and(|s| s.identity != candidate.identity) {
                     if let Some(mut old) = provider.take() { old.provider.stop().await; }
                 }
                 if provider.is_none() {
                     emit("status", format!("Starting {}", descriptor.name));
-                    *provider = Some(provider_instance(descriptor, settings, self.child.clone()));
+                    *provider = Some(candidate);
                 }
                 let mut bytes = 0;
                 let mut bounded = |event: &str, text: String| {
@@ -298,12 +320,7 @@ impl Session {
                 provider.as_mut().unwrap().provider.explain(prompt, &settings.model, &mut bounded).await
             }) => result.unwrap_or_else(|_| Err(format!("{} explanation timed out. Please retry.", descriptor.name))),
         };
-        if result.is_err()
-            || self.child.lock().unwrap().is_none()
-            || provider
-                .as_ref()
-                .is_some_and(|s| !s.provider.descriptor().warm)
-        {
+        if result.is_err() || provider.as_ref().is_some_and(|s| !s.provider.reusable()) {
             if let Some(mut old) = provider.take() {
                 old.provider.stop().await;
             }
@@ -861,8 +878,7 @@ pub async fn companion_check<R: Runtime>(
     settings: Value,
 ) -> Result<SetupStatus, String> {
     validate_owner(window.label())?;
-    let (descriptor, settings) = configuration(&provider, &settings)?;
-    let mut probe = provider_instance(descriptor, &settings, Arc::default());
+    let (mut probe, _settings) = configuration(&provider, &settings, Arc::default())?;
     Ok(probe.provider.check(Duration::from_secs(10)).await)
 }
 
@@ -879,7 +895,6 @@ pub fn companion_explain<R: Runtime>(
     if request_id.is_empty() || request_id.len() > 128 {
         return Err("Invalid explanation request id".into());
     }
-    let (descriptor, settings) = configuration(&provider, &settings)?;
     let prompt = explanation_prompt(&context)?;
     let session = state
         .0
@@ -888,6 +903,7 @@ pub fn companion_explain<R: Runtime>(
         .entry(window.label().into())
         .or_default()
         .clone();
+    let (candidate, settings) = configuration(&provider, &settings, session.child.clone())?;
     let (cancelled, completed) = session.begin(&request_id)?;
     tauri::async_runtime::spawn(async move {
         let started = Instant::now();
@@ -896,7 +912,7 @@ pub fn companion_explain<R: Runtime>(
             .execute(
                 cancelled,
                 completed,
-                descriptor,
+                candidate,
                 &settings,
                 &prompt,
                 |event, text| {
@@ -975,8 +991,8 @@ mod tests {
 
     #[test]
     fn provider_configuration_is_strict_and_defaults_missing_values() {
-        let (descriptor, settings) = configuration("codex", &json!({})).unwrap();
-        assert_eq!(descriptor.id, "codex");
+        let (instance, settings) = configuration("codex", &json!({}), Arc::default()).unwrap();
+        assert_eq!(instance.descriptor.id, "codex");
         assert!(settings.executable.is_empty());
         assert!(settings.model.is_empty());
         assert_eq!(
@@ -997,12 +1013,20 @@ mod tests {
             json!({"model":"x".repeat(257)}),
             json!({"executable":"a\u{0}b"}),
         ] {
-            assert!(configuration("codex", &settings).is_err(), "{settings}");
+            assert!(
+                configuration("codex", &settings, Arc::default()).is_err(),
+                "{settings}"
+            );
         }
-        assert!(configuration("unknown", &json!({})).is_err());
+        assert!(configuration("unknown", &json!({}), Arc::default()).is_err());
         let registry = serde_json::to_value(companion_providers()).unwrap();
         assert_eq!(registry[0]["id"], "codex");
-        assert_eq!(registry[0]["guidance"]["ready"], CODEX.guidance.ready);
+        assert!(registry[0]["guidance"].get("ready").is_none());
+        assert_eq!(instance.identity.provider, instance.descriptor.id);
+        assert!(std::ptr::eq(
+            instance.provider.descriptor(),
+            instance.descriptor
+        ));
         assert_eq!(registry[0]["warm"], true);
     }
 
@@ -1021,16 +1045,21 @@ mod tests {
         .into_iter()
         .enumerate()
         {
+            let config = json!({ "executable": path, "model": model });
+            let (candidate, settings) =
+                configuration("codex", &config, session.child.clone()).unwrap();
+            if index == 1 {
+                let (unused, _) = configuration("codex", &config, session.child.clone()).unwrap();
+                drop(unused);
+                assert_eq!(session.child.lock().unwrap().as_ref().unwrap().id(), pid);
+            }
             let (cancelled, completed) = session.begin(&index.to_string()).unwrap();
             session
                 .execute(
                     cancelled,
                     completed,
-                    &CODEX,
-                    &Settings {
-                        executable: path.clone(),
-                        model: model.into(),
-                    },
+                    candidate,
+                    &settings,
                     &Prompt::raw("RANK ERROR"),
                     |_, _| {},
                 )
@@ -1086,7 +1115,7 @@ mod tests {
             model: String::new(),
         };
         let session = Session::default();
-        let mut probe = provider_instance(&CODEX, &settings, Arc::default());
+        let mut probe = PROVIDERS[0].instance(&settings, Arc::default());
         let task =
             tokio::spawn(async move { probe.provider.check(Duration::from_millis(500)).await });
         let pid: i32 = tokio::time::timeout(Duration::from_secs(3), async {
@@ -1134,18 +1163,34 @@ mod tests {
         guidance: SetupGuidance {
             missing: "missing",
             signin: "signin",
-            ready: "ready",
             unavailable: "unavailable",
         },
     };
+    static COLD_ENTRY: RegistryEntry = RegistryEntry {
+        descriptor: &COLD,
+        create: |_, child| {
+            Box::new(ColdProvider {
+                descriptor: &COLD,
+                child,
+                stopped: Arc::default(),
+                overflow: false,
+                reusable: false,
+            })
+        },
+    };
     struct ColdProvider {
+        descriptor: &'static Descriptor,
         child: Arc<Mutex<Option<Child>>>,
         stopped: Arc<Mutex<usize>>,
         overflow: bool,
+        reusable: bool,
     }
     impl Provider for ColdProvider {
         fn descriptor(&self) -> &'static Descriptor {
-            &COLD
+            self.descriptor
+        }
+        fn reusable(&self) -> bool {
+            self.reusable
         }
         fn check(&mut self, _: Duration) -> ProviderFuture<'_, SetupStatus> {
             Box::pin(async { panic!("explanation must not check setup") })
@@ -1179,6 +1224,92 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn session_discards_nonreusable_provider_even_with_a_child_and_warm_descriptor() {
+        let stopped = Arc::new(Mutex::new(0));
+        let session = Session::default();
+        let settings = Settings::default();
+        *session.child.lock().unwrap() = Some(
+            Command::new("sleep")
+                .arg("60")
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap(),
+        );
+        *session.provider.lock().await = Some(ConfiguredProvider {
+            descriptor: &CODEX,
+            identity: settings.process_identity(&CODEX),
+            provider: Box::new(ColdProvider {
+                descriptor: &CODEX,
+                child: session.child.clone(),
+                stopped: stopped.clone(),
+                overflow: false,
+                reusable: false,
+            }),
+        });
+        let (cancelled, completed) = session.begin("test").unwrap();
+        session
+            .execute(
+                cancelled,
+                completed,
+                PROVIDERS[0].instance(&settings, session.child.clone()),
+                &settings,
+                &Prompt::raw("test"),
+                |_, _| {},
+            )
+            .await
+            .unwrap();
+        assert!(session.provider.lock().await.is_none());
+        assert!(session.child.lock().unwrap().is_none());
+        assert_eq!(*stopped.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn session_retains_provider_that_is_reusable_without_a_child_or_warm_descriptor() {
+        let stopped = Arc::new(Mutex::new(0));
+        let session = Session::default();
+        let settings = Settings::default();
+        *session.provider.lock().await = Some(ConfiguredProvider {
+            descriptor: &COLD,
+            identity: settings.process_identity(&COLD),
+            provider: Box::new(ColdProvider {
+                descriptor: &COLD,
+                child: session.child.clone(),
+                stopped: stopped.clone(),
+                overflow: false,
+                reusable: true,
+            }),
+        });
+        for request in ["first", "second"] {
+            let (cancelled, completed) = session.begin(request).unwrap();
+            session
+                .execute(
+                    cancelled,
+                    completed,
+                    COLD_ENTRY.instance(&settings, session.child.clone()),
+                    &settings,
+                    &Prompt::raw("test"),
+                    |_, _| {},
+                )
+                .await
+                .unwrap();
+            assert!(session.child.lock().unwrap().is_none());
+            assert!(session.provider.lock().await.is_some());
+            assert_eq!(*stopped.lock().unwrap(), 0);
+        }
+        session
+            .provider
+            .lock()
+            .await
+            .take()
+            .unwrap()
+            .provider
+            .stop()
+            .await;
+        assert_eq!(*stopped.lock().unwrap(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn cold_provider_is_released_after_each_request_and_shared_output_limit_aborts() {
         for overflow in [false, true] {
             let stopped = Arc::new(Mutex::new(0));
@@ -1193,11 +1324,14 @@ mod tests {
                         .unwrap(),
                 );
                 *session.provider.lock().await = Some(ConfiguredProvider {
+                    descriptor: &COLD,
                     identity: settings.process_identity(&COLD),
                     provider: Box::new(ColdProvider {
+                        descriptor: &COLD,
                         child: session.child.clone(),
                         stopped: stopped.clone(),
                         overflow,
+                        reusable: false,
                     }),
                 });
                 let (cancelled, completed) = session.begin(request).unwrap();
@@ -1206,7 +1340,7 @@ mod tests {
                     .execute(
                         cancelled,
                         completed,
-                        &COLD,
+                        COLD_ENTRY.instance(&settings, session.child.clone()),
                         &settings,
                         &Prompt::raw("test"),
                         |event, delta| {
@@ -1522,7 +1656,13 @@ mod tests {
                         .execute(
                             cancelled,
                             completed,
-                            &CODEX,
+                            PROVIDERS[0].instance(
+                                &Settings {
+                                    executable: path.clone(),
+                                    model: String::new(),
+                                },
+                                running.child.clone(),
+                            ),
                             &Settings {
                                 executable: path,
                                 model: String::new(),

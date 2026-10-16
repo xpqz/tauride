@@ -172,7 +172,7 @@ fixtureTest('native explanation preserves historical target, streams inert text,
     const original = D.el.Menu.buildFromTemplate;
     D.el.Menu.buildFromTemplate = (items) => {
       D.el.Menu.buildFromTemplate = original;
-      const item = items.find(x => x.label === 'Explain Last Error…');
+      const item = items.find(x => x.label === 'Explain This Error…');
       if (!item) throw new Error('Historical error context menu missing');
       return { popup() { item.click(); } };
     };
