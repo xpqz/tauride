@@ -92,6 +92,9 @@ fn is_tool(block: &Value) -> bool {
 }
 
 fn check_isolated(init: &Value) -> Result<(), String> {
+    if !init["tools"].is_array() || !init["mcp_servers"].is_array() {
+        return Err("Claude Code did not report its tools and MCP servers; update Claude Code".into());
+    }
     if !init["tools"].as_array().is_some_and(Vec::is_empty) {
         return Err("Claude Code started with tools enabled; error explanations allow none".into());
     }
@@ -594,6 +597,7 @@ mod tests {
             ("FIXTURE_TOOL", "tool"),
             ("FIXTURE_TOOLS_ENABLED", "tool"),
             ("FIXTURE_MCP_ENABLED", "MCP"),
+            ("FIXTURE_TOOLS_UNREPORTED", "did not report"),
             ("FIXTURE_OVERSIZED", "oversized"),
             ("FIXTURE_MALFORMED", "invalid"),
             ("FIXTURE_NO_RESULT", "before completing"),

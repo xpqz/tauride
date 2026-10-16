@@ -48,6 +48,8 @@ if 'FIXTURE_TOOLS_ENABLED' in prompt:
     init['tools'] = ['Bash']
 if 'FIXTURE_MCP_ENABLED' in prompt:
     init['mcp_servers'] = [{'name': 'tauride', 'status': 'connected'}]
+if 'FIXTURE_TOOLS_UNREPORTED' in prompt:
+    del init['tools']
 send(init)
 
 def event(value):
