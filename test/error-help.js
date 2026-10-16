@@ -314,3 +314,6 @@ fixtureTest('floating tracer target resolves in its owner and explains in the se
     'helper does not launch a separate companion');
   await c.switchToWindow(owner);
 });
+
+require('./_error-help-request-capture')({ fixtureTest, fixture, failure, menuExplain, complete,
+  setModel: (c, model) => c.execute(value => D.prf.agentModel(value), model) });

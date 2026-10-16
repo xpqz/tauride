@@ -19,6 +19,8 @@ def send(value):
 thread_number = 0
 for line in sys.stdin:
     message = json.loads(line)
+    with open(__file__ + '.requests', 'a') as requests:
+        requests.write(json.dumps(message) + '\n')
     method = message.get('method')
     request_id = message.get('id')
     params = message.get('params', {})
