@@ -88,7 +88,7 @@ const Console = console;
           if (line && D.ide.floating && D.errorHelpTarget) id = await D.errorHelpTarget(win.id, line);
           else if (line && D.agent) id = D.agent.errorAt(win.id, line);
           if (id != null) cmitems.unshift({
-            label: 'Explain this error with Codex…',
+            label: 'Explain Last Error…',
             click: () => {
               if (D.ide.floating) D.ide.ipc.emit('explainError', { id });
               else D.errorHelp && D.errorHelp.explain(id);

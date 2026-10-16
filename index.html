@@ -647,12 +647,14 @@
       <div id=code_agent hidden>
         <hr>
         <h2>Code Agent</h2>
-        <p>Codex explains errors using your installed Codex CLI and sign-in. Enable observation before reproducing an error to capture its context.</p>
+        <p>Your selected provider explains errors using its installed CLI and sign-in. Enable observation before reproducing an error to capture its context.</p>
+        <p><label for=code_provider>Provider <select id=code_provider></select></label></p>
+        <p id=code_provider_status role=status></p>
         <details>
           <summary>Advanced</summary>
-          <p><label for=code_agexe>Codex executable <input id=code_agexe placeholder="Auto-detect Codex" size=36></label></p>
-          <p><label for=code_agmodel>Codex model <input id=code_agmodel placeholder="Configured Codex default" size=24></label></p>
-          <p>Leave these blank to use the detected executable and configured Codex model.</p>
+          <p><label for=code_provider_executable>Provider executable <input id=code_provider_executable placeholder="Auto-detect executable" size=36></label></p>
+          <p id=code_provider_modelrow><label for=code_provider_model>Provider model <input id=code_provider_model placeholder="Configured default" size=24></label></p>
+          <p>Leave these blank to use the detected executable and configured provider model.</p>
         </details>
         <p><input id=code_ago type=checkbox><label for=code_ago>Observe session</label></p>
         <p><input id=code_agc type=checkbox><label for=code_agc>Allow control</label></p>

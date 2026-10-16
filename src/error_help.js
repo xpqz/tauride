@@ -1,4 +1,8 @@
 (() => {
+  const byteLength = value => Array.from(value).reduce((size, c) => {
+    const point = c.codePointAt(0);
+    return size + (point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4);
+  }, 0);
   // Only code delimiters are interpreted; every other character stays inert text.
   const renderExplanation = (element, value) => {
     const doc = element.ownerDocument;
@@ -43,7 +47,7 @@
     const ready = new Set();
     let sequence = 0; let active = null; let unlisten = null; let selected; let barrier = null;
     let view = {
-      open: false, busy: false, status: '', text: '', context: null, setup: null, observation: false,
+      open: false, busy: false, status: '', text: '', context: null, setup: null, observation: false, provider: null,
     };
     const render = (change) => { view = { ...view, ...change }; io.render(view); };
     const invokeQuiet = (cmd, args) => Promise.resolve(io.invoke(cmd, args)).catch(() => {});
@@ -64,36 +68,47 @@
       sequence += 1;
       const ticket = sequence;
       render({
-        open: true, busy: false, status: '', text: '', context: null, setup: null, observation: !io.level(),
+        open: true, busy: false, status: '', text: '', context: null, setup: null, observation: !io.level(), provider: null,
       });
-      render({ busy: true, status: 'Checking Codex setup…' });
+      render({ busy: true, status: 'Checking provider setup…' });
       try {
         if (barrier) await barrier;
         if (ticket !== sequence) return;
         const settings = io.settings();
-        const executable = settings.executable || '';
-        if (checkOnly) ready.delete(executable);
-        if (!ready.has(executable)) {
-          render({ status: 'Checking Codex setup…' });
-          const setup = await io.invoke('companion_check', { executable });
+        const providers = await io.providers();
+        if (ticket !== sequence) return;
+        const provider = providers.find(p => p.id === settings.provider);
+        if (!provider) throw new Error('Unknown error explanation provider. Choose a provider in Preferences.');
+        const config = settings.settings;
+        if (!config || typeof config !== 'object' || Array.isArray(config)
+          || Object.keys(config).some(k => !['executable', 'model'].includes(k) || typeof config[k] !== 'string')
+          || Object.entries(config).some(([k, value]) => value.includes('\0') || byteLength(value) > (k === 'model' ? 256 : 4096))
+          || (!provider.supports_model && config.model)) throw new Error('Invalid provider settings. Check Preferences.');
+        const executable = config.executable || '';
+        const identity = JSON.stringify([provider.id, executable]);
+        render({ provider });
+        if (checkOnly) ready.delete(identity);
+        if (!ready.has(identity)) {
+          render({ status: `Checking ${provider.name} setup…` });
+          const setup = await io.invoke('companion_check', settings);
           if (ticket !== sequence) return;
           if (setup.status !== 'ready') {
-            render({ busy: false, setup: setup.status, status: setup.message || 'Codex setup needs attention.' });
+            render({ busy: false, setup: setup.status, status: setup.message || `${provider.name} setup needs attention.` });
             return;
           }
-          ready.add(executable);
+          ready.add(identity);
         }
         if (!io.level()) {
-          render({ busy: false, setup: 'ready', observation: true, status: 'Codex is ready. Enable observation, then reproduce the error so its code and values can be captured.' });
+          render({ busy: false, setup: 'ready', observation: true, status: `${provider.name} is ready. Enable observation, then reproduce the error so its code and values can be captured.` });
           return;
         }
-        if (checkOnly) { render({ busy: false, setup: 'ready', status: 'Codex is ready. Choose Explain error to request an explanation.' }); return; }
+        if (checkOnly) { render({ busy: false, setup: 'ready', status: `${provider.name} is ready. Choose Explain error to request an explanation.` }); return; }
         render({ status: 'Collecting error context…' });
         const context = await io.context(id);
         if (ticket !== sequence) return;
-        if (!context) throw new Error('Error context is unavailable or expired. With observation enabled, reproduce the error, then choose Explain this error with Codex…');
+        if (!context) throw new Error('Error context is unavailable or expired. With observation enabled, reproduce the error, then choose Explain Last Error…');
         selected = context.id || id;
-        render({ context, status: 'Starting Codex…' });
+        render({ context, status: `Starting ${provider.name}…` });
         const requestId = `error-help-${Date.now()}-${ticket}`;
         const stop = await io.listen((p) => {
           if (ticket !== sequence || p.requestId !== active) return;
@@ -101,7 +116,7 @@
           else if (p.event === 'status') render({ status: p.text || p.status || 'Working…' });
           else if (p.event === 'done' || p.event === 'error') {
             active = null;
-            render({ busy: false, status: p.event === 'done' ? 'Complete — review suggestions before using them.' : p.text || 'Codex could not explain this error.' });
+            render({ busy: false, status: p.event === 'done' ? 'Complete — review suggestions before using them.' : p.text || `${provider.name} could not explain this error.` });
             if (unlisten) { unlisten(); unlisten = null; }
           }
         });
@@ -134,7 +149,7 @@
       checkAgain: () => explain(selected, true),
       enableObservation: () => {
         io.enableObservation();
-        render({ observation: false, status: view.setup && view.setup !== 'ready' ? view.status : 'Observation enabled. Reproduce the error, then choose Explain this error with Codex…' });
+        render({ observation: false, status: view.setup && view.setup !== 'ready' ? view.status : 'Observation enabled. Reproduce the error, then choose Explain Last Error…' });
       },
       state: () => view,
     };
@@ -147,14 +162,14 @@
     panel = document.createElement('section');
     panel.id = 'error-help'; panel.hidden = true; panel.tabIndex = -1;
     panel.setAttribute('role', 'region'); panel.setAttribute('aria-labelledby', 'error-help-title');
-    const title = document.createElement('h2'); title.id = 'error-help-title'; title.textContent = 'Explain error with Codex'; panel.appendChild(title);
+    const title = document.createElement('h2'); title.id = 'error-help-title'; title.textContent = 'Explain error'; panel.appendChild(title);
     const error = document.createElement('pre'); error.className = 'error-help-context'; panel.appendChild(error);
     const status = document.createElement('p'); status.setAttribute('role', 'status'); panel.appendChild(status);
     const guidance = document.createElement('p'); panel.appendChild(guidance);
-    const docs = document.createElement('a'); docs.href = 'https://developers.openai.com/codex/quickstart'; docs.target = '_blank'; docs.rel = 'noopener noreferrer'; docs.textContent = 'Codex installation and sign-in guide';
+    const docs = document.createElement('a'); docs.target = '_blank'; docs.rel = 'noopener noreferrer'; docs.textContent = 'Provider setup guide';
     docs.onclick = (e) => { e.preventDefault(); D.openExternal(docs.href); };
     panel.appendChild(docs);
-    const disclosure = document.createElement('p'); disclosure.className = 'error-help-disclosure'; disclosure.textContent = 'Requesting an explanation sends relevant code, the error and available values to your configured Codex service. Suggestions are shown for review and are never executed.'; panel.appendChild(disclosure);
+    const disclosure = document.createElement('p'); disclosure.className = 'error-help-disclosure'; disclosure.textContent = 'Requesting an explanation sends relevant code, the error and available values to your selected provider.'; panel.appendChild(disclosure);
     const text = document.createElement('div'); text.className = 'error-help-text'; text.setAttribute('aria-label', 'Explanation and suggested correction'); panel.appendChild(text);
     const buttons = {};
     const action = (name, label, fn) => {
@@ -166,7 +181,14 @@
       level: () => D.agent && D.agent.level(),
       enableObservation: () => D.prf.agent(1),
       context: (id) => D.agent.errorContext(id),
-      settings: () => ({ executable: D.prf.agentExecutable(), model: D.prf.agentModel() }),
+      providers: () => invoke('companion_providers', {}),
+      settings: () => {
+        const provider = D.prf.agentProvider();
+        const allSettings = D.prf.agentProviderSettings();
+        const settings = allSettings && typeof allSettings === 'object' && !Array.isArray(allSettings)
+          ? allSettings[provider] : allSettings;
+        return { provider, settings: settings === undefined ? { executable: '', model: '' } : settings };
+      },
       listen: (f) => window.__TAURI__.event.listen(
         'ride-companion',
         ({ payload }) => f(payload),
@@ -182,8 +204,12 @@
         error.textContent = v.context ? `${message || 'Selected error'}${v.context.stale ? '\nEarlier error — session state has changed.' : ''}` : '';
         panel.setAttribute('aria-busy', String(v.busy));
         guidance.hidden = !v.setup || v.setup === 'ready';
-        guidance.textContent = v.setup === 'missing' ? 'Install the Codex CLI, then run codex login in a terminal to sign in.' : 'Run codex login in a terminal to sign in. Check your executable in Preferences if Codex cannot be reached.';
-        docs.hidden = !v.setup || v.setup === 'ready';
+        guidance.textContent = v.provider && v.provider.guidance[v.setup] || '';
+        title.textContent = v.provider ? `Explain error with ${v.provider.name}` : 'Explain error';
+        docs.href = v.provider ? v.provider.docs_url : '';
+        docs.textContent = v.provider ? `${v.provider.name} setup guide` : 'Provider setup guide';
+        disclosure.textContent = `Requesting an explanation sends relevant code, the error and available values to ${v.provider ? v.provider.name : 'your selected provider'}. Suggestions are shown for review.${v.provider && v.provider.enforces_no_tools ? ' The provider is prevented from using tools; suggestions are never executed.' : ' Tauride cannot prevent this provider from using tools or taking actions.'}`;
+        docs.hidden = !v.setup || v.setup === 'ready' || !v.provider || !v.provider.docs_url;
         if (buttons.observe) buttons.observe.hidden = !v.observation;
         if (buttons.check) buttons.check.disabled = v.busy;
         if (buttons.cancel) buttons.cancel.disabled = !v.busy;

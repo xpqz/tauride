@@ -11,13 +11,15 @@ const fakeDocument = () => {
   });
   return document;
 };
+const providers = [{ id: 'codex', name: 'Codex', warm: true, enforces_no_tools: true, supports_model: true, docs_url: 'https://example.test/codex', guidance: { missing: 'Install Codex', signin: 'Sign in with Codex' } }];
 const setup = () => {
   const calls = []; let listener;
   const io = {
     level: () => 'observe', context: async id => ({ error: { id, message: '<img onerror=bad>' } }),
     listen: async f => { listener = f; calls.push(['listen']); return () => calls.push(['unlisten']); },
     invoke: async (cmd, args) => { calls.push([cmd, args]); return { status: 'ready' }; },
-    settings: () => ({ executable: '', model: '' }), render() {},
+    providers: async () => providers,
+    settings: () => ({ provider: 'codex', settings: { executable: '', model: '' } }), render() {},
   };
   const c = create(io);
   return { c, io, calls, event: p => listener(p) };
@@ -33,7 +35,7 @@ test('target and settings preserved; subscribe before invoke; streaming stays pl
   const { c, calls, event } = setup(); await c.explain('chosen');
   assert.ok(calls.findIndex(x => x[0] === 'listen') < calls.findIndex(x => x[0] === 'companion_explain'));
   const [, args] = calls.find(x => x[0] === 'companion_explain');
-  assert.equal(args.context.error.id, 'chosen'); assert.equal(args.model, ''); assert.equal(args.executable, '');
+  assert.equal(args.context.error.id, 'chosen'); assert.equal(args.settings.model, ''); assert.equal(args.settings.executable, '');
   event({ requestId: args.requestId, event: 'delta', text: '<script>bad</script>' });
   assert.equal(c.state().text, '<script>bad</script>');
   event({ requestId: 'unrelated', event: 'done' }); assert.equal(c.state().busy, true);
@@ -60,12 +62,12 @@ test('closing while context loads prevents sending; invoke rejection is visible'
 test('menu command has no default shortcut and Code preferences expose executable and optional model', () => {
   const fs = require('node:fs');
   const read = name => fs.readFileSync(require('node:path').join(__dirname, '..', name), 'utf8');
-  assert.match(read('src/cmds.js'), /\['AGE',\s*'Explain Last Error with Codex…',\s*\[\]\]/);
-  assert.match(read('src/prf.js'), /Explain Last Error with Codex…\s*=AGE/);
-  assert.match(read('src/prf.js'), /\['agentExecutable',\s*''\]/);
-  assert.match(read('src/prf.js'), /\['agentModel',\s*''\]/);
-  assert.match(read('index.html'), /id=code_agexe/);
-  assert.match(read('index.html'), /id=code_agmodel/);
+  assert.match(read('src/cmds.js'), /\['AGE',\s*'Explain Last Error…',\s*\[\]\]/);
+  assert.match(read('src/prf.js'), /Explain Last Error…\s*=AGE/);
+  assert.match(read('src/prf.js'), /\['agentProvider',\s*'codex'\]/);
+  assert.match(read('src/prf.js'), /\['agentProviderSettings',\s*\{ codex: \{ executable: '', model: '' \} \}\]/);
+  assert.match(read('index.html'), /id=code_provider_executable/);
+  assert.match(read('index.html'), /id=code_provider_model/);
 });
 test('close during subscription setup cannot send, including late listener cleanup', async () => {
   const { c, io, calls } = setup(); let resolve; let removed = false;
@@ -97,11 +99,11 @@ test('browser panel renders HTML-looking Codex output inertly and Escape restore
   const document = { createElement: make, createTextNode: text => ({ tag: '#text', textContent: text }), activeElement: original };
   document.body = make('body');
   let requestId; let nativeFocus = 0;
-  const D = { wm: { main: () => ({ focus() { nativeFocus += 1; } }) }, prf: { agentExecutable: () => '', agentModel: () => '' }, agent: {
+  const D = { wm: { main: () => ({ focus() { nativeFocus += 1; } }) }, prf: { agentProvider: () => 'codex', agentProviderSettings: () => ({}) }, agent: {
     level: () => 'observe', errorContext: async () => ({ message: '<img src=x>', error: {} }), onErrorChange() {},
   } };
   const window = { __RIDE__: true, addEventListener() {},
-    __TAURI_INTERNALS__: { metadata: { currentWindow: { label: 'main' } }, invoke: async (cmd, args) => { if (cmd === 'companion_explain') requestId = args.requestId; return { status: 'ready' }; } },
+    __TAURI_INTERNALS__: { metadata: { currentWindow: { label: 'main' } }, invoke: async (cmd, args) => { if (cmd === 'companion_providers') return providers; if (cmd === 'companion_explain') requestId = args.requestId; return { status: 'ready' }; } },
     __TAURI__: { event: { listen: async (name, fn) => { listener = fn; return () => {}; } } },
   };
   vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname, '../src/error_help.js'), 'utf8'), { D, window, document, navigator: {}, module: { exports: {} }, console });
@@ -206,13 +208,13 @@ test('successful checks are cached by executable and Check Again probes without 
   await c.checkAgain();
   assert.equal(calls.filter(x => x[0] === 'companion_check').length, 2);
   assert.equal(calls.filter(x => x[0] === 'companion_explain').length, 2);
-  io.settings = () => ({ executable: '/other/codex', model: '' });
+  io.settings = () => ({ provider: 'codex', settings: { executable: '/other/codex', model: '' } });
   await c.retry(); assert.equal(calls.filter(x => x[0] === 'companion_check').length, 3);
 });
 test('closing during setup ignores a late response and never sends old context', async () => {
   const { c, io, calls } = setup(); let finish;
   io.invoke = (cmd, args) => { calls.push([cmd, args]); return cmd === 'companion_check' ? new Promise(r => { finish = r; }) : Promise.resolve(); };
-  const pending = c.explain('old'); await c.close(); finish({ status: 'ready' }); await pending;
+  const pending = c.explain('old'); await new Promise(r => setImmediate(r)); await c.close(); finish({ status: 'ready' }); await pending;
   assert.equal(c.state().open, false); assert.equal(calls.some(x => x[0] === 'companion_explain'), false);
 });
 
@@ -223,4 +225,66 @@ test('missing setup stays actionable when observation is enabled', async () => {
   await c.explain(); c.enableObservation();
   assert.equal(c.state().setup, 'missing'); assert.equal(c.state().status, 'Install Codex');
   assert.deepEqual(calls.map(x => x[0]), ['companion_check']);
+});
+
+
+test('model is per request while setup identity includes provider and executable', async () => {
+  const { c, io, calls } = setup();
+  io.providers = async () => [...providers, { ...providers[0], id: 'other', name: 'Other' }];
+  let provider = 'codex'; let model = 'first';
+  io.settings = () => ({ provider, settings: { executable: '', model } });
+  await c.explain('x'); model = 'second'; await c.retry();
+  assert.equal(calls.filter(x => x[0] === 'companion_check').length, 1);
+  assert.equal(calls.filter(x => x[0] === 'companion_explain').at(-1)[1].settings.model, 'second');
+  provider = 'other'; await c.retry();
+  assert.equal(calls.filter(x => x[0] === 'companion_check').length, 2);
+  assert.equal(calls.filter(x => x[0] === 'companion_explain').at(-1)[1].provider, 'other');
+});
+test('unknown providers and invalid settings never collect context or invoke a provider', async () => {
+  for (const settings of [
+    { provider: 'unknown', settings: {} },
+    { provider: 'codex', settings: { command: 'anything' } },
+    { provider: 'codex', settings: { executable: 42 } },
+  ]) {
+    const { c, io, calls } = setup(); let collected = false;
+    io.settings = () => settings; io.context = async () => { collected = true; };
+    await c.explain('x');
+    assert.equal(collected, false); assert.deepEqual(calls, []);
+    assert.match(c.state().status, /provider|settings/i);
+  }
+});
+
+test('panel only claims tool enforcement when the selected provider guarantees it', async () => {
+  const fs = require('node:fs'); const vm = require('node:vm');
+  for (const config of [undefined, {}, null, false, 0, 'invalid', [], { malformedMap: null }, { malformedMap: [] }, { malformedMap: false }, { malformedMap: 0 }, { malformedMap: 'invalid' }]) {
+    const enforced = config === undefined;
+    const nodes = []; let document;
+    const make = tag => { const node = {
+      tag, ownerDocument: document, dataset: {}, children: [], value: '',
+      get textContent() { return this.value + this.children.map(n => n.textContent).join(''); },
+      set textContent(value) { this.value = value; this.children = []; },
+      appendChild(n) { this.children.push(n); }, setAttribute() {}, addEventListener() {}, focus() {},
+    }; nodes.push(node); return node; };
+    document = { createElement: make, createTextNode: text => ({ textContent: text }) }; document.body = make('body');
+    const provider = { ...providers[0], enforces_no_tools: enforced };
+    let setupCalls = 0;
+    const D = { wm: { main: () => ({ focus() {} }) }, prf: { agentProvider: () => 'codex', agentProviderSettings: () => config && Object.hasOwn(config, 'malformedMap') ? config.malformedMap : ({ codex: config }) }, agent: { level: () => 'observe', errorContext: async () => ({ id: 'x' }) } };
+    const window = { __RIDE__: true, addEventListener() {}, __TAURI_INTERNALS__: {
+      metadata: { currentWindow: { label: 'main' } }, invoke: async cmd => { if (cmd === 'companion_providers') return [provider]; setupCalls += 1; return { status: 'missing' }; },
+    } };
+    vm.runInNewContext(fs.readFileSync(require.resolve('../src/error_help'), 'utf8'), { D, window, document, navigator: {} });
+    await D.errorHelp.explain('x');
+    const disclosure = nodes.find(n => n.className === 'error-help-disclosure').textContent;
+    assert.equal(disclosure.includes('prevented from using tools'), enforced);
+    assert.equal(disclosure.includes('never executed'), enforced);
+    assert.equal(disclosure.includes('Tauride cannot prevent'), !enforced);
+    if (config === undefined || (config && !Array.isArray(config) && typeof config === 'object' && !Object.hasOwn(config, 'malformedMap'))) {
+      assert.equal(setupCalls, 1);
+      assert.ok(nodes.some(n => n.textContent === provider.guidance.missing));
+      assert.ok(nodes.some(n => n.href === provider.docs_url));
+    } else {
+      assert.equal(setupCalls, 0);
+      assert.ok(nodes.some(n => /Invalid provider settings/.test(n.textContent)));
+    }
+  }
 });

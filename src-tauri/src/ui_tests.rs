@@ -13,7 +13,7 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
         "PRF" => "Preferences...",
         "AGO" => "Observe Session",
         "AGC" => "Allow Control",
-        "AGE" => "Explain Last Error",
+        "AGE" => "Explain Last Error…",
         _ => "",
     };
     for item in items {

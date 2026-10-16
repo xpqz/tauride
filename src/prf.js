@@ -9,8 +9,8 @@ D.prf = {};
 [ // name                 default (type is determined from default value; setter enforces type and handles encoding)
   ['agent',              0], // agent pairing (Tauri, tauri/agent-pairing.md): open the port for observation
   ['agentControl',       0], // let the agent execute, edit, save and drive the tracer; implies observation
-  ['agentExecutable',    ''],
-  ['agentModel',         ''],
+  ['agentProvider',      'codex'],
+  ['agentProviderSettings', { codex: { executable: '', model: '' } }],
   ['agentConfirm',       0], // ask Run / Deny before each control request except an interrupt
   ['autoStart',          0], // Auto-start default configuration when Ride starts
   ['autoCloseBrackets',  1], //whether to insert {}[]() in pairs
@@ -196,7 +196,7 @@ D.prf = {};
     + '\n  Unpause all threads      =UAT'
     + '\n  Continue all threads     =MA'
     + '\n&Agent                          {tauri}'
-    + '\n  Explain Last Error with Codex… =AGE'
+    + '\n  Explain Last Error… =AGE'
     + '\n  Observe Session          =AGO'
     + '\n  Allow Control            =AGC'
     + '\n&Help'

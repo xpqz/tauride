@@ -142,6 +142,6 @@ test('HTML shortcut labels use resolved bindings including an explicitly disable
 
 test('Explain Last Error has a semantic native ID so it follows the focused session', () => {
   const context = shimMenu();
-  const item = context.menuItems([{ label: 'Explain Last Error', rideCommand: 'AGE' }], 'app:w1000001:9', new Map(), true)[0];
+  const item = context.menuItems([{ label: 'Explain Last Error…', rideCommand: 'AGE' }], 'app:w1000001:9', new Map(), true)[0];
   assert.equal(item.id, 'app:w1000001:9:0:AGE');
 });

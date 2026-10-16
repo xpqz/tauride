@@ -25,7 +25,7 @@ async function fixture(t, { observe = true, account = 'ready' } = {}) {
   fs.writeFileSync(`${executable}.account`, account);
   t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
   const c = t.context.app.client;
-  await c.execute((exe, enabled) => { D.prf.sqp(0); D.prf.agentExecutable(exe); D.prf.agentModel(''); D.prf.agentControl(0); D.prf.agent(enabled ? 1 : 0); }, executable, observe);
+  await c.execute((exe, enabled) => { D.prf.sqp(0); D.prf.agentProvider('codex'); D.prf.agentProviderSettings({ codex: { executable: exe, model: '' } }); D.prf.agentControl(0); D.prf.agent(enabled ? 1 : 0); }, executable, observe);
   await wait(c, enabled => D.agent && (enabled ? D.agent.level() === 'observe' : !D.agent.level()), observe);
   return { executable, contexts: () => fs.existsSync(`${executable}.contexts`) ? fs.readFileSync(`${executable}.contexts`, 'utf8').trim().split('\n').map(JSON.parse) : [] };
 }
@@ -106,13 +106,13 @@ fixtureTest('first-use guidance enables observation without granting control or 
   await c.switchToWindow(preferences);
   await wait(c, () => !I.prf_dlg.hidden && !document.querySelector('#code').hidden);
   t.true(await c.execute(() => {
-    const advanced = document.querySelector('#code_agexe').closest('details');
+    const advanced = document.querySelector('#code_provider_executable').closest('details');
     return !!advanced && /Advanced/.test(advanced.querySelector('summary').textContent)
-      && advanced.contains(document.querySelector('#code_agmodel'));
+      && advanced.contains(document.querySelector('#code_provider_model'));
   }), 'Preferences keeps executable and model overrides under Advanced');
   await (await c.$('#code_agent details summary')).click();
-  t.true(await (await c.$('#code_agexe')).isDisplayed());
-  t.true(await (await c.$('#code_agmodel')).isDisplayed());
+  t.true(await (await c.$('#code_provider_executable')).isDisplayed());
+  t.true(await (await c.$('#code_provider_model')).isDisplayed());
   await (await c.$('#prf_dlg_cancel')).click();
   await c.switchToWindow(owner);
   await (await c.$('#error-help button[data-action="observe"]')).click();
@@ -129,12 +129,12 @@ fixtureTest('missing Codex and signed-out Codex show actionable setup without in
   const c = t.context.app.client;
   const fake = await fixture(t, { account: 'signin' });
   await failure(c, 'missingErrorHelpSetup');
-  await c.execute(executable => D.prf.agentExecutable(executable), `${fake.executable}-missing`);
+  await c.execute(executable => D.prf.agentProviderSettings({ codex: { executable, model: '' } }), `${fake.executable}-missing`);
   await menuExplain(c);
   await wait(c, () => /install|not found|could not find/i.test(document.querySelector('#error-help [role=status]').textContent));
   t.true(await c.execute(() => !!document.querySelector('#error-help a[href^="https://"]')));
   t.is(fake.contexts().length, 0);
-  await c.execute(executable => D.prf.agentExecutable(executable), fake.executable);
+  await c.execute(executable => D.prf.agentProviderSettings({ codex: { executable, model: '' } }), fake.executable);
   await (await c.$('#error-help button[data-action="check"]')).click();
   await wait(c, () => /sign.?in|log.?in/i.test(document.querySelector('#error-help [role=status]').textContent));
   t.regex(await c.execute(() => document.querySelector('#error-help').textContent), /codex login/i);
@@ -172,7 +172,7 @@ fixtureTest('native explanation preserves historical target, streams inert text,
     const original = D.el.Menu.buildFromTemplate;
     D.el.Menu.buildFromTemplate = (items) => {
       D.el.Menu.buildFromTemplate = original;
-      const item = items.find(x => x.label === 'Explain this error with Codex…');
+      const item = items.find(x => x.label === 'Explain Last Error…');
       if (!item) throw new Error('Historical error context menu missing');
       return { popup() { item.click(); } };
     };
@@ -316,4 +316,4 @@ fixtureTest('floating tracer target resolves in its owner and explains in the se
 });
 
 require('./_error-help-request-capture')({ fixtureTest, fixture, failure, menuExplain, complete,
-  setModel: (c, model) => c.execute(value => D.prf.agentModel(value), model) });
+  setModel: (c, model) => c.execute(value => D.prf.agentProviderSettings({ ...D.prf.agentProviderSettings(), codex: { ...D.prf.agentProviderSettings().codex, model: value } }), model) });
