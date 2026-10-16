@@ -11,6 +11,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::watch;
 
+mod claude;
+
 const MAX_LINE: usize = 256 * 1024;
 const MAX_CONTEXT: usize = 96 * 1024;
 const MAX_OUTPUT: usize = 64 * 1024;
@@ -223,6 +225,9 @@ static PROVIDERS: &[RegistryEntry] = &[RegistryEntry {
             server: None,
         })
     },
+}, RegistryEntry {
+    descriptor: &claude::CLAUDE,
+    create: |settings, child| Box::new(claude::ClaudeProvider::new(settings, child)),
 }];
 
 impl RegistryEntry {
@@ -489,7 +494,7 @@ struct Server {
     stderr: tokio::task::JoinHandle<()>,
     pending: VecDeque<Value>,
     sequence: u64,
-    cwd: PathBuf,
+    cwd: PrivateDir,
     config: Value,
 }
 
@@ -502,7 +507,6 @@ impl Drop for Server {
                 let _ = child.wait().await;
             });
         }
-        let _ = std::fs::remove_dir(&self.cwd);
     }
 }
 
@@ -535,32 +539,71 @@ fn configured_executable(
     }
 }
 
-fn executable_path(configured: &str) -> Result<PathBuf, String> {
+/// How a provider's executable is found when none is configured: the binary on
+/// PATH, then the usual install locations.
+struct ExecutableSearch {
+    name: &'static str,
+    binary: &'static str,
+    locations: &'static [&'static str],
+    home_locations: &'static [&'static str],
+}
+
+static CODEX_EXECUTABLE: ExecutableSearch = ExecutableSearch {
+    name: "Codex",
+    binary: if cfg!(windows) { "codex.exe" } else { "codex" },
+    locations: &[
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+        "/Applications/Codex.app/Contents/Resources/codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    ],
+    home_locations: if cfg!(windows) {
+        &[".local/bin/codex.exe", ".cargo/bin/codex.exe", "AppData/Roaming/npm/codex.cmd"]
+    } else {
+        &[".local/bin/codex", ".cargo/bin/codex", "AppData/Roaming/npm/codex.cmd"]
+    },
+};
+
+fn executable_path(configured: &str, search: &ExecutableSearch) -> Result<PathBuf, String> {
+    let name = search.name;
     let search_path = std::env::var_os("PATH");
     if !configured.trim().is_empty() {
         return configured_executable(configured.trim(), search_path.as_deref()).ok_or_else(|| {
-            "Codex was not found on PATH. Check its executable in Preferences.".into()
+            format!("{name} was not found on PATH. Check its executable in Preferences.")
         });
     }
-    let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
-    if let Some(path) = path_executable(binary, search_path.as_deref()) {
+    if let Some(path) = path_executable(search.binary, search_path.as_deref()) {
         return Ok(path);
     }
-    let mut candidates = vec![
-        PathBuf::from("/opt/homebrew/bin/codex"),
-        PathBuf::from("/usr/local/bin/codex"),
-        PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
-        PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
-    ];
+    let mut candidates: Vec<PathBuf> = search.locations.iter().map(PathBuf::from).collect();
     if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
         let home = PathBuf::from(home);
-        candidates.extend([
-            home.join(".local/bin").join(binary),
-            home.join(".cargo/bin").join(binary),
-            home.join("AppData/Roaming/npm/codex.cmd"),
-        ]);
+        candidates.extend(search.home_locations.iter().map(|p| home.join(p)));
     }
-    candidates.into_iter().find(|p| p.is_file()).ok_or_else(|| "Codex was not found. Install Codex, sign in, or configure its executable path in Preferences.".into())
+    candidates.into_iter().find(|p| p.is_file()).ok_or_else(|| format!("{name} was not found. Install {name}, sign in, or configure its executable path in Preferences."))
+}
+
+/// An empty directory private to one companion process, removed when dropped.
+struct PrivateDir(PathBuf);
+
+impl PrivateDir {
+    fn create() -> Result<Self, String> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let path = std::env::temp_dir().join(format!(
+            "tauride-companion-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&path)
+            .map_err(|e| format!("Cannot create companion working directory: {e}"))?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for PrivateDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir(&self.0);
+    }
 }
 
 impl Server {
@@ -573,21 +616,8 @@ impl Server {
         executable: &str,
         owned_child: Arc<Mutex<Option<Child>>>,
     ) -> Result<Self, String> {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let cwd = std::env::temp_dir().join(format!(
-            "tauride-companion-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&cwd)
-            .map_err(|e| format!("Cannot create companion working directory: {e}"))?;
-        let path = match executable_path(executable) {
-            Ok(path) => path,
-            Err(e) => {
-                let _ = std::fs::remove_dir(&cwd);
-                return Err(e);
-            }
-        };
+        let cwd = PrivateDir::create()?;
+        let path = executable_path(executable, &CODEX_EXECUTABLE)?;
         let mut command = Command::new(path);
         command
             .arg("app-server")
@@ -617,7 +647,7 @@ impl Server {
                 "-c",
                 "web_search=\"disabled\"",
             ])
-            .current_dir(&cwd)
+            .current_dir(&cwd.0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -627,7 +657,6 @@ impl Server {
         let mut child = match command.spawn() {
             Ok(c) => c,
             Err(e) => {
-                let _ = std::fs::remove_dir(&cwd);
                 return Err(format!(
                     "Cannot start Codex: {e}. Check the executable path and sign in with Codex."
                 ));
@@ -742,7 +771,7 @@ impl Server {
         model: &str,
         mut emit: impl FnMut(&str, String) -> Result<(), String>,
     ) -> Result<(), String> {
-        let mut params = json!({"ephemeral":true,"cwd":self.cwd,"sandbox":"read-only","approvalPolicy":"never","config":self.config,"baseInstructions":prompt.base_instructions,"developerInstructions":prompt.developer_instructions});
+        let mut params = json!({"ephemeral":true,"cwd":self.cwd.0,"sandbox":"read-only","approvalPolicy":"never","config":self.config,"baseInstructions":prompt.base_instructions,"developerInstructions":prompt.developer_instructions});
         if !model.trim().is_empty() {
             params["model"] = Value::String(model.trim().into());
         }
@@ -830,7 +859,9 @@ fn account_status(result: &Value) -> &'static str {
 }
 
 async fn check_setup(executable: &str, timeout: Duration) -> SetupStatus {
-    let path = executable_path(executable).ok().filter(|p| p.is_file());
+    let path = executable_path(executable, &CODEX_EXECUTABLE)
+        .ok()
+        .filter(|p| p.is_file());
     let Some(path) = path else {
         return SetupStatus {
             status: "missing",
