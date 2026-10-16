@@ -155,29 +155,45 @@ review explicitly replaces the capture test's hard-coded client version with
 
 ### `claude`
 
-Claude Code in print mode, one process per request (`warm: false`):
+Claude Code in print mode (#147), one process per request: `warm: false`,
+never reusable, `enforces_no_tools: true`, `supports_model: true`.
 
 ```
 claude -p --output-format stream-json --verbose --include-partial-messages
-       --tools "" --strict-mcp-config --no-session-persistence
-       --setting-sources "" --system-prompt <instructions> [--model <m>]
+       --tools "" --strict-mcp-config --setting-sources ""
+       --no-session-persistence --disable-slash-commands
+       --system-prompt <base>\n\n<developer> [--model=<m>]
 ```
 
-The snapshot goes to stdin. Text deltas from the stream map to `Delta`; the
-final `result` message maps to completion or an error. `--tools ""`
-disables the built-in tools and `--strict-mcp-config` with no
-`--mcp-config` is intended to load no MCP servers. Verify these guarantees,
-including managed configuration, before setting `enforces_no_tools: true`.
-This is a proposed future provider, not a tested implementation.
+The user prefix and snapshot go to stdin, which is then closed. The working
+directory is a fresh empty directory per request, removed afterwards. The
+model is passed as `--model=<m>` so that a value beginning with `-` is
+never parsed as an option.
+
+Measured against Claude Code 2.1.301:
+
+- Text arrives only as `stream_event` messages whose `event` is a
+  `content_block_delta` with a `text_delta`. The `assistant` message and
+  `result.result` repeat the same text and are not streamed; `result.result`
+  is used only when no delta arrived.
+- The `result` message reports failure through `is_error`, independently of
+  `subtype`: an API billing error arrives as `subtype: "success"`,
+  `is_error: true`.
+- With these flags the `system`/`init` message lists no tools, no MCP
+  servers, no slash commands and no skills. The provider checks `init` and
+  fails the request if any tool or MCP server is present, and fails on any
+  `tool_use` content block.
+- Without `--setting-sources ""`, user hooks run and a plugin's
+  `SessionStart` hook injects its own instructions into the conversation.
+  With it, neither happens.
+- `--bare` is not used: it restricts authentication to `ANTHROPIC_API_KEY`
+  or an `apiKeyHelper` and never reads the claude.ai sign-in.
 
 `check` runs `claude auth status --json` and maps `loggedIn` to `ready` or
-`signin`; it starts no inference.
-
-To verify before the brief (checked only against `claude --help`, 2.1.301):
-the exact stream-json message types for text deltas and completion; that
-`--setting-sources ""` is accepted and keeps user hooks and permissions out;
-whether `--bare` is the better way to exclude hooks and plugins; cold
-first-text latency, since there is no warm process.
+`signin`; it starts no inference. As for Codex, `ready` confirms local
+setup, not model access: with `ANTHROPIC_API_KEY` set, Claude Code uses
+that key in preference to the sign-in, and an account without credit fails
+at explanation time with the service's message.
 
 ### `command`
 
@@ -240,6 +256,10 @@ not replace them: the companion works with no agent attached.
 ## Status
 
 Step 1 is implemented on the #145 branch: the provider trait, Codex adapter,
-provider-neutral UI and preferences, and descriptor discovery. Claude, command
-and the pairing interface's `last_error` request remain deferred. Validation
+provider-neutral UI and preferences, and descriptor discovery. Validation
 and the unchanged request-capture proof are recorded in `docs/prs/145.md`.
+
+Step 2, the `claude` provider, is implemented in #147; validation, mutation
+checks and a live run are recorded in `docs/prs/147.md`. The `command`
+provider (#148) and the pairing interface's `last_error` request (#149)
+remain to be built.
