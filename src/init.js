@@ -14,7 +14,7 @@ const Console = console;
 
     D.createContextMenu = (el, win) => {
       if (!D.el) return;
-      el.oncontextmenu = (e) => {
+      el.oncontextmenu = async (e) => {
         e.preventDefault();
         e.stopPropagation();
         let cmitems;
@@ -80,6 +80,20 @@ const Console = console;
               ]);
             }
           }
+        }
+        if (window.__RIDE__ && win && win.me && win.me.getTargetAtClientPoint) {
+          const target = win.me.getTargetAtClientPoint(e.clientX, e.clientY);
+          const line = target && target.position && target.position.lineNumber;
+          let id = null;
+          if (line && D.ide.floating && D.errorHelpTarget) id = await D.errorHelpTarget(win.id, line);
+          else if (line && D.agent) id = D.agent.errorAt(win.id, line);
+          if (id != null) cmitems.unshift({
+            label: 'Explain This Error…',
+            click: () => {
+              if (D.ide.floating) D.ide.ipc.emit('explainError', { id });
+              else D.errorHelp && D.errorHelp.explain(id);
+            },
+          }, { type: 'separator' });
         }
         const cmenu = D.el.Menu.buildFromTemplate(cmitems);
         cmenu.popup();

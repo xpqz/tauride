@@ -10,6 +10,19 @@
     D.ipc.connectTo('ride_master', () => {
       const rm = D.ipc.of.ride_master;
       const ide = new D.IDE({ floating: 1, ipc: rm });
+      let errorHelpSequence = 0;
+      const errorHelpQueries = new Map();
+      D.errorHelpTarget = (token, line) => new Promise((resolve) => {
+        const request = ++errorHelpSequence;
+        const timer = setTimeout(() => { errorHelpQueries.delete(request); resolve(null); }, 1500);
+        errorHelpQueries.set(request, (id) => { clearTimeout(timer); resolve(id); });
+        rm.emit('errorHelpTarget', { request, token, line });
+      });
+      rm.on('errorHelpTargetReply', ({ request, id }) => {
+        const resolve = errorHelpQueries.get(request);
+        errorHelpQueries.delete(request);
+        if (resolve) resolve(id);
+      });
       rm.on('connect', () => {
         D.ipc.log('## connected to ride_master ##'.rainbow, D.ipc.config.delay);
         rm.emit('browserCreated', winId);
@@ -313,6 +326,11 @@
         D.ide.focusWin(D.ide.wins[id]);
       });
       srv.on('zoom', (z) => D.ide.zoom(z));
+      srv.on('errorHelpTarget', ({ request, token, line }, socket) => {
+        const id = D.agent && D.agent.errorAt(token, line);
+        srv.emit(socket, 'errorHelpTargetReply', { request, id: id == null ? null : id });
+      });
+      srv.on('explainError', ({ id }) => D.errorHelp && D.errorHelp.explain(id));
       srv.on('ABT', () => D.commands.ABT());
       srv.on('CVH', () => D.ide.CVH());
       srv.on('LOG', () => D.commands.LOG());

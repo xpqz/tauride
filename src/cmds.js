@@ -40,6 +40,7 @@ D.cmds = [
   // The agent pairing port (tauri/agent-pairing.md) exists in Tauride only.
   ...(typeof window !== 'undefined' && window.__RIDE__ ? [
   ['AGC','Agent: allow control',    []],
+  ['AGE', 'Explain Last Error…', []],
   ['AGO','Agent: observe session',  []],
   ] : []),
   ['AO', 'Comment out lines',       []],

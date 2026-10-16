@@ -185,7 +185,7 @@ const OUTPUT_COMMANDS: &[&str] = &["BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ
 fn session_menu_command(id: &str) -> Option<&str> {
     if !id.starts_with("app:") { return None; }
     let command = id.rsplit(':').next()?;
-    (["AGC", "AGO", "TTB", "IT"].contains(&command)
+    (["AGC", "AGO", "AGE", "TTB", "IT"].contains(&command)
         || INLINE_INSPECTIONS.contains(&command) || OUTPUT_COMMANDS.contains(&command)).then_some(command)
 }
 
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn helper_menus_release_inline_and_output_accelerators_in_nested_custom_menus() {
-        let commands: Vec<_> = ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD", "IT", "AGC", "AGO", "TTB"]
+        let commands: Vec<_> = ["FX", "SI", "SC", "RP", "QCP", "TGC", "RD", "IT", "AGC", "AGO", "AGE", "TTB"]
             .into_iter().chain(INLINE_INSPECTIONS.iter().copied()).chain(OUTPUT_COMMANDS.iter().copied()).collect();
         for page in ["http://tauri.localhost/index.html?type=prf", "http://tauri.localhost/about.html",
             "http://tauri.localhost/log.html", "http://tauri.localhost/index.html?type=editor&winId=12"] {
@@ -367,7 +367,7 @@ mod tests {
         }
         assert_eq!(session_menu_command("ctx:2:0:ITL"), None);
         assert_eq!(session_menu_command("app:main:1:0:PRF"), None);
-        for command in ["AGC", "AGO", "TTB"] {
+        for command in ["AGC", "AGO", "AGE", "TTB"] {
             assert_eq!(session_menu_command(&format!("app:main:1:0:{command}")), Some(command));
         }
     }

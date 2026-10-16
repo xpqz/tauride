@@ -58,6 +58,9 @@ jobs:
       - name: Build Tauri test app
         run: npm run test:build
 
+      - name: Rust tests
+        run: cargo test --locked --features ui-tests --lib --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target/ui-tests
+
       - name: Tauri connection tests
         if: runner.os == 'Linux'
         env:
@@ -113,6 +116,8 @@ jobs:
       - run: npm run css
 
       - run: npm run test:unit
+
+      - run: node --test tools/tauride-mcp/test.js
 
       - run: node mk zf
 

@@ -1,4 +1,5 @@
 mod agent;
+mod companion;
 mod dialog;
 mod menu;
 mod native_services;
@@ -250,6 +251,7 @@ pub fn run() {
         .manage(proc::Procs::default())
         .manage(ssh::Ssh::default())
         .manage(agent::Agent::default())
+        .manage(companion::Companion::default())
         .manage(transcript::Transcript::default())
         .invoke_handler(tauri::generate_handler![
             #[cfg(feature = "ui-tests")]
@@ -282,6 +284,11 @@ pub fn run() {
             ssh::ssh_forward_out,
             ssh::ssh_forward_in,
             ssh::ssh_end,
+            companion::companion_providers,
+            companion::companion_check,
+            companion::companion_explain,
+            companion::companion_cancel,
+            companion::companion_close,
             agent::agent_listen,
             agent::agent_close,
             agent::agent_send,
@@ -329,6 +336,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = _event {
                 proc::kill_all(_app);
                 agent::cleanup_all(_app);
+                companion::cleanup_all(_app);
             }
             // Clicking the Dock icon with no session window open starts one.
             #[cfg(target_os = "macos")]

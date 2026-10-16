@@ -646,7 +646,16 @@
       <p><input id=code_coq type=checkbox><label for=code_coq>Connect on quit</label></p>
       <div id=code_agent hidden>
         <hr>
-        <h2>Agent</h2>
+        <h2>Code Agent</h2>
+        <p>Your selected provider explains errors using its installed CLI and sign-in. Enable observation before reproducing an error to capture its context.</p>
+        <p><label for=code_provider>Provider <select id=code_provider></select></label></p>
+        <p id=code_provider_status role=status></p>
+        <details>
+          <summary>Advanced</summary>
+          <p><label for=code_provider_executable>Provider executable <input id=code_provider_executable placeholder="Auto-detect executable" size=36></label></p>
+          <p id=code_provider_modelrow><label for=code_provider_model>Provider model <input id=code_provider_model placeholder="Configured default" size=24></label></p>
+          <p>Leave these blank to use the detected executable and configured provider model.</p>
+        </details>
         <p><input id=code_ago type=checkbox><label for=code_ago>Observe session</label></p>
         <p><input id=code_agc type=checkbox><label for=code_agc>Allow control</label></p>
         <p><input id=code_agk type=checkbox><label for=code_agk>Confirm each action</label></p>
@@ -914,6 +923,14 @@
 <script src=src/ide.js        ></script>
 <script src=src/ipc.js        ></script>
 <script src=src/agent.js      ></script>
+<script>
+if (window.__RIDE__) {
+  const s = document.createElement('script');
+  const ready = new Promise((resolve, reject) => { s.onload = resolve; s.onerror = reject; });
+  D.errorHelp = { explain: id => ready.then(() => D.errorHelp.explain(id)), close: () => Promise.resolve() };
+  s.src = 'src/error_help.js'; document.head.appendChild(s);
+}
+</script>
 <script src=src/mon_apl.js    ></script>
 <script src=src/init.js       ></script>
 
