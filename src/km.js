@@ -315,6 +315,11 @@
     DBG() { D.prf.dbg.toggle(); },
     WSE() { D.prf.wse.toggle(); },
     POE() { D.prf.pauseOnError.toggle(); },
+    AGE() {
+      if (!window.__RIDE__) return;
+      if (D.ide && D.ide.floating) D.ide.ipc.emit('explainError', {});
+      else D.errorHelp && D.errorHelp.explain();
+    },
     AGO() { D.prf.agent.toggle(); },
     AGC() { D.prf.agentControl.toggle(); },
     PAT() { D.send('PauseAllThreads', { pause: 1 }); },

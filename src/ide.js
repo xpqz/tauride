@@ -1227,6 +1227,7 @@ D.IDE.prototype = {
     return (RegExp(`^(${D.syntax.sysvar}|${D.syntax.name})?\\b`, 'i').exec(loc + roc) || [''])[0];
   },
   die() { // don't really, just pretend
+    D.agent && D.agent.clearErrorContext && D.agent.clearErrorContext();
     const ide = this;
     if (ide.dead) return;
     ide.dead = 1;

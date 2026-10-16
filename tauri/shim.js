@@ -804,7 +804,7 @@
     .filter((it) => it.visible !== false)
     .map((it, i) => {
       const semanticCommand = app && [
-        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'TTB', 'FX', 'SI', 'RP', 'QCP', 'TGC', 'RD', 'IT',
+        'SC', 'SA', 'CVH', 'AGC', 'AGO', 'AGE', 'TTB', 'FX', 'SI', 'RP', 'QCP', 'TGC', 'RD', 'IT',
         'ITL', 'ITF', 'ITR', 'ITA', 'ITRES', 'ITPL', 'ITPF', 'ITPR', 'ITPA',
         'BXO', 'BXN', 'BXMIN', 'BXMID', 'BXMAX', 'BXQ', 'BXH',
         'RWO', 'RWL', 'RWC', 'RWW', 'RWFO', 'RWF0', 'RWF1', 'RWF2', 'RWF3',

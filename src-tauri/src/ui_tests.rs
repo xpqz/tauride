@@ -13,6 +13,7 @@ fn menu_command_item<R: Runtime>(items: Vec<MenuItemKind<R>>, command: &str) -> 
         "PRF" => "Preferences...",
         "AGO" => "Observe Session",
         "AGC" => "Allow Control",
+        "AGE" => "Explain Last Error",
         _ => "",
     };
     for item in items {
@@ -54,7 +55,7 @@ fn menu_item_labels<R: Runtime>(items: Vec<MenuItemKind<R>>) -> Result<Vec<Strin
 }
 
 fn installed_menu_command_item<R: Runtime>(app: &AppHandle<R>, command: &str) -> Result<MenuItemKind<R>, String> {
-    if !["SC", "SA", "LBR", "SBR", "WRP", "PRF", "CVH", "TTB", "AGO", "AGC", "FX", "SI", "RP", "QCP", "TGC", "RD",
+    if !["SC", "SA", "LBR", "SBR", "WRP", "PRF", "CVH", "TTB", "AGO", "AGC", "AGE", "FX", "SI", "RP", "QCP", "TGC", "RD",
         "IT", "ITL", "ITF", "ITR", "ITA", "ITRES", "ITPL", "ITPF", "ITPR", "ITPA",
         "BXO", "BXN", "BXMIN", "BXMID", "BXMAX", "BXQ", "BXH", "RWO", "RWL", "RWC", "RWW", "RWFO",
         "RWF0", "RWF1", "RWF2", "RWF3", "RWF4", "RWF5", "RWF6", "RWF7", "RWF8", "RWF9", "RWQ", "RWH"].contains(&command) { return Err("Unsupported test menu command".into()); }

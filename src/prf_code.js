@@ -51,6 +51,8 @@
       q.ago.checked = !!p.agent();
       q.agc.checked = !!p.agentControl();
       q.agk.checked = !!p.agentConfirm();
+      q.agexe.value = p.agentExecutable();
+      q.agmodel.value = p.agentModel();
       q.ac.onchange();
       q.mme.onchange();
     },
@@ -83,6 +85,8 @@
       p.agent              (q.ago.checked);
       p.agentControl       (q.agc.checked);
       p.agentConfirm       (q.agk.checked);
+      p.agentExecutable    (q.agexe.value.trim());
+      p.agentModel         (q.agmodel.value.trim());
     },
     validate() {
       const isInt = (x, minX) => +x === (+x | 0) && +x >= minX;

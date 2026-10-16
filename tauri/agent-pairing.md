@@ -366,3 +366,18 @@ Not verified: Linux and Windows, the confirm toast end to end (the deny
 timeout is not tested; the unit tests only check which requests ask),
 transcript rotation at
 32 MB, and the MCP adapter under Claude Code itself beyond its stdio tests.
+
+
+## Explain errors with Codex
+
+With **Agent > Observe Session** or **Allow Control** enabled, choose **Agent > Explain Last Error**, or right-click a captured error in the Session and choose **Explain this error**. The same action is available on the associated stopped tracer line. The command is `AGE` in custom menus and keyboard mappings; it has no default shortcut. Errors that occurred before observation was enabled do not have a captured context.
+
+Tauride opens an explanation panel and streams a concise explanation and suggested correction from a local Codex companion. **Cancel** stops the request; **Retry** makes a fresh request for the selected error; **Copy error context** copies the diagnostic bundle. The companion does not apply changes or execute APL.
+
+Install and sign in to Codex first. Under **Preferences > Code > Agent**, **Codex executable** can specify its executable path (including paths containing spaces); blank uses automatic discovery. **Codex model** can select a model, or remain blank to use the configured Codex default. A model that requires a newer Codex version produces an error in the panel: upgrade the CLI or select a compatible installed runtime/model. Authentication remains managed by Codex; Tauride does not copy credentials or add an API-key store.
+
+The companion starts on the first explanation and keeps its process available for subsequent requests. Each error uses a new ephemeral conversation so earlier explanations cannot contaminate the context. Closing the panel, disabling observation or closing the session releases the companion. The existing MCP socket remains available independently.
+
+Context includes a bounded snapshot of the failing input, error output and available tracer source, stack and named-value previews. Modified editor text is distinguished from the saved source. Missing or truncated data is labelled, and an earlier error is marked stale after execution advances or the selected stack frame changes. Later values are not substituted for values at the time of that error. Breakpoint stops are not classified as runtime errors.
+
+The initial adapter uses the [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server). It disables inherited MCP servers, connectors, plugins and execution tools for these requests, uses read-only permissions, and rejects tool/approval requests. The diagnostic snapshot is passed as data. Requests and streamed replies are correlated within the owning session window; cancellation and session shutdown terminate the owned companion.

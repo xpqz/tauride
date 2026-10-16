@@ -14,16 +14,15 @@ if (window.__RIDE__) {
     const { label } = window.__TAURI_INTERNALS__.metadata.currentWindow;
     const fs = nodeRequire('fs');
     const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
-    // The core is loaded from here rather than from index.html so the
-    // Electron build, which shares the page, never fetches a script it does
-    // not use. The pages' CSP allows same-origin scripts, not eval.
-    const coreLoaded = new Promise((resolve, reject) => {
+    const loadScript = (name, exported) => new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = document.currentScript.src.replace(/agent\.js(\?.*)?$/, 'agent_core.js');
-      s.onload = () => resolve(window.agentCore);
-      s.onerror = () => reject(new Error('agent_core.js did not load'));
+      s.src = document.currentScript.src.replace(/agent\.js(\?.*)?$/, name);
+      s.onload = () => resolve(window[exported]);
+      s.onerror = () => reject(new Error(`${name} did not load`));
       document.head.appendChild(s);
     });
+
+    const coreLoaded = Promise.all([loadScript('agent_core.js', 'agentCore'), loadScript('error_context.js', 'errorContext')]);
 
     // Preferences are read through here because the booleans the UI task adds
     // (agent, agentControl, agentConfirm) may not exist yet, and the phase 1
@@ -53,7 +52,7 @@ if (window.__RIDE__) {
     // editors, which are proxies without an editor in this window, have none.
     const describe = (w) => {
       // A window that is closing has lost its model already.
-      const model = w && w.id && w.me && w.me.getModel();
+      const model = w && w.id && w.me && typeof w.me.getModel === 'function' && w.me.getModel();
       if (!model) return null;
       w.updStops();
       const stops = w.getStops();
@@ -154,6 +153,84 @@ if (window.__RIDE__) {
       onAgentEcho: (seq, text) => D.agent.onAgentEcho && D.agent.onAgentEcho(seq, text),
     };
 
+    let errorCapture;
+    let settleTimer;
+    const errorMarks = new Map();
+    const errorTracers = new Map();
+    const protocolWindows = new Map();
+    const pendingMarks = [];
+    let renderedModel;
+    const renderedLines = new Set();
+    const watchErrorOutput = () => {
+      const se = D.ide && D.ide.wins[0];
+      const model = se && se.me.getModel();
+      if (!model || model === renderedModel) return;
+      renderedModel = model;
+      renderedLines.clear();
+      model.onDidChangeContent((ev) => {
+        if (!want) return;
+        ev.changes.forEach((change) => {
+          const end = change.range.startLineNumber + change.text.split('\n').length - 1;
+          for (let line = change.range.startLineNumber; line <= end; line++) renderedLines.add(line);
+        });
+      });
+    };
+    const previewReplies = new Map();
+    const errorListeners = new Set();
+    const clearMarks = () => {
+      errorMarks.forEach(({ model, decoration }) => {
+        if (!model.isDisposed()) model.deltaDecorations([decoration], []);
+      });
+      errorMarks.clear();
+      errorTracers.clear();
+      protocolWindows.clear();
+      pendingMarks.length = 0;
+      renderedLines.clear();
+    };
+    const markErrors = () => {
+      const se = D.ide && D.ide.wins[0];
+      const model = se && se.me.getModel();
+      if (!model) return;
+      pendingMarks.splice(0).reverse().forEach(({ id, output }) => {
+        const summary = errorCapture.info();
+        const text = summary && summary.id === id ? summary.message : output.map((o) => o.text).join('').split('\n').find((line) => /ERROR|INTERRUPT|WS FULL/.test(line));
+        if (!text) return;
+        for (let line = model.getLineCount(); line > 0; line--) {
+          if (!renderedLines.has(line)) continue;
+          if (model.getLineContent(line).trim() !== text.trim()) continue;
+          const occupied = [...errorMarks.values()].some((m) => m.model === model && model.getDecorationRange(m.decoration)?.startLineNumber === line);
+          if (occupied) continue;
+          const [decoration] = model.deltaDecorations([], [{
+            range: new monaco.Range(line, 1, line, model.getLineMaxColumn(line)),
+            options: { stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
+          }]);
+          errorMarks.set(id, { model, decoration, text: model.getLineContent(line).trim() });
+          while (errorMarks.size > 8) {
+            const first = errorMarks.keys().next().value;
+            const old = errorMarks.get(first);
+            if (!old.model.isDisposed()) old.model.deltaDecorations([old.decoration], []);
+            errorMarks.delete(first);
+          }
+          break;
+        }
+      });
+    };
+    const scheduleCapture = () => {
+      if (settleTimer) return;
+      const poll = () => {
+        settleTimer = null;
+        if (!errorCapture || !want || !D.ide || !D.ide.connected) return;
+        if (!D.ide.quiescent()) { settleTimer = setTimeout(poll, 10); return; }
+        errorCapture.settle().then(async () => {
+          const summary = errorCapture.info();
+          const bundle = summary && await errorCapture.context(summary.id);
+          if (bundle) errorTracers.set(bundle.id, bundle.frameToken === undefined ? [] : [bundle.frameToken]);
+          markErrors();
+        });
+      };
+      settleTimer = setTimeout(poll, 10);
+    };
+
     const onSocket = (p) => {
       if (p === true || p === null) { core.socket(p === true); status(); return; }
       if (typeof p === 'string') core.frame(p);
@@ -163,8 +240,50 @@ if (window.__RIDE__) {
     let early = [];
     const relay = (f, x, y) => { core ? f(x, y) : early.push([f, x, y]); };
     const ready = Promise.all([
-      coreLoaded.then((ac) => {
+      coreLoaded.then(([ac, ec]) => {
         core = ac.create(io);
+        errorCapture = ec.create({
+          snapshot: (frameToken) => {
+            const tracers = Object.values(D.ide.wins).filter((w) => w.tc)
+              .sort((a, b) => Number(b.id === frameToken) - Number(a.id === frameToken));
+            const windows = tracers.slice(0, 4).map((w) => {
+              const description = describe(w);
+              const cached = protocolWindows.get(w.id);
+              if (description) {
+                const line = description.currentLine;
+                const startLine = Math.max(0, line - 2);
+                return {
+                  sourceSnippet: {
+                    origin: 'executable', startLine,
+                    lines: (w.oText || '').split('\n').slice(startLine, line + 3),
+                  },
+                  ...description,
+                  executableText: (w.oText || '').slice(0, 24000).split('\n'),
+                };
+              }
+              return cached && { ...cached, bufferUnavailable: 'Floating editor buffer unavailable; source is last received executable definition' };
+            }).filter(Boolean);
+            const summary = pendingMarks.length ? pendingMarks[pendingMarks.length - 1] : errorCapture.info();
+            if (summary) {
+              errorTracers.set(summary.id, windows.filter((w) => w.kind === 'tracer').map((w) => w.token));
+              while (errorTracers.size > 8) errorTracers.delete(errorTracers.keys().next().value);
+            }
+            return { interpreter: io.ide(), windows };
+          },
+          onError: (id, output) => pendingMarks.push({ id, output }),
+          requestStack: () => D.send('GetSIStack', {}),
+          preview: (names, token) => Promise.all(names.map((name) => new Promise((resolve) => {
+            const tipToken = D.ide.valueTipToken++;
+            const timer = setTimeout(() => { previewReplies.delete(tipToken); resolve(null); }, 180);
+            previewReplies.set(tipToken, (y) => { clearTimeout(timer); resolve({ name, tip: y.tip, class: y.class }); });
+            D.send('GetValueTip', { win: token, line: name, pos: 0, maxWidth: 80, maxHeight: 6, token: tipToken });
+          }))).then((values) => values.filter(Boolean)),
+        });
+        errorCapture.setEnabled(!!want);
+        errorCapture.onChange((summary) => {
+          if (!summary) clearMarks();
+          errorListeners.forEach((listener) => listener(summary));
+        });
         early.forEach(([f, x, y]) => relay(f, x, y));
         early = null;
       }),
@@ -292,9 +411,32 @@ if (window.__RIDE__) {
         else want = observe ? 'observe' : null;
         if (started) {
           core.setLevel(want);
+          errorCapture.setEnabled(!!want);
           ready.then(apply).catch((e) => console.error('agent:', e));
         } else status();
       },
+      clearErrorContext: () => errorCapture && errorCapture.clear(),
+      errorInfo: () => errorCapture ? errorCapture.info() : null,
+      errorContext: (id) => errorCapture ? errorCapture.context(id) : Promise.resolve(null),
+      errorAt(win, lineNumber) {
+        if (!errorCapture || !want) return null;
+        const w = typeof win === 'object' ? win : D.ide && D.ide.wins[win];
+        if (!w || !w.me) return null;
+        if (typeof w.me.getModel !== 'function') {
+          const summary = errorCapture.info();
+          const cached = protocolWindows.get(w.id);
+          return summary && !summary.stale && cached && cached.kind === 'tracer' && lineNumber === cached.currentLine + 1 && (errorTracers.get(summary.id) || []).includes(w.id) ? summary.id : null;
+        }
+        const model = w.me.getModel();
+        for (const [id, mark] of errorMarks) {
+          const range = mark.model === model && model.getDecorationRange(mark.decoration);
+          if (range && range.endColumn > range.startColumn && model.getLineContent(range.startLineNumber).trim() === mark.text && lineNumber >= range.startLineNumber && lineNumber <= range.endLineNumber) return id;
+        }
+        const summary = errorCapture.info();
+        if (w.tc && summary && !summary.stale && (errorTracers.get(summary.id) || []).includes(w.id) && w.HIGHLIGHT && lineNumber === w.HIGHLIGHT.lineStart) return summary.id;
+        return null;
+      },
+      onErrorChange(listener) { errorListeners.add(listener); return () => errorListeners.delete(listener); },
       level: () => want,
       connected: () => !!(core && core.connected()),
       // Asked before every control request except interrupt while agentConfirm
@@ -326,9 +468,44 @@ if (window.__RIDE__) {
     };
     const tapRecv = (x, y) => {
       if (!started && D.ide) start();
+      if (want && (x === 'OpenWindow' || x === 'UpdateWindow')) {
+        const old = protocolWindows.get(y.token) || {};
+        const line = y.currentRow || 0;
+        const startLine = Math.max(0, line - 2);
+        protocolWindows.set(y.token, {
+          ...old, token: y.token, name: y.name || old.name,
+          kind: (y.debugger === undefined ? old.kind === 'tracer' : y.debugger) ? 'tracer' : 'editor',
+          currentLine: y.currentRow === undefined ? old.currentLine : y.currentRow,
+          sourceSnippet: y.text ? {
+            origin: 'executable', startLine,
+            lines: y.text.slice(startLine, line + 3).map((text) => text.slice(0, 2000)),
+          } : old.sourceSnippet,
+          executableText: y.text ? y.text.join('\n').slice(0, 24000).split('\n').slice(0, 120) : old.executableText,
+        });
+        while (protocolWindows.size > 32) protocolWindows.delete(protocolWindows.keys().next().value);
+      }
+      if (x === 'SetHighlightLine' && protocolWindows.has(y.win)) {
+        const cached = protocolWindows.get(y.win);
+        cached.currentLine = y.line;
+        const snippet = cached.sourceSnippet;
+        if (!snippet || y.line < snippet.startLine || y.line >= snippet.startLine + snippet.lines.length) {
+          const start = Math.max(0, y.line - 2);
+          cached.sourceSnippet = cached.executableText && y.line < cached.executableText.length
+            ? { origin: 'executable', startLine: start, lines: cached.executableText.slice(start, y.line + 3) }
+            : { origin: 'executable', startLine: y.line, lines: [], unavailable: 'Highlighted source beyond retained protocol source' };
+        }
+      }
+      if (x === 'CloseWindow') protocolWindows.delete(y.win);
+      if (x === 'WindowTypeChanged' && protocolWindows.has(y.win)) protocolWindows.get(y.win).kind = y.tracer ? 'tracer' : 'editor';
+      watchErrorOutput();
       core.recv(x, y);
+      errorCapture.recv(x, y);
+      if (x === 'ValueTip' && previewReplies.has(y.token)) {
+        const reply = previewReplies.get(y.token); previewReplies.delete(y.token); reply(y);
+      }
+      if (x === 'HadError' || x === 'SetPromptType' || x === 'SetHighlightLine' || x === 'OpenWindow') scheduleCapture();
     };
-    const tapSend = (x, y) => core.sent(x, y);
+    const tapSend = (x, y) => { if (x === 'Execute') renderedLines.clear(); core.sent(x, y); errorCapture.sent(x, y); };
     hook('recv', (x, y) => relay(tapRecv, x, y));
     hook('send', (x, y) => relay(tapSend, x, y));
   })();

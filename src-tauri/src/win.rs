@@ -123,6 +123,7 @@ pub fn watch<R: Runtime>(w: &Window<R>) {
             WindowEvent::Moved(_) | WindowEvent::Resized(_) => crate::winstate::schedule_save(&app, &label),
             WindowEvent::CloseRequested { .. } => crate::winstate::save_now(&app, &label),
             WindowEvent::Destroyed => {
+                crate::companion::cleanup(&app, &label);
                 if let Some(m) = SESSION_ENV.lock().unwrap().as_mut() {
                     m.remove(&label);
                 }
