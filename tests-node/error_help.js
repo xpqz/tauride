@@ -16,7 +16,7 @@ const setup = () => {
   const io = {
     level: () => 'observe', context: async id => ({ error: { id, message: '<img onerror=bad>' } }),
     listen: async f => { listener = f; calls.push(['listen']); return () => calls.push(['unlisten']); },
-    invoke: async (cmd, args) => { calls.push([cmd, args]); },
+    invoke: async (cmd, args) => { calls.push([cmd, args]); return { status: 'ready' }; },
     settings: () => ({ executable: '', model: '' }), render() {},
   };
   const c = create(io);
@@ -24,12 +24,14 @@ const setup = () => {
 };
 test('observation required before collecting or sending context', async () => {
   const { c, io, calls } = setup(); io.level = () => null;
-  await c.explain('chosen'); assert.equal(calls.length, 0);
+  let collected = false; io.context = async () => { collected = true; };
+  await c.explain('chosen');
+  assert.deepEqual(calls.map(x => x[0]), ['companion_check']); assert.equal(collected, false);
   assert.match(c.state().status, /observ/i);
 });
 test('target and settings preserved; subscribe before invoke; streaming stays plain text', async () => {
   const { c, calls, event } = setup(); await c.explain('chosen');
-  assert.equal(calls[0][0], 'listen');
+  assert.ok(calls.findIndex(x => x[0] === 'listen') < calls.findIndex(x => x[0] === 'companion_explain'));
   const [, args] = calls.find(x => x[0] === 'companion_explain');
   assert.equal(args.context.error.id, 'chosen'); assert.equal(args.model, ''); assert.equal(args.executable, '');
   event({ requestId: args.requestId, event: 'delta', text: '<script>bad</script>' });
@@ -49,17 +51,17 @@ test('cancel and retry ignore late events from old request', async () => {
 test('closing while context loads prevents sending; invoke rejection is visible', async () => {
   const { c, io, calls } = setup(); let resolve;
   io.context = () => new Promise(r => { resolve = r; });
-  const pending = c.explain('chosen'); await c.close(); resolve({ error: { id: 'chosen' } }); await pending;
+  const pending = c.explain('chosen'); await new Promise(r => setImmediate(r)); await c.close(); resolve({ error: { id: 'chosen' } }); await pending;
   assert.ok(!calls.some(x => x[0] === 'companion_explain'));
   io.context = async () => ({ error: { id: 'chosen' } });
-  io.invoke = async cmd => { if (cmd === 'companion_explain') throw new Error('Codex unavailable'); };
+  io.invoke = async cmd => { if (cmd === 'companion_explain') throw new Error('Codex unavailable'); return { status: 'ready' }; };
   await c.explain('chosen'); assert.match(c.state().status, /Codex unavailable/); assert.equal(c.state().busy, false);
 });
 test('menu command has no default shortcut and Code preferences expose executable and optional model', () => {
   const fs = require('node:fs');
   const read = name => fs.readFileSync(require('node:path').join(__dirname, '..', name), 'utf8');
-  assert.match(read('src/cmds.js'), /\['AGE',\s*'Agent: explain last error',\s*\[\]\]/);
-  assert.match(read('src/prf.js'), /Explain Last Error\s*=AGE/);
+  assert.match(read('src/cmds.js'), /\['AGE',\s*'Explain Last Error with Codex…',\s*\[\]\]/);
+  assert.match(read('src/prf.js'), /Explain Last Error with Codex…\s*=AGE/);
   assert.match(read('src/prf.js'), /\['agentExecutable',\s*''\]/);
   assert.match(read('src/prf.js'), /\['agentModel',\s*''\]/);
   assert.match(read('index.html'), /id=code_agexe/);
@@ -68,7 +70,7 @@ test('menu command has no default shortcut and Code preferences expose executabl
 test('close during subscription setup cannot send, including late listener cleanup', async () => {
   const { c, io, calls } = setup(); let resolve; let removed = false;
   io.listen = () => new Promise(r => { resolve = r; });
-  const pending = c.explain('x'); await Promise.resolve(); await c.close();
+  const pending = c.explain('x'); await new Promise(r => setImmediate(r)); await c.close();
   resolve(() => { removed = true; }); await pending;
   assert.equal(removed, true); assert.ok(!calls.some(x => x[0] === 'companion_explain'));
 });
@@ -99,7 +101,7 @@ test('browser panel renders HTML-looking Codex output inertly and Escape restore
     level: () => 'observe', errorContext: async () => ({ message: '<img src=x>', error: {} }), onErrorChange() {},
   } };
   const window = { __RIDE__: true, addEventListener() {},
-    __TAURI_INTERNALS__: { metadata: { currentWindow: { label: 'main' } }, invoke: async (cmd, args) => { if (cmd === 'companion_explain') requestId = args.requestId; } },
+    __TAURI_INTERNALS__: { metadata: { currentWindow: { label: 'main' } }, invoke: async (cmd, args) => { if (cmd === 'companion_explain') requestId = args.requestId; return { status: 'ready' }; } },
     __TAURI__: { event: { listen: async (name, fn) => { listener = fn; return () => {}; } } },
   };
   vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname, '../src/error_help.js'), 'utf8'), { D, window, document, navigator: {}, module: { exports: {} }, console });
@@ -178,4 +180,47 @@ test('fenced code preserves indentation, newlines and HTML across split closing 
   assert.equal(pre.children[0].tag, 'code');
   assert.equal(pre.textContent, '  ⎕←x\n    `<img src=x>`\n');
   assert.equal(element.textContent, 'Correction:\n  ⎕←x\n    `<img src=x>`\nThen use x.');
+});
+
+for (const status of ['missing', 'signin']) {
+  test(`setup ${status} prevents context collection and model requests`, async () => {
+    const { c, io, calls } = setup(); let collected = false;
+    io.context = async () => { collected = true; };
+    io.invoke = async (cmd, args) => { calls.push([cmd, args]); return { status, message: 'Setup required' }; };
+    await c.explain('x');
+    assert.equal(c.state().setup, status); assert.equal(collected, false);
+    assert.equal(calls.some(x => x[0] === 'companion_explain'), false);
+  });
+}
+test('enabling observation never starts a model request', async () => {
+  const { c, io, calls } = setup(); let enabled = 0;
+  io.level = () => null; io.enableObservation = () => { enabled += 1; };
+  await c.explain(); c.enableObservation();
+  assert.equal(enabled, 1); assert.deepEqual(calls.map(x => x[0]), ['companion_check']);
+  assert.match(c.state().status, /Reproduce the error/);
+});
+test('successful checks are cached by executable and Check Again probes without sending', async () => {
+  const { c, io, calls } = setup();
+  await c.explain('x'); await c.retry();
+  assert.equal(calls.filter(x => x[0] === 'companion_check').length, 1);
+  await c.checkAgain();
+  assert.equal(calls.filter(x => x[0] === 'companion_check').length, 2);
+  assert.equal(calls.filter(x => x[0] === 'companion_explain').length, 2);
+  io.settings = () => ({ executable: '/other/codex', model: '' });
+  await c.retry(); assert.equal(calls.filter(x => x[0] === 'companion_check').length, 3);
+});
+test('closing during setup ignores a late response and never sends old context', async () => {
+  const { c, io, calls } = setup(); let finish;
+  io.invoke = (cmd, args) => { calls.push([cmd, args]); return cmd === 'companion_check' ? new Promise(r => { finish = r; }) : Promise.resolve(); };
+  const pending = c.explain('old'); await c.close(); finish({ status: 'ready' }); await pending;
+  assert.equal(c.state().open, false); assert.equal(calls.some(x => x[0] === 'companion_explain'), false);
+});
+
+test('missing setup stays actionable when observation is enabled', async () => {
+  const { c, io, calls } = setup(); io.level = () => null;
+  io.enableObservation = () => {};
+  io.invoke = async (cmd, args) => { calls.push([cmd, args]); return { status: 'missing', message: 'Install Codex' }; };
+  await c.explain(); c.enableObservation();
+  assert.equal(c.state().setup, 'missing'); assert.equal(c.state().status, 'Install Codex');
+  assert.deepEqual(calls.map(x => x[0]), ['companion_check']);
 });

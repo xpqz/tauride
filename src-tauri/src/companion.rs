@@ -270,16 +270,44 @@ impl Drop for Server {
     }
 }
 
+fn path_executable(binary: &str, search_path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    std::env::split_paths(search_path?).find_map(|directory| {
+        let candidate = directory.join(binary);
+        if candidate.is_file() {
+            return std::fs::canonicalize(candidate).ok();
+        }
+        #[cfg(windows)]
+        if candidate.extension().is_none() {
+            let candidate = candidate.with_extension("exe");
+            if candidate.is_file() {
+                return std::fs::canonicalize(candidate).ok();
+            }
+        }
+        None
+    })
+}
+
+fn configured_executable(
+    configured: &str,
+    search_path: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    let path = PathBuf::from(configured);
+    if path.components().count() == 1 && !path.is_absolute() {
+        path_executable(configured, search_path)
+    } else {
+        Some(path)
+    }
+}
+
 fn executable_path(configured: &str) -> Result<PathBuf, String> {
+    let search_path = std::env::var_os("PATH");
     if !configured.trim().is_empty() {
-        return Ok(PathBuf::from(configured.trim()));
+        return configured_executable(configured.trim(), search_path.as_deref()).ok_or_else(|| {
+            "Codex was not found on PATH. Check its executable in Preferences.".into()
+        });
     }
     let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
-    if let Some(path) = std::env::var_os("PATH").and_then(|p| {
-        std::env::split_paths(&p)
-            .map(|d| d.join(binary))
-            .find(|p| p.is_file())
-    }) {
+    if let Some(path) = path_executable(binary, search_path.as_deref()) {
         return Ok(path);
     }
     let mut candidates = vec![
@@ -546,6 +574,80 @@ fn emit<R: Runtime>(
     let _ = window.emit("ride-companion", json!({"requestId":request_id,"event":event,"text":text,"status":if event == "status" { Some(text) } else { None },"elapsedMs":started.elapsed().as_millis(),"firstTextMs":first}));
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct SetupStatus {
+    status: &'static str,
+    message: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    executable: Option<String>,
+}
+
+fn account_status(result: &Value) -> &'static str {
+    if result["account"].is_object() || result["requiresOpenaiAuth"] == false {
+        "ready"
+    } else if result.get("account").is_some_and(Value::is_null)
+        && result["requiresOpenaiAuth"] == true
+    {
+        "signin"
+    } else {
+        "unavailable"
+    }
+}
+
+async fn check_setup(executable: &str, timeout: Duration) -> SetupStatus {
+    let path = executable_path(executable).ok().filter(|p| p.is_file());
+    let Some(path) = path else {
+        return SetupStatus {
+            status: "missing",
+            message: "Codex was not found. Install Codex or choose its executable in Preferences.",
+            executable: None,
+        };
+    };
+    let executable = path.to_string_lossy().into_owned();
+    // This child is independent of every session's warm explanation server.
+    let child = Arc::new(Mutex::new(None));
+    let result = tokio::time::timeout(timeout, async {
+        let mut server = Server::start_owned(&executable, child.clone()).await?;
+        let result = server
+            .rpc("account/read", json!({"refreshToken":false}))
+            .await;
+        server.stop().await;
+        result
+    })
+    .await;
+    // Also cover cancellation during startup, before a Server has been constructed.
+    let remaining = child.lock().unwrap().take();
+    if let Some(mut child) = remaining {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
+    let status = match result {
+        Ok(Ok(account)) => account_status(&account),
+        _ => "unavailable",
+    };
+    SetupStatus {
+        status,
+        message: match status {
+            "ready" => "Codex is ready to explain errors.",
+            "signin" => "Sign in with Codex, then check again.",
+            _ => "Could not check Codex. Update Codex, verify its executable in Preferences, and try again.",
+        },
+        executable: Some(executable),
+    }
+}
+
+#[tauri::command]
+pub async fn companion_check<R: Runtime>(
+    window: WebviewWindow<R>,
+    executable: String,
+) -> Result<SetupStatus, String> {
+    validate_owner(window.label())?;
+    if executable.len() > 4096 {
+        return Err("Invalid Codex configuration".into());
+    }
+    Ok(check_setup(&executable, Duration::from_secs(10)).await)
+}
+
 #[tauri::command]
 pub fn companion_explain<R: Runtime>(
     window: WebviewWindow<R>,
@@ -759,6 +861,101 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         (dir, script.to_string_lossy().into_owned())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn configured_path_basename_resolves_for_both_probe_and_launch() {
+        let (dir, executable) = fixture();
+        let search_path = std::env::join_paths([&dir]).unwrap();
+        let resolved = configured_executable("codex", Some(&search_path)).unwrap();
+        assert_eq!(resolved, std::fs::canonicalize(&executable).unwrap());
+        assert!(configured_executable("missing-codex", Some(&search_path)).is_none());
+        let resolved = resolved.to_str().unwrap();
+        assert_eq!(
+            check_setup(resolved, Duration::from_secs(3)).await.status,
+            "ready"
+        );
+        let mut server = Server::start(resolved).await.unwrap();
+        server.explain("RANK ERROR", "", |_, _| {}).await.unwrap();
+        server.stop().await;
+        drop(server);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn setup_probe_is_private_has_no_inference_and_reaps_every_outcome() {
+        for (mode, expected) in [
+            ("ready", "ready"),
+            ("provider", "ready"),
+            ("signin", "signin"),
+            ("invalid", "unavailable"),
+            ("unsupported", "unavailable"),
+            ("malformed", "unavailable"),
+            ("wait", "unavailable"),
+            ("initwait", "unavailable"),
+        ] {
+            let (dir, executable) = fixture();
+            if mode == "initwait" {
+                std::fs::write(format!("{executable}.initwait"), "").unwrap();
+            } else {
+                std::fs::write(format!("{executable}.account"), mode).unwrap();
+            }
+            let status = check_setup(&executable, Duration::from_millis(500)).await;
+            assert_eq!(status.status, expected, "{mode}");
+            let serialized = serde_json::to_string(&status).unwrap();
+            assert!(!serialized.contains("secret@example.com"));
+            assert!(!serialized.contains("account"));
+            let pid: i32 = std::fs::read_to_string(format!("{executable}.pid"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while unsafe { libc::kill(pid, 0) } == 0 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("probe must be killed and reaped");
+            if mode != "initwait" {
+                assert_eq!(
+                    std::fs::read_to_string(format!("{executable}.log")).unwrap(),
+                    "start\naccount/read\n"
+                );
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+        let status = check_setup("/nonexistent/tauride-codex", Duration::from_millis(500)).await;
+        assert_eq!(status.status, "missing");
+        assert!(status.executable.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn setup_probe_does_not_replace_a_warm_explanation_server() {
+        let (dir, executable) = fixture();
+        let mut warm = Server::start(&executable).await.unwrap();
+        let pid = warm.child.lock().unwrap().as_ref().unwrap().id();
+        assert_eq!(
+            check_setup(&executable, Duration::from_secs(3))
+                .await
+                .status,
+            "ready"
+        );
+        assert_eq!(warm.child.lock().unwrap().as_ref().unwrap().id(), pid);
+        let mut text = String::new();
+        warm.explain("RANK ERROR", "", |event, delta| {
+            if event == "delta" {
+                text.push_str(&delta);
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(text, "The array ranks differ. Check the operands.");
+        warm.stop().await;
+        drop(warm);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]

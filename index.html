@@ -646,10 +646,14 @@
       <p><input id=code_coq type=checkbox><label for=code_coq>Connect on quit</label></p>
       <div id=code_agent hidden>
         <hr>
-        <h2>Agent</h2>
-        <p><label for=code_agexe>Codex executable <input id=code_agexe placeholder="Auto-detect Codex" size=36></label></p>
-        <p><label for=code_agmodel>Codex model <input id=code_agmodel placeholder="Configured Codex default" size=24></label></p>
-        <p>Error explanations use your installed Codex sign-in. Suggestions are read-only.</p>
+        <h2>Code Agent</h2>
+        <p>Codex explains errors using your installed Codex CLI and sign-in. Enable observation before reproducing an error to capture its context.</p>
+        <details>
+          <summary>Advanced</summary>
+          <p><label for=code_agexe>Codex executable <input id=code_agexe placeholder="Auto-detect Codex" size=36></label></p>
+          <p><label for=code_agmodel>Codex model <input id=code_agmodel placeholder="Configured Codex default" size=24></label></p>
+          <p>Leave these blank to use the detected executable and configured Codex model.</p>
+        </details>
         <p><input id=code_ago type=checkbox><label for=code_ago>Observe session</label></p>
         <p><input id=code_agc type=checkbox><label for=code_agc>Allow control</label></p>
         <p><input id=code_agk type=checkbox><label for=code_agk>Confirm each action</label></p>

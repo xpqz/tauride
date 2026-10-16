@@ -2,20 +2,6 @@ const test = require('ava');
 const { tfw } = require('./_utils');
 tfw.init({ src: 'se', interpreter: true });
 
-test('Explain Last Error opens an accessible observation-gated panel without invoking Codex', async (t) => {
-  const c = t.context.app.client;
-  await c.execute(() => { D.prf.agentControl(0); D.prf.agent(0); D.commands.AGE(); });
-  await c.waitUntil(() => c.execute(() => !!document.querySelector('#error-help:not([hidden])')), { timeout: 5000 });
-  t.true(await c.execute(() => {
-    const panel = document.querySelector('#error-help');
-    return panel.getAttribute('aria-labelledby') === 'error-help-title'
-      && /observ/i.test(panel.textContent)
-      && !!panel.querySelector('button[data-action="close"]');
-  }));
-  await (await c.$('#error-help button[data-action="close"]')).click();
-  t.true(await c.execute(() => document.querySelector('#error-help').hidden));
-});
-
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -23,7 +9,7 @@ const { connect } = require('../tools/tauride-mcp/tauride-mcp');
 const fixtureTest = process.platform === 'win32' ? test.skip : test;
 const wait = (c, predicate, ...args) => c.waitUntil(() => c.execute(predicate, ...args), { timeout: 15000 });
 
-async function fixture(t) {
+async function fixture(t, { observe = true, account = 'ready' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tauride error help '));
   const executable = path.join(dir, 'fake codex');
   let script = fs.readFileSync(path.join(__dirname, '../src-tauri/tests/fixtures/fake-codex-app-server.py'), 'utf8');
@@ -36,10 +22,11 @@ async function fixture(t) {
   script = script.replace("delta='Check the operands.'", `delta=${JSON.stringify(secondDelta)}`);
   script = script.replace("'text': 'The array ranks differ. Check the operands.'", `'text': ${JSON.stringify(firstDelta + secondDelta)}`);
   fs.writeFileSync(executable, script, { mode: 0o700 });
+  fs.writeFileSync(`${executable}.account`, account);
   t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
   const c = t.context.app.client;
-  await c.execute((exe) => { D.prf.sqp(0); D.prf.agentExecutable(exe); D.prf.agentModel(''); D.prf.agentControl(0); D.prf.agent(1); }, executable);
-  await wait(c, () => D.agent && D.agent.level() === 'observe');
+  await c.execute((exe, enabled) => { D.prf.sqp(0); D.prf.agentExecutable(exe); D.prf.agentModel(''); D.prf.agentControl(0); D.prf.agent(enabled ? 1 : 0); }, executable, observe);
+  await wait(c, enabled => D.agent && (enabled ? D.agent.level() === 'observe' : !D.agent.level()), observe);
   return { executable, contexts: () => fs.existsSync(`${executable}.contexts`) ? fs.readFileSync(`${executable}.contexts`, 'utf8').trim().split('\n').map(JSON.parse) : [] };
 }
 
@@ -79,6 +66,88 @@ async function menuExplain(c) {
 const complete = c => wait(c, () => /Complete/.test(document.querySelector('#error-help [role=status]')?.textContent || ''));
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (_) { return false; } };
 
+fixtureTest('Explain Last Error opens an accessible observation-gated panel without inference', async (t) => {
+  const c = t.context.app.client;
+  const fake = await fixture(t, { observe: false });
+  await c.execute(() => D.commands.AGE());
+  await c.waitUntil(() => c.execute(() => !!document.querySelector('#error-help:not([hidden])')), { timeout: 5000 });
+  t.true(await c.execute(() => {
+    const panel = document.querySelector('#error-help');
+    return panel.getAttribute('aria-labelledby') === 'error-help-title'
+      && /observ/i.test(panel.textContent)
+      && !!panel.querySelector('button[data-action="close"]');
+  }));
+  t.is(fake.contexts().length, 0, 'setup probing never starts inference');
+  await (await c.$('#error-help button[data-action="close"]')).click();
+  t.true(await c.execute(() => document.querySelector('#error-help').hidden));
+});
+
+fixtureTest('first-use guidance enables observation without granting control or starting inference', async (t) => {
+  const c = t.context.app.client;
+  const fake = await fixture(t, { observe: false });
+  await menuExplain(c);
+  await wait(c, () => !document.querySelector('#error-help').hidden
+    && !document.querySelector('#error-help button[data-action="observe"]').hidden);
+  const setup = await c.execute(() => {
+    const panel = document.querySelector('#error-help');
+    return { text: panel.textContent, title: panel.querySelector('h2').textContent,
+      preferences: !!panel.querySelector('button[data-action="preferences"]'),
+      guide: !!panel.querySelector('a[href^="https://"]') };
+  });
+  t.regex(setup.title, /Codex/);
+  t.regex(setup.text, /context|sent|send|shar/i, 'setup discloses context sharing');
+  t.true(setup.preferences);
+  t.true(setup.guide);
+  t.is(fake.contexts().length, 0);
+  const owner = await c.getWindowHandle();
+  await (await c.$('#error-help button[data-action="preferences"]')).click();
+  await wait(c, () => !!(D.prf_bw && D.prf_bw.socket));
+  const preferences = await c.execute(() => D.prf_bw.win.label);
+  await c.switchToWindow(preferences);
+  await wait(c, () => !I.prf_dlg.hidden && !document.querySelector('#code').hidden);
+  t.true(await c.execute(() => {
+    const advanced = document.querySelector('#code_agexe').closest('details');
+    return !!advanced && /Advanced/.test(advanced.querySelector('summary').textContent)
+      && advanced.contains(document.querySelector('#code_agmodel'));
+  }), 'Preferences keeps executable and model overrides under Advanced');
+  await (await c.$('#code_agent details summary')).click();
+  t.true(await (await c.$('#code_agexe')).isDisplayed());
+  t.true(await (await c.$('#code_agmodel')).isDisplayed());
+  await (await c.$('#prf_dlg_cancel')).click();
+  await c.switchToWindow(owner);
+  await (await c.$('#error-help button[data-action="observe"]')).click();
+  await wait(c, () => D.agent.level() === 'observe'
+    && /reproduce/i.test(document.querySelector('#error-help [role=status]').textContent));
+  t.deepEqual(await c.execute(() => [!!D.prf.agent(), !!D.prf.agentControl()]), [true, false]);
+  t.is(fake.contexts().length, 0, 'enabling observation never requests an explanation');
+  await failure(c, 'missingErrorHelpOnboarding');
+  await menuExplain(c); await complete(c);
+  t.is(fake.contexts().length, 1, 'a reproduced error can be explicitly explained');
+});
+
+fixtureTest('missing Codex and signed-out Codex show actionable setup without inference', async (t) => {
+  const c = t.context.app.client;
+  const fake = await fixture(t, { account: 'signin' });
+  await failure(c, 'missingErrorHelpSetup');
+  await c.execute(executable => D.prf.agentExecutable(executable), `${fake.executable}-missing`);
+  await menuExplain(c);
+  await wait(c, () => /install|not found|could not find/i.test(document.querySelector('#error-help [role=status]').textContent));
+  t.true(await c.execute(() => !!document.querySelector('#error-help a[href^="https://"]')));
+  t.is(fake.contexts().length, 0);
+  await c.execute(executable => D.prf.agentExecutable(executable), fake.executable);
+  await (await c.$('#error-help button[data-action="check"]')).click();
+  await wait(c, () => /sign.?in|log.?in/i.test(document.querySelector('#error-help [role=status]').textContent));
+  t.regex(await c.execute(() => document.querySelector('#error-help').textContent), /codex login/i);
+  t.is(fake.contexts().length, 0, 'setup checks never submit error context');
+  fs.writeFileSync(`${fake.executable}.account`, 'ready');
+  await (await c.$('#error-help button[data-action="check"]')).click();
+  await wait(c, () => /ready/i.test(document.querySelector('#error-help [role=status]').textContent));
+  t.is(fake.contexts().length, 0, 'a successful recheck still requires an explicit explanation');
+  await (await c.$('#error-help button[data-action="retry"]')).click();
+  await complete(c);
+  t.is(fake.contexts().length, 1);
+});
+
 fixtureTest('native explanation preserves historical target, streams inert text, and coexists with attached MCP', async (t) => {
   const c = t.context.app.client;
   const fake = await fixture(t);
@@ -103,7 +172,7 @@ fixtureTest('native explanation preserves historical target, streams inert text,
     const original = D.el.Menu.buildFromTemplate;
     D.el.Menu.buildFromTemplate = (items) => {
       D.el.Menu.buildFromTemplate = original;
-      const item = items.find(x => x.label === 'Explain this error');
+      const item = items.find(x => x.label === 'Explain this error with Codex…');
       if (!item) throw new Error('Historical error context menu missing');
       return { popup() { item.click(); } };
     };

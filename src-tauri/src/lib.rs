@@ -284,6 +284,7 @@ pub fn run() {
             ssh::ssh_forward_out,
             ssh::ssh_forward_in,
             ssh::ssh_end,
+            companion::companion_check,
             companion::companion_explain,
             companion::companion_cancel,
             companion::companion_close,

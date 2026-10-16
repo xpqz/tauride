@@ -40,9 +40,10 @@
     } else inline(tail);
   };
   const create = (io) => {
+    const ready = new Set();
     let sequence = 0; let active = null; let unlisten = null; let selected; let barrier = null;
     let view = {
-      open: false, busy: false, status: '', text: '', context: null,
+      open: false, busy: false, status: '', text: '', context: null, setup: null, observation: false,
     };
     const render = (change) => { view = { ...view, ...change }; io.render(view); };
     const invokeQuiet = (cmd, args) => Promise.resolve(io.invoke(cmd, args)).catch(() => {});
@@ -57,22 +58,40 @@
       }
       return barrier;
     };
-    const explain = async (id) => {
+    const explain = async (id, checkOnly = false) => {
       if (active || view.busy) cancel();
       selected = id;
       sequence += 1;
       const ticket = sequence;
       render({
-        open: true, busy: false, status: '', text: '', context: null,
+        open: true, busy: false, status: '', text: '', context: null, setup: null, observation: !io.level(),
       });
-      if (!io.level()) { render({ status: 'Enable Observe session in Agent or Preferences > Code to explain errors.' }); return; }
-      render({ busy: true, status: 'Collecting error context…' });
+      render({ busy: true, status: 'Checking Codex setup…' });
       try {
         if (barrier) await barrier;
         if (ticket !== sequence) return;
+        const settings = io.settings();
+        const executable = settings.executable || '';
+        if (checkOnly) ready.delete(executable);
+        if (!ready.has(executable)) {
+          render({ status: 'Checking Codex setup…' });
+          const setup = await io.invoke('companion_check', { executable });
+          if (ticket !== sequence) return;
+          if (setup.status !== 'ready') {
+            render({ busy: false, setup: setup.status, status: setup.message || 'Codex setup needs attention.' });
+            return;
+          }
+          ready.add(executable);
+        }
+        if (!io.level()) {
+          render({ busy: false, setup: 'ready', observation: true, status: 'Codex is ready. Enable observation, then reproduce the error so its code and values can be captured.' });
+          return;
+        }
+        if (checkOnly) { render({ busy: false, setup: 'ready', status: 'Codex is ready. Choose Explain error to request an explanation.' }); return; }
+        render({ status: 'Collecting error context…' });
         const context = await io.context(id);
         if (ticket !== sequence) return;
-        if (!context) throw new Error('Error context is unavailable or expired.');
+        if (!context) throw new Error('Error context is unavailable or expired. With observation enabled, reproduce the error, then choose Explain this error with Codex…');
         selected = context.id || id;
         render({ context, status: 'Starting Codex…' });
         const requestId = `error-help-${Date.now()}-${ticket}`;
@@ -88,7 +107,7 @@
         });
         if (ticket !== sequence) { stop(); return; }
         unlisten = stop; active = requestId;
-        await io.invoke('companion_explain', { requestId, context, ...io.settings() });
+        await io.invoke('companion_explain', { requestId, context, ...settings });
       } catch (e) {
         if (ticket !== sequence) return;
         active = null;
@@ -108,7 +127,16 @@
       await closing;
     };
     return {
-      explain, cancel, close, retry: () => explain(selected), state: () => view,
+      explain,
+      cancel,
+      close,
+      retry: () => explain(selected),
+      checkAgain: () => explain(selected, true),
+      enableObservation: () => {
+        io.enableObservation();
+        render({ observation: false, status: view.setup && view.setup !== 'ready' ? view.status : 'Observation enabled. Reproduce the error, then choose Explain this error with Codex…' });
+      },
+      state: () => view,
     };
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = { create, renderExplanation };
@@ -119,9 +147,14 @@
     panel = document.createElement('section');
     panel.id = 'error-help'; panel.hidden = true; panel.tabIndex = -1;
     panel.setAttribute('role', 'region'); panel.setAttribute('aria-labelledby', 'error-help-title');
-    const title = document.createElement('h2'); title.id = 'error-help-title'; title.textContent = 'Explain this error'; panel.appendChild(title);
+    const title = document.createElement('h2'); title.id = 'error-help-title'; title.textContent = 'Explain error with Codex'; panel.appendChild(title);
     const error = document.createElement('pre'); error.className = 'error-help-context'; panel.appendChild(error);
     const status = document.createElement('p'); status.setAttribute('role', 'status'); panel.appendChild(status);
+    const guidance = document.createElement('p'); panel.appendChild(guidance);
+    const docs = document.createElement('a'); docs.href = 'https://developers.openai.com/codex/quickstart'; docs.target = '_blank'; docs.rel = 'noopener noreferrer'; docs.textContent = 'Codex installation and sign-in guide';
+    docs.onclick = (e) => { e.preventDefault(); D.openExternal(docs.href); };
+    panel.appendChild(docs);
+    const disclosure = document.createElement('p'); disclosure.className = 'error-help-disclosure'; disclosure.textContent = 'Requesting an explanation sends relevant code, the error and available values to your configured Codex service. Suggestions are shown for review and are never executed.'; panel.appendChild(disclosure);
     const text = document.createElement('div'); text.className = 'error-help-text'; text.setAttribute('aria-label', 'Explanation and suggested correction'); panel.appendChild(text);
     const buttons = {};
     const action = (name, label, fn) => {
@@ -131,6 +164,7 @@
     const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
     controller = create({
       level: () => D.agent && D.agent.level(),
+      enableObservation: () => D.prf.agent(1),
       context: (id) => D.agent.errorContext(id),
       settings: () => ({ executable: D.prf.agentExecutable(), model: D.prf.agentModel() }),
       listen: (f) => window.__TAURI__.event.listen(
@@ -143,9 +177,15 @@
         const opening = panel.hidden && v.open;
         panel.hidden = !v.open; status.textContent = v.status;
         renderExplanation(text, v.text);
-        const message = v.context && (v.context.message || (v.context.error && v.context.error.message));
+        const message = v.context
+          && (v.context.message || (v.context.error && v.context.error.message));
         error.textContent = v.context ? `${message || 'Selected error'}${v.context.stale ? '\nEarlier error — session state has changed.' : ''}` : '';
         panel.setAttribute('aria-busy', String(v.busy));
+        guidance.hidden = !v.setup || v.setup === 'ready';
+        guidance.textContent = v.setup === 'missing' ? 'Install the Codex CLI, then run codex login in a terminal to sign in.' : 'Run codex login in a terminal to sign in. Check your executable in Preferences if Codex cannot be reached.';
+        docs.hidden = !v.setup || v.setup === 'ready';
+        if (buttons.observe) buttons.observe.hidden = !v.observation;
+        if (buttons.check) buttons.check.disabled = v.busy;
         if (buttons.cancel) buttons.cancel.disabled = !v.busy;
         if (buttons.retry) buttons.retry.disabled = v.busy;
         if (buttons.copy) buttons.copy.disabled = !v.context;
@@ -153,8 +193,11 @@
         if (!v.open && previousFocus) { previousFocus.focus(); previousFocus = null; }
       },
     });
+    action('observe', 'Enable Observation', () => controller.enableObservation());
+    action('preferences', 'Open Preferences', () => D.prf_ui('code'));
+    action('check', 'Check Again', () => controller.checkAgain());
     action('cancel', 'Cancel', () => controller.cancel());
-    action('retry', 'Retry', () => controller.retry());
+    action('retry', 'Explain error', () => controller.retry());
     action('copy', 'Copy error context', () => navigator.clipboard.writeText(JSON.stringify(controller.state().context, null, 2)).catch((e) => { status.textContent = `Could not copy: ${e}`; }));
     action('close', 'Close', () => controller.close());
     panel.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); controller.close(); } });

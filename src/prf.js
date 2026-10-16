@@ -196,7 +196,7 @@ D.prf = {};
     + '\n  Unpause all threads      =UAT'
     + '\n  Continue all threads     =MA'
     + '\n&Agent                          {tauri}'
-    + '\n  Explain Last Error       =AGE'
+    + '\n  Explain Last Error with Codex… =AGE'
     + '\n  Observe Session          =AGO'
     + '\n  Allow Control            =AGC'
     + '\n&Help'

@@ -26,6 +26,26 @@ for line in sys.stdin:
         send({'id': request_id, 'result': {'userAgent': 'fixture'}})
     elif method == 'config/read':
         send({'id': request_id, 'result': {'config': {'mcp_servers': {'tauride': {'enabled': True}}}}})
+    elif method == 'account/read':
+        assert params == {'refreshToken': False}
+        with open(__file__ + '.log', 'a') as log:
+            log.write('account/read\n')
+        mode_file = __file__ + '.account'
+        mode = open(mode_file).read() if os.path.exists(mode_file) else 'ready'
+        if mode == 'wait':
+            time.sleep(60)
+        elif mode == 'unsupported':
+            send({'id': request_id, 'error': {'message': 'secret@example.com'}})
+        elif mode == 'malformed':
+            print('bad json', flush=True)
+        else:
+            result = {
+                'ready': {'account': {'email': 'secret@example.com'}, 'requiresOpenaiAuth': True},
+                'signin': {'account': None, 'requiresOpenaiAuth': True},
+                'provider': {'account': None, 'requiresOpenaiAuth': False},
+                'invalid': {},
+            }[mode]
+            send({'id': request_id, 'result': result})
     elif method == 'thread/start':
         assert params['ephemeral'] is True
         assert params['sandbox'] == 'read-only'
