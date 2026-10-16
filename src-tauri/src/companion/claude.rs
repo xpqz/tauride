@@ -412,6 +412,23 @@ mod tests {
         let script = dir.join("claude");
         std::fs::write(&script, include_str!("../../tests/fixtures/fake-claude.py")).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Linux refuses to exec a file that a concurrently forked child still holds
+        // open for writing (ETXTBSY); after one successful exec no such copy remains.
+        for _ in 0..200 {
+            match std::process::Command::new(&script)
+                .arg("--fixture-ready")
+                .stdin(Stdio::null())
+                .status()
+            {
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                result => {
+                    assert!(result.unwrap().success());
+                    break;
+                }
+            }
+        }
         (dir, script.to_string_lossy().into_owned())
     }
 
