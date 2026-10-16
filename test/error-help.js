@@ -63,6 +63,10 @@ async function menuExplain(c) {
     });
   }
 }
+const displayed = c => c.execute(() => {
+  const panel = document.querySelector('#error-help');
+  return !!panel && getComputedStyle(panel).display !== 'none';
+});
 const complete = c => wait(c, () => /Complete/.test(document.querySelector('#error-help [role=status]')?.textContent || ''));
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (_) { return false; } };
 
@@ -80,6 +84,11 @@ fixtureTest('Explain Last Error opens an accessible observation-gated panel with
   t.is(fake.contexts().length, 0, 'setup probing never starts inference');
   await (await c.$('#error-help button[data-action="close"]')).click();
   t.true(await c.execute(() => document.querySelector('#error-help').hidden));
+  t.false(await displayed(c), 'Close removes the panel from the screen');
+  await c.execute(() => D.commands.AGE());
+  await c.waitUntil(() => displayed(c), { timeout: 5000 });
+  await c.execute(() => document.querySelector('#error-help').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  t.false(await displayed(c), 'Escape removes the panel from the screen');
 });
 
 fixtureTest('first-use guidance enables observation without granting control or starting inference', async (t) => {
@@ -230,6 +239,7 @@ fixtureTest('cancel then immediate Retry starts successfully and disabling obser
   await c.waitUntil(() => fake.contexts().length === 3, { timeout: 10000 });
   await c.execute(() => D.prf.agent(0));
   await wait(c, () => document.querySelector('#error-help').hidden && !D.agent.errorInfo());
+  t.false(await displayed(c), 'disabling observation removes the panel from the screen');
   const pids = fs.readFileSync(`${fake.executable}.pids`, 'utf8').trim().split('\n').map(Number);
   await c.waitUntil(() => pids.every(pid => !processAlive(pid)), { timeout: 10000, timeoutMsg: 'Disabling observation left a companion child running' });
 });
