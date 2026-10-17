@@ -5,59 +5,137 @@
 
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-#[derive(Default)]
-pub struct Procs {
-    /// Process ids by webview id, with the stdin RIDE keeps open as a pipe.
-    running: Mutex<HashMap<String, (u32, Option<tokio::process::ChildStdin>)>>,
+struct Spawned {
+    pid: u32,
+    /// The process group a detached spawn leads; its members include what the
+    /// spawned process starts, such as the interpreter a wrapper script runs.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    group: Option<i32>,
+    /// The stdin RIDE keeps open as a pipe.
+    _stdin: Option<tokio::process::ChildStdin>,
 }
 
-/// App exit: end every process RIDE spawned (the interpreter, and what its
-/// wrapper script started) so none outlives Tauride, as Electron's children
-/// did not. Each process tree is collected before any of it is signalled,
-/// as a child whose parent has gone can no longer be found by parent. Dyalog
-/// serving RIDE ignores SIGTERM (and SIGHUP and SIGINT), so whatever is left
-/// after a moment gets SIGKILL: with the app gone nothing can reach it.
-#[cfg(unix)]
-pub fn kill_all<R: Runtime>(app: &AppHandle<R>) {
-    fn tree(pid: u32, out: &mut Vec<i32>) {
-        out.push(pid as i32);
-        let children = std::process::Command::new("pgrep").args(["-P", &pid.to_string()]).output();
-        for c in children.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default().split_whitespace() {
-            if let Ok(c) = c.parse() {
-                tree(c, out);
+#[derive(Default)]
+pub struct Procs {
+    /// Spawned processes by webview id, until the process itself exits.
+    running: Mutex<HashMap<String, Spawned>>,
+    /// Process groups of detached spawns, kept until they are empty: a member
+    /// can outlive its leader, and must still end when Tauride does. Only
+    /// groups Tauride created are recorded, so an interpreter it merely
+    /// connected to is never signalled.
+    #[cfg(unix)]
+    groups: Mutex<HashSet<i32>>,
+}
+
+impl Procs {
+    fn insert(&self, id: &str, pid: u32, group: Option<i32>, stdin: Option<tokio::process::ChildStdin>) {
+        #[cfg(unix)]
+        if let Some(group) = group {
+            self.track_group(group);
+        }
+        self.running.lock().unwrap().insert(id.into(), Spawned { pid, group, _stdin: stdin });
+    }
+
+    #[cfg(unix)]
+    fn track_group(&self, group: i32) {
+        self.groups.lock().unwrap().insert(group);
+    }
+
+    #[cfg(all(test, unix))]
+    fn tracked_groups(&self) -> Vec<i32> {
+        self.groups.lock().unwrap().iter().copied().collect()
+    }
+
+    /// Signals a detached spawn's whole group, otherwise the process alone.
+    #[cfg(unix)]
+    fn signal(&self, id: &str, sig: i32) -> Result<(), String> {
+        let target = self
+            .running
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|s| s.group.map_or(s.pid as i32, |g| -g))
+            .ok_or_else(|| format!("process {id} is not running"))?;
+        if unsafe { libc::kill(target, sig) } != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(())
+    }
+
+    /// Waits until a group has no members, then forgets it, so its id is never
+    /// signalled once the system may have given it to another process group.
+    #[cfg(unix)]
+    async fn release_group(&self, group: i32) {
+        while unsafe { libc::kill(-group, 0) } == 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        self.groups.lock().unwrap().remove(&group);
+    }
+
+    /// App exit: end every process RIDE spawned, with what its wrapper script
+    /// started, so none outlives Tauride, as Electron's children did not.
+    /// Process trees are collected before any of it is signalled, as a child
+    /// whose parent has gone can no longer be found by parent; recorded groups
+    /// also reach members whose leader has already exited. Dyalog serving RIDE
+    /// ignores SIGTERM (and SIGHUP and SIGINT), so whatever is left after a
+    /// moment gets SIGKILL: with the app gone nothing can reach it.
+    #[cfg(unix)]
+    fn reap(&self) {
+        fn tree(pid: u32, out: &mut Vec<i32>) {
+            out.push(pid as i32);
+            let children = std::process::Command::new("pgrep").args(["-P", &pid.to_string()]).output();
+            for c in children.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default().split_whitespace() {
+                if let Ok(c) = c.parse() {
+                    tree(c, out);
+                }
+            }
+        }
+        let mut targets = Vec::new();
+        for spawned in self.running.lock().unwrap().values() {
+            tree(spawned.pid, &mut targets);
+        }
+        // A group that cannot be signalled is empty, or its id now belongs to
+        // a group Tauride did not create.
+        targets.extend(
+            self.groups
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|&&g| unsafe { libc::kill(-g, 0) } == 0)
+                .map(|&g| -g),
+        );
+        if targets.is_empty() {
+            return;
+        }
+        for &p in &targets {
+            unsafe { libc::kill(p, libc::SIGTERM) };
+        }
+        let alive = |p: i32| unsafe { libc::kill(p, 0) } == 0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        while std::time::Instant::now() < deadline && targets.iter().any(|&p| alive(p)) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        for &p in &targets {
+            if alive(p) {
+                unsafe { libc::kill(p, libc::SIGKILL) };
             }
         }
     }
-    let mut pids = Vec::new();
-    for (pid, _) in app.state::<Procs>().running.lock().unwrap().values() {
-        tree(*pid, &mut pids);
-    }
-    if pids.is_empty() {
-        return;
-    }
-    for &p in &pids {
-        unsafe { libc::kill(p, libc::SIGTERM) };
-    }
-    let alive = |p: i32| unsafe { libc::kill(p, 0) } == 0;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-    while std::time::Instant::now() < deadline && pids.iter().any(|&p| alive(p)) {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    for &p in &pids {
-        if alive(p) {
-            unsafe { libc::kill(p, libc::SIGKILL) };
-        }
-    }
+}
+
+#[cfg(unix)]
+pub fn kill_all<R: Runtime>(app: &AppHandle<R>) {
+    app.state::<Procs>().reap();
 }
 
 #[cfg(all(windows, feature = "ui-tests"))]
 pub fn kill_all<R: Runtime>(app: &AppHandle<R>) {
-    for (pid, _) in app.state::<Procs>().running.lock().unwrap().values() {
+    for Spawned { pid, .. } in app.state::<Procs>().running.lock().unwrap().values() {
         match std::process::Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .output()
@@ -120,19 +198,27 @@ pub async fn proc_spawn<R: Runtime>(
     }
     let io = opts.stdio.unwrap_or_default();
     cmd.stdin(stdio(io.first())).stdout(stdio(io.get(1))).stderr(stdio(io.get(2)));
+    let detached = cfg!(unix) && opts.detached.unwrap_or(false);
     #[cfg(unix)]
-    if opts.detached.unwrap_or(false) {
+    if detached {
         cmd.process_group(0);
     }
     let mut child = cmd.spawn().map_err(|e| spawn_err(&e, &exe))?;
     let pid = child.id().unwrap_or(0);
     let stdin = child.stdin.take();
-    app.state::<Procs>().running.lock().unwrap().insert(id.clone(), (pid, stdin));
+    // A process put in its own group leads it, so the group id is its pid.
+    let group = (detached && pid > 0).then_some(pid as i32);
+    app.state::<Procs>().insert(&id, pid, group, stdin);
 
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let status = child.wait().await;
         app2.state::<Procs>().running.lock().unwrap().remove(&id);
+        #[cfg(unix)]
+        if let Some(group) = group {
+            let app3 = app2.clone();
+            tauri::async_runtime::spawn(async move { app3.state::<Procs>().release_group(group).await });
+        }
         let (code, signal) = match status {
             Ok(s) => {
                 #[cfg(unix)]
@@ -161,17 +247,11 @@ fn signal_name(n: i32) -> &'static str {
     }
 }
 
-/// kill(signal): SIGTERM by default, as in Node.
+/// kill(signal): SIGTERM by default, as in Node. Unlike Node, a detached
+/// spawn's whole process group is signalled, so the interpreter a wrapper
+/// script started ends with the wrapper.
 #[tauri::command]
 pub fn proc_kill<R: Runtime>(app: AppHandle<R>, id: String, signal: Option<String>) -> Result<(), String> {
-    let pid = app
-        .state::<Procs>()
-        .running
-        .lock()
-        .unwrap()
-        .get(&id)
-        .map(|(pid, _)| *pid)
-        .ok_or_else(|| format!("process {id} is not running"))?;
     #[cfg(unix)]
     {
         let sig = match signal.as_deref() {
@@ -180,11 +260,17 @@ pub fn proc_kill<R: Runtime>(app: AppHandle<R>, id: String, signal: Option<Strin
             Some("SIGHUP") => libc::SIGHUP,
             _ => libc::SIGTERM,
         };
-        if unsafe { libc::kill(pid as i32, sig) } != 0 {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        Ok(())
+        app.state::<Procs>().signal(&id, sig)
     }
+    #[cfg(not(unix))]
+    let pid = app
+        .state::<Procs>()
+        .running
+        .lock()
+        .unwrap()
+        .get(&id)
+        .map(|s| s.pid)
+        .ok_or_else(|| format!("process {id} is not running"))?;
     // As in Node, any signal terminates the process outright.
     #[cfg(windows)]
     unsafe {
@@ -298,9 +384,18 @@ mod tests {
         false
     }
 
+    /// Ends a test's process group when the test does, whether or not it passed.
+    struct Cleanup(i32);
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            unsafe { libc::kill(-self.0, libc::SIGKILL) };
+        }
+    }
+
     /// A detached leader whose one member, started in the background, reports its pid.
     /// `member` is the member's shell body.
-    fn group(leader: &str, member: &str) -> (std::process::Child, i32) {
+    fn group(leader: &str, member: &str) -> (std::process::Child, i32, Cleanup) {
         use std::os::unix::process::CommandExt;
         let script = format!("({member}) & echo $!; {leader}");
         let mut child = std::process::Command::new("/bin/sh")
@@ -313,7 +408,8 @@ mod tests {
         BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
         let member = line.trim().parse().unwrap();
         assert!(alive(member));
-        (child, member)
+        let cleanup = Cleanup(child.id() as i32);
+        (child, member, cleanup)
     }
 
     const IGNORES_TERM: &str = "trap '' TERM; while :; do sleep 1; done";
@@ -321,7 +417,7 @@ mod tests {
     #[test]
     fn reap_ends_a_group_whose_leader_has_exited() {
         let procs = Procs::default();
-        let (mut leader, member) = group("exit 0", IGNORES_TERM);
+        let (mut leader, member, _cleanup) = group("exit 0", IGNORES_TERM);
         let pgid = leader.id() as i32;
         procs.track_group(pgid);
         leader.wait().unwrap();
@@ -333,7 +429,7 @@ mod tests {
     #[test]
     fn signal_reaches_every_member_of_a_detached_spawn() {
         let procs = Procs::default();
-        let (mut leader, member) = group("wait", "sleep 600");
+        let (mut leader, member, _cleanup) = group("wait", "sleep 600");
         let pid = leader.id();
         procs.insert("p1", pid, Some(pid as i32), None);
         procs.signal("p1", libc::SIGTERM).unwrap();
@@ -345,19 +441,18 @@ mod tests {
     #[test]
     fn signal_reaches_only_the_process_of_a_spawn_without_its_own_group() {
         let procs = Procs::default();
-        let (mut leader, member) = group("wait", "sleep 600");
+        let (mut leader, member, _cleanup) = group("wait", "sleep 600");
         let pid = leader.id();
         procs.insert("p1", pid, None, None);
         procs.signal("p1", libc::SIGTERM).unwrap();
         leader.wait().unwrap();
-        assert!(alive(member), "only the recorded process is signalled");
-        unsafe { libc::kill(member, libc::SIGKILL) };
+        assert!(!gone_within(member, Duration::from_millis(500)), "only the recorded process is signalled");
     }
 
     #[tokio::test]
     async fn a_group_is_forgotten_once_it_is_empty() {
         let procs = std::sync::Arc::new(Procs::default());
-        let (mut leader, member) = group("exit 0", "sleep 600");
+        let (mut leader, member, _cleanup) = group("exit 0", "sleep 600");
         let pgid = leader.id() as i32;
         procs.track_group(pgid);
         leader.wait().unwrap();
