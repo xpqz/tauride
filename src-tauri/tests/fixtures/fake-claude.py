@@ -5,6 +5,9 @@ import os
 import sys
 import time
 
+if sys.argv[1:] == ['--fixture-ready']:
+    sys.exit(0)
+
 base = os.path.realpath(__file__)
 
 def log(text):
