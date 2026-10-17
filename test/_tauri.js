@@ -41,6 +41,7 @@ function isolatedEnv(userData, port, options = {}, inherited = process.env) {
     TAURI_UI_TEST_STDIN: '1',
   });
   if (options.interpreter || options.RIDE_SPAWN) env.RIDE_SPAWN = resolveDyalog(inherited);
+  if (options.RIDE_CONNECT) env.RIDE_CONNECT = options.RIDE_CONNECT;
   return env;
 }
 

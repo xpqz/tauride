@@ -276,3 +276,97 @@ pub fn exec_sync(a: &serde_json::Value) -> crate::sync::Result {
     }
     Ok(json!(stdout))
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::time::{Duration, Instant};
+
+    fn alive(pid: i32) -> bool {
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    fn gone_within(pid: i32, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while Instant::now() < deadline {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    /// A detached leader whose one member, started in the background, reports its pid.
+    /// `member` is the member's shell body.
+    fn group(leader: &str, member: &str) -> (std::process::Child, i32) {
+        use std::os::unix::process::CommandExt;
+        let script = format!("({member}) & echo $!; {leader}");
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", &script])
+            .stdout(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let member = line.trim().parse().unwrap();
+        assert!(alive(member));
+        (child, member)
+    }
+
+    const IGNORES_TERM: &str = "trap '' TERM; while :; do sleep 1; done";
+
+    #[test]
+    fn reap_ends_a_group_whose_leader_has_exited() {
+        let procs = Procs::default();
+        let (mut leader, member) = group("exit 0", IGNORES_TERM);
+        let pgid = leader.id() as i32;
+        procs.track_group(pgid);
+        leader.wait().unwrap();
+        assert!(alive(member), "the member outlives its leader");
+        procs.reap();
+        assert!(gone_within(member, Duration::from_secs(3)), "reap ends a member that ignores SIGTERM");
+    }
+
+    #[test]
+    fn signal_reaches_every_member_of_a_detached_spawn() {
+        let procs = Procs::default();
+        let (mut leader, member) = group("wait", "sleep 600");
+        let pid = leader.id();
+        procs.insert("p1", pid, Some(pid as i32), None);
+        procs.signal("p1", libc::SIGTERM).unwrap();
+        assert!(gone_within(member, Duration::from_secs(3)), "the member receives the signal");
+        leader.wait().unwrap();
+        assert!(procs.signal("missing", libc::SIGTERM).is_err());
+    }
+
+    #[test]
+    fn signal_reaches_only_the_process_of_a_spawn_without_its_own_group() {
+        let procs = Procs::default();
+        let (mut leader, member) = group("wait", "sleep 600");
+        let pid = leader.id();
+        procs.insert("p1", pid, None, None);
+        procs.signal("p1", libc::SIGTERM).unwrap();
+        leader.wait().unwrap();
+        assert!(alive(member), "only the recorded process is signalled");
+        unsafe { libc::kill(member, libc::SIGKILL) };
+    }
+
+    #[tokio::test]
+    async fn a_group_is_forgotten_once_it_is_empty() {
+        let procs = std::sync::Arc::new(Procs::default());
+        let (mut leader, member) = group("exit 0", "sleep 600");
+        let pgid = leader.id() as i32;
+        procs.track_group(pgid);
+        leader.wait().unwrap();
+        let watching = procs.clone();
+        let released = tokio::spawn(async move { watching.release_group(pgid).await });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(procs.tracked_groups(), vec![pgid], "a group with a live member stays tracked");
+        unsafe { libc::kill(member, libc::SIGKILL) };
+        tokio::time::timeout(Duration::from_secs(5), released).await.unwrap().unwrap();
+        assert!(procs.tracked_groups().is_empty());
+    }
+}
