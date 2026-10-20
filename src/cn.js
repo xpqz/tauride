@@ -673,7 +673,8 @@
               if (child) {
                 child.off('exit', onExit);
                 child.off('error', onError);
-                child.kill();
+                // Dyalog serving RIDE ignores SIGTERM.
+                child.kill('SIGKILL');
                 child = 0;
               }
               hideDlgs();
