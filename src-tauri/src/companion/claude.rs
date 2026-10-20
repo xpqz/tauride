@@ -21,6 +21,7 @@ pub(super) static CLAUDE: Descriptor = Descriptor {
     warm: false,
     enforces_no_tools: true,
     supports_model: true,
+    supports_args: false,
     docs_url: Some("https://code.claude.com/docs/en/quickstart"),
     guidance: SetupGuidance {
         missing: "Install Claude Code, then run claude auth login in a terminal to sign in.",

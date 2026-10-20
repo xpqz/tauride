@@ -12,6 +12,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::watch;
 
 mod claude;
+mod command;
 
 const MAX_LINE: usize = 256 * 1024;
 const MAX_CONTEXT: usize = 96 * 1024;
@@ -36,13 +37,15 @@ pub struct Descriptor {
     warm: bool,
     enforces_no_tools: bool,
     supports_model: bool,
+    /// Takes an `args` setting: one program argument per line.
+    supports_args: bool,
     docs_url: Option<&'static str>,
     guidance: SetupGuidance,
 }
 
 static CODEX: Descriptor = Descriptor {
     id: "codex", name: "Codex", warm: true, enforces_no_tools: true,
-    supports_model: true, docs_url: Some("https://developers.openai.com/codex/quickstart"),
+    supports_model: true, supports_args: false, docs_url: Some("https://developers.openai.com/codex/quickstart"),
     guidance: SetupGuidance {
         missing: "Install the Codex CLI, then run codex login in a terminal to sign in.",
         signin: "Run codex login in a terminal to sign in. Check your executable in Preferences if Codex cannot be reached.",
@@ -54,6 +57,7 @@ static CODEX: Descriptor = Descriptor {
 struct Settings {
     executable: String,
     model: String,
+    args: String,
 }
 
 fn configuration(
@@ -70,7 +74,7 @@ fn configuration(
     let object = settings.as_object().ok_or_else(invalid)?;
     if object
         .keys()
-        .any(|key| key != "executable" && key != "model")
+        .any(|key| !matches!(key.as_str(), "executable" | "model" | "args"))
     {
         return Err(invalid());
     }
@@ -87,8 +91,12 @@ fn configuration(
     let settings = Settings {
         executable: value("executable", 4096)?,
         model: value("model", 256)?,
+        args: value("args", 4096)?,
     };
     if !descriptor.supports_model && !settings.model.is_empty() {
+        return Err(invalid());
+    }
+    if !descriptor.supports_args && object.contains_key("args") {
         return Err(invalid());
     }
     Ok((entry.instance(&settings, child), settings))
@@ -228,6 +236,9 @@ static PROVIDERS: &[RegistryEntry] = &[RegistryEntry {
 }, RegistryEntry {
     descriptor: &claude::CLAUDE,
     create: |settings, child| Box::new(claude::ClaudeProvider::new(settings, child)),
+}, RegistryEntry {
+    descriptor: &command::COMMAND,
+    create: |settings, child| Box::new(command::CommandProvider::new(settings, child)),
 }];
 
 impl RegistryEntry {
@@ -1144,6 +1155,7 @@ mod tests {
         let settings = Settings {
             executable: executable.clone(),
             model: String::new(),
+            args: String::new(),
         };
         let session = Session::default();
         let mut probe = PROVIDERS[0].instance(&settings, Arc::default());
@@ -1190,6 +1202,7 @@ mod tests {
         warm: false,
         enforces_no_tools: true,
         supports_model: false,
+        supports_args: false,
         docs_url: None,
         guidance: SetupGuidance {
             missing: "missing",
@@ -1691,12 +1704,14 @@ mod tests {
                                 &Settings {
                                     executable: path.clone(),
                                     model: String::new(),
+                                    args: String::new(),
                                 },
                                 running.child.clone(),
                             ),
                             &Settings {
                                 executable: path,
                                 model: String::new(),
+                                args: String::new(),
                             },
                             &Prompt::raw("FIXTURE_WAIT"),
                             |_, _| {},

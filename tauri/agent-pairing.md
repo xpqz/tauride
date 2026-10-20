@@ -372,7 +372,7 @@ transcript rotation at
 
 With **Agent > Observe Session** or **Allow Control** enabled, choose **Agent > Explain Last Error…**, or right-click a captured error in the Session and choose **Explain This Error…**. The same action is available on the associated stopped tracer line. The command is `AGE` in custom menus and keyboard mappings; it has no default shortcut. Errors that occurred before observation was enabled do not have a captured context.
 
-Tauride opens an explanation panel and streams a concise explanation and suggested correction from the selected explanation provider: Codex or Claude Code. **Cancel** stops the request; **Explain error** makes a fresh request for the selected error; **Copy error context** copies the diagnostic bundle. The companion does not apply changes or execute APL.
+Tauride opens an explanation panel and streams a concise explanation and suggested correction from the selected explanation provider: Codex, Claude Code or a custom command. **Cancel** stops the request; **Explain error** makes a fresh request for the selected error; **Copy error context** copies the diagnostic bundle. The companion does not apply changes or execute APL.
 
 On first use, the panel checks the selected provider's installation and existing sign-in without sending error context or starting a model request. Missing installation or sign-in shows guidance and a link to the official setup guide. **Open Preferences** opens the Code tab; **Check Again** repeats the setup check without requesting an explanation. **Enable Observation** enables context capture without granting control; reproduce the error afterwards. The panel explains which context is sent when an explanation is requested.
 
@@ -386,10 +386,17 @@ The setup probe runs separately from the warm companion, reads `account/read` wi
 
 The initial adapter uses the [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server). It disables inherited MCP servers, connectors, plugins and execution tools for these requests, uses read-only permissions, and rejects tool/approval requests. The diagnostic snapshot is passed as data. Requests and streamed replies are correlated within the owning session window; cancellation and session shutdown terminate the owned companion.
 
-Provider descriptors are exposed by `companion_providers` to both the panel and Preferences. Settings are stored as `agentProvider` and `agentProviderSettings`, a map of provider ids to their executable and model overrides. The earlier `agentExecutable` and `agentModel` preferences are replaced without migration. The panel only promises enforced read-only operation and disabled tools when the descriptor's `enforces_no_tools` flag is true. A user-defined command provider and an attached-agent `last_error` request are planned; see [the provider design](agent-providers.md).
+Provider descriptors are exposed by `companion_providers` to both the panel and Preferences. Settings are stored as `agentProvider` and `agentProviderSettings`, a map of provider ids to their executable and model overrides. The earlier `agentExecutable` and `agentModel` preferences are replaced without migration. The panel only promises enforced read-only operation and disabled tools when the descriptor's `enforces_no_tools` flag is true. An attached-agent `last_error` request is planned; see [the provider design](agent-providers.md).
 
 ### Claude Code
 
 Claude Code runs one `claude -p` process per explanation; nothing stays running between requests. Each run has no tools, no MCP servers, no user or project settings (so no hooks or plugins), no slash commands or skills, and no saved session, in an empty private working directory. A run that reports any tool or MCP server, or that asks to use a tool, fails. Cancellation, disabling observation and closing the session kill the running process.
 
 The setup check runs `claude auth status --json` and starts no model request. Sign in with `claude auth login`. If `ANTHROPIC_API_KEY` is set in Tauride's environment, Claude Code uses that key instead of the claude.ai sign-in; the check still reports ready, and an account without credit fails at explanation time with the service's message.
+
+### Custom command
+
+**Custom command** runs a program you choose, for agents without a dedicated provider, such as `llm` or `ollama run`. Set **Provider executable** to the program and **Arguments** to its arguments, one per line; blank lines are skipped, and no shell is involved, so a pipeline needs `/bin/sh` with `-c` and the pipeline as its argument. The command reads the whole prompt, instructions and diagnostic snapshot, on standard input and writes the explanation to standard output, which streams into the panel. Exit status 0 completes it; any other status shows the start of its standard error.
+
+Tauride cannot know what the command does with the data or whether it uses tools or takes actions, and the panel says so. The command runs in an empty working directory; cancelling, disabling observation and closing the session end it and anything it started. The setup check only confirms that the executable exists.
+

@@ -654,7 +654,8 @@
           <summary>Advanced</summary>
           <p><label for=code_provider_executable>Provider executable <input id=code_provider_executable placeholder="Auto-detect executable" size=36></label></p>
           <p id=code_provider_modelrow><label for=code_provider_model>Provider model <input id=code_provider_model placeholder="Configured default" size=24></label></p>
-          <p>Leave these blank to use the detected executable and configured provider model.</p>
+          <p id=code_provider_argsrow hidden><label for=code_provider_args>Arguments, one per line<br><textarea id=code_provider_args rows=4 cols=36 spellcheck=false></textarea></label></p>
+          <p>Leave the executable and model blank to use the detected executable and the provider's configured model. A custom command needs its executable; it reads the prompt on standard input and writes the explanation to standard output.</p>
         </details>
         <p><input id=code_ago type=checkbox><label for=code_ago>Observe session</label></p>
         <p><input id=code_agc type=checkbox><label for=code_agc>Allow control</label></p>

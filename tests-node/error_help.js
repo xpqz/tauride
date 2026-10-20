@@ -288,3 +288,18 @@ test('panel only claims tool enforcement when the selected provider guarantees i
     }
   }
 });
+test('arguments reach a provider that takes them and are refused for one that does not', async () => {
+  const command = { id: 'command', name: 'Custom command', warm: false, enforces_no_tools: false, supports_model: false, supports_args: true, docs_url: null, guidance: { missing: 'Choose a command', unavailable: 'Check the command' } };
+  const { c, io, calls } = setup();
+  io.providers = async () => [...providers, command];
+  io.settings = () => ({ provider: 'command', settings: { executable: '/x', args: 'a\nb' } });
+  await c.explain('chosen');
+  const [, args] = calls.find(x => x[0] === 'companion_explain');
+  assert.equal(args.settings.args, 'a\nb');
+  const other = setup();
+  other.io.providers = async () => [...providers, command];
+  other.io.settings = () => ({ provider: 'codex', settings: { executable: '', model: '', args: 'a' } });
+  await other.c.explain('chosen');
+  assert.match(other.c.state().status, /Invalid provider settings/);
+  assert.ok(!other.calls.some(x => x[0] === 'companion_explain'));
+});
