@@ -11,9 +11,10 @@
       if (!provider) return `Unknown provider: ${id}`;
       const config = settings[id];
       if (!config || typeof config !== 'object' || Array.isArray(config)
-        || Object.keys(config).some(k => !['executable', 'model'].includes(k) || typeof config[k] !== 'string')) return `Invalid settings for ${provider.name}.`;
+        || Object.keys(config).some(k => !['executable', 'model', 'args'].includes(k) || typeof config[k] !== 'string')) return `Invalid settings for ${provider.name}.`;
       if (Object.entries(config).some(([k, value]) => value.includes('\0') || byteLength(value) > (k === 'model' ? 256 : 4096))) return `Invalid settings for ${provider.name}.`;
       if (!provider.supports_model && config.model) return `${provider.name} does not support a model setting.`;
+      if (!provider.supports_args && 'args' in config) return `${provider.name} does not take arguments.`;
     }
     return null;
   };
@@ -28,7 +29,9 @@
       const previous = drafts[selected];
       if (previous === undefined || (previous && typeof previous === 'object' && !Array.isArray(previous)
         && Object.keys(previous).every(k => typeof previous[k] === 'string'))) {
+        const provider = providers && providers.find(p => p.id === selected);
         drafts[selected] = { ...previous, executable: q.provider_executable.value.trim(), model: q.provider_model.value.trim() };
+        if (provider && provider.supports_args) drafts[selected].args = q.provider_args.value;
       }
     }
   };
@@ -36,7 +39,9 @@
     const provider = providers && providers.find(p => p.id === selected);
     const config = drafts && drafts[selected] || {};
     q.provider_executable.value = config.executable || ''; q.provider_model.value = config.model || '';
+    q.provider_args.value = config.args || '';
     q.provider_modelrow.hidden = !!provider && !provider.supports_model;
+    q.provider_argsrow.hidden = !provider || !provider.supports_args;
   };
   let q; // DOM elements whose ids start with "code_", keyed by the rest of the id
   D.prf_tabs.code = {

@@ -49,3 +49,33 @@ test('loading preferences preserves invalid stored types for validation', async 
     assert.deepEqual(values.agentProviderSettings.codex, config);
   }
 });
+const withArgs = [...providers, { id: 'command', name: 'Custom command', supports_model: false, supports_args: true }];
+test('arguments are accepted only by a provider that takes them', () => {
+  assert.equal(validateProviders(withArgs, 'command', { command: { executable: '/x', args: 'a\nb' } }), null);
+  for (const map of [{ codex: { args: 'a' } }, { command: { args: 3 } }, { command: { args: 'a\0b' } }, { command: { args: 'x'.repeat(4097) } }]) {
+    assert.ok(validateProviders(withArgs, 'command', map), JSON.stringify(map));
+  }
+});
+test('preferences show, keep and save arguments only for a provider that takes them', async () => {
+  const values = { agentProvider: 'codex', agentProviderSettings: { codex: { executable: '', model: '' } } };
+  const nodes = {};
+  const q = new Proxy(nodes, { get(target, key) { if (!target[key]) target[key] = { value: '', checked: false, children: [], appendChild(n) { this.children.push(n); }, select() {} }; return target[key]; } });
+  const prf = new Proxy({}, { get(_, key) { return (...args) => { if (args.length) values[key] = args[0]; return values[key] === undefined ? '' : values[key]; }; } });
+  const D = { prf_tabs: {}, prf };
+  const window = { __RIDE__: true, __TAURI_INTERNALS__: { invoke: async () => withArgs } };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../src/prf_code'), 'utf8'), { D, J: { code: q }, window, document: { createElement: () => ({}) } });
+  D.prf_tabs.code.init(); D.prf_tabs.code.load(); await new Promise(r => setImmediate(r));
+  assert.equal(nodes.provider_argsrow.hidden, true, 'Codex takes no arguments');
+  nodes.provider.value = 'command'; nodes.provider.onchange();
+  assert.equal(nodes.provider_argsrow.hidden, false);
+  assert.equal(nodes.provider_modelrow.hidden, true);
+  nodes.provider_executable.value = '/usr/local/bin/llm'; nodes.provider_args.value = '-m\nmistral\n';
+  nodes.provider.value = 'codex'; nodes.provider.onchange();
+  nodes.provider.value = 'command'; nodes.provider.onchange();
+  assert.equal(nodes.provider_args.value, '-m\nmistral\n', 'arguments survive switching providers');
+  nodes.ac.value = 'off'; nodes.ph.checked = false;
+  assert.equal(D.prf_tabs.code.validate(), null); D.prf_tabs.code.save();
+  assert.equal(values.agentProvider, 'command');
+  assert.deepEqual({ ...values.agentProviderSettings.command }, { executable: '/usr/local/bin/llm', model: '', args: '-m\nmistral\n' });
+  assert.equal('args' in values.agentProviderSettings.codex, false, 'a provider without arguments stores none');
+});

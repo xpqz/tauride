@@ -197,14 +197,26 @@ at explanation time with the service's message.
 
 ### `command`
 
-A user-defined argv. Tauride writes the instructions and snapshot, in the
-single-text framing, to stdin and streams stdout as `Delta`. A non-zero
-exit, with up to the first 4 KiB of stderr, is the error. This covers
-Gemini CLI, `llm`, `ollama run` and similar without code for each.
+"Custom command" (#148): a program and its arguments, one per line, run
+directly with no shell; blank lines are skipped. `warm: false`, never
+reusable, `enforces_no_tools: false`, `supports_model: false` (a model
+belongs in the arguments), `supports_args: true`. Only a provider with
+`supports_args` accepts an `args` setting, in the Rust configuration, in
+Preferences and in the panel.
 
-`warm: false`, `enforces_no_tools: false`, `supports_model: false` (a
-model belongs in the argv). `check` confirms the executable resolves on
-`PATH` or as a path, and nothing more.
+Tauride writes the whole prompt to stdin as one text (base instructions,
+developer instructions, then the user prefix and snapshot, separated by
+blank lines) and closes it. stdout is streamed as `Delta`, decoded as UTF-8
+without splitting a character across deltas. The command runs in its own
+process group in an empty private working directory, so cancellation,
+disabling observation and session close end what it started too.
+
+Exit status 0 with text completes the explanation. A non-zero exit is the
+error, with at most 4 KiB of stderr; exit 0 without text is an error; a
+command that closes stdout but does not exit within 3 s is ended and
+reported. `check` reports `ready` when the executable resolves on `PATH` or
+as a path and `missing` otherwise, including when none is set; it never runs
+the command.
 
 Because Tauride cannot know what an arbitrary command does with the data
 or whether it can act, the panel's disclosure says so for this provider
@@ -260,6 +272,6 @@ provider-neutral UI and preferences, and descriptor discovery. Validation
 and the unchanged request-capture proof are recorded in `docs/prs/145.md`.
 
 Step 2, the `claude` provider, is implemented in #147; validation, mutation
-checks and a live run are recorded in `docs/prs/147.md`. The `command`
-provider (#148) and the pairing interface's `last_error` request (#149)
-remain to be built.
+checks and a live run are recorded in `docs/prs/147.md`. Step 3, the `command` provider, is implemented in #148
+(`docs/prs/148.md`). The pairing interface's `last_error` request (#149)
+remains to be built.

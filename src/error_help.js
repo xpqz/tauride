@@ -81,9 +81,10 @@
         if (!provider) throw new Error('Unknown error explanation provider. Choose a provider in Preferences.');
         const config = settings.settings;
         if (!config || typeof config !== 'object' || Array.isArray(config)
-          || Object.keys(config).some(k => !['executable', 'model'].includes(k) || typeof config[k] !== 'string')
+          || Object.keys(config).some(k => !['executable', 'model', 'args'].includes(k) || typeof config[k] !== 'string')
           || Object.entries(config).some(([k, value]) => value.includes('\0') || byteLength(value) > (k === 'model' ? 256 : 4096))
-          || (!provider.supports_model && config.model)) throw new Error('Invalid provider settings. Check Preferences.');
+          || (!provider.supports_model && config.model)
+          || (!provider.supports_args && 'args' in config)) throw new Error('Invalid provider settings. Check Preferences.');
         const executable = config.executable || '';
         const identity = JSON.stringify([provider.id, executable]);
         render({ provider });
