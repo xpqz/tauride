@@ -1159,16 +1159,18 @@ mod tests {
         };
         let session = Session::default();
         let mut probe = PROVIDERS[0].instance(&settings, Arc::default());
+        // The probe's bound must outlast the double's startup, which under load
+        // can take seconds; the double then waits far longer than the bound.
         let task =
-            tokio::spawn(async move { probe.provider.check(Duration::from_millis(500)).await });
-        let pid: i32 = tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::spawn(async move { probe.provider.check(Duration::from_secs(5)).await });
+        let pid: i32 = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if let Ok(pid) = std::fs::read_to_string(format!("{executable}.pid")) {
                     if let Ok(pid) = pid.parse() {
                         break pid;
                     }
                 }
-                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
@@ -1559,7 +1561,14 @@ mod tests {
             } else {
                 std::fs::write(format!("{executable}.account"), mode).unwrap();
             }
-            let status = check_setup(&executable, Duration::from_millis(500)).await;
+            // An answering double needs time to start under load; a waiting one
+            // sleeps far longer than either bound, so it still times out.
+            let bound = if matches!(mode, "wait" | "initwait") {
+                Duration::from_secs(3)
+            } else {
+                Duration::from_secs(15)
+            };
+            let status = check_setup(&executable, bound).await;
             assert_eq!(status.status, expected, "{mode}");
             let serialized = serde_json::to_string(&status).unwrap();
             assert!(!serialized.contains("secret@example.com"));
