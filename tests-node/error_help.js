@@ -201,13 +201,13 @@ test('enabling observation never starts a model request', async () => {
   assert.equal(enabled, 1); assert.deepEqual(calls.map(x => x[0]), ['companion_check']);
   assert.match(c.state().status, /Reproduce the error/);
 });
-test('successful checks are cached by executable and Check Again probes without sending', async () => {
+test('successful checks are cached by executable and Check Again rechecks, then explains', async () => {
   const { c, io, calls } = setup();
   await c.explain('x'); await c.retry();
   assert.equal(calls.filter(x => x[0] === 'companion_check').length, 1);
   await c.checkAgain();
   assert.equal(calls.filter(x => x[0] === 'companion_check').length, 2);
-  assert.equal(calls.filter(x => x[0] === 'companion_explain').length, 2);
+  assert.equal(calls.filter(x => x[0] === 'companion_explain').length, 3);
   io.settings = () => ({ provider: 'codex', settings: { executable: '/other/codex', model: '' } });
   await c.retry(); assert.equal(calls.filter(x => x[0] === 'companion_check').length, 3);
 });
@@ -302,4 +302,40 @@ test('arguments reach a provider that takes them and are refused for one that do
   await other.c.explain('chosen');
   assert.match(other.c.state().status, /Invalid provider settings/);
   assert.ok(!other.calls.some(x => x[0] === 'companion_explain'));
+});
+test('the panel offers only the buttons that apply in each state', async () => {
+  const actions = c => [...c.state().actions];
+  const missing = setup();
+  missing.io.invoke = async (cmd, args) => { missing.calls.push([cmd, args]); return { status: 'missing', message: 'Codex was not found.' }; };
+  await missing.c.explain('x');
+  assert.deepEqual(actions(missing.c), ['check', 'close'], 'setup failed');
+  const unobserved = setup(); unobserved.io.level = () => null;
+  await unobserved.c.explain('x');
+  assert.deepEqual(actions(unobserved.c), ['observe', 'close'], 'observation off');
+  const run = setup();
+  await run.c.explain('x');
+  assert.deepEqual(actions(run.c), ['cancel', 'copy', 'close'], 'running');
+  const [, first] = run.calls.find(x => x[0] === 'companion_explain');
+  run.event({ requestId: first.requestId, event: 'done' });
+  assert.deepEqual(actions(run.c), ['copy', 'close'], 'complete');
+  await run.c.retry();
+  const [, second] = run.calls.filter(x => x[0] === 'companion_explain')[1];
+  run.event({ requestId: second.requestId, event: 'error', text: 'Codex: unavailable' });
+  assert.deepEqual(actions(run.c), ['retry', 'copy', 'close'], 'failed');
+  await run.c.retry(); await run.c.cancel();
+  assert.deepEqual(actions(run.c), ['retry', 'copy', 'close'], 'cancelled');
+  const broken = setup(); broken.io.context = async () => null;
+  await broken.c.explain('x');
+  assert.deepEqual(actions(broken.c), ['retry', 'close'], 'failed before any context was captured');
+});
+test('a successful Check Again continues with the explanation', async () => {
+  const { c, io, calls } = setup(); let status = 'signin';
+  io.invoke = async (cmd, args) => { calls.push([cmd, args]); return { status, message: status }; };
+  await c.explain('x');
+  assert.ok(!calls.some(x => x[0] === 'companion_explain'), 'a failed check sends nothing');
+  status = 'ready';
+  await c.checkAgain();
+  assert.equal(calls.filter(x => x[0] === 'companion_check').length, 2);
+  assert.equal(calls.filter(x => x[0] === 'companion_explain').length, 1);
+  assert.deepEqual([...c.state().actions], ['cancel', 'copy', 'close']);
 });

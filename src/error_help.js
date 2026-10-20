@@ -47,28 +47,37 @@
     const ready = new Set();
     let sequence = 0; let active = null; let unlisten = null; let selected; let barrier = null;
     let view = {
-      open: false, busy: false, status: '', text: '', context: null, setup: null, observation: false, provider: null,
+      open: false, busy: false, status: '', text: '', context: null, setup: null, observation: false, provider: null, outcome: null, actions: ['close'],
     };
-    const render = (change) => { view = { ...view, ...change }; io.render(view); };
+    // The buttons that apply in a state, in display order.
+    const actionsFor = v => [
+      v.observation && 'observe',
+      v.setup && v.setup !== 'ready' && 'check',
+      v.busy && 'cancel',
+      !v.busy && ['cancelled', 'failed'].includes(v.outcome) && 'retry',
+      v.context && 'copy',
+      'close',
+    ].filter(Boolean);
+    const render = (change) => { view = { ...view, ...change }; view.actions = actionsFor(view); io.render(view); };
     const invokeQuiet = (cmd, args) => Promise.resolve(io.invoke(cmd, args)).catch(() => {});
     const cancel = async () => {
       sequence += 1;
       const id = active; active = null;
       if (unlisten) { unlisten(); unlisten = null; }
-      render({ busy: false, status: 'Cancelled' });
+      render({ busy: false, status: 'Cancelled', outcome: 'cancelled' });
       if (id) {
         const stop = () => invokeQuiet('companion_cancel', { requestId: id });
         barrier = barrier ? barrier.then(stop) : stop();
       }
       return barrier;
     };
-    const explain = async (id, checkOnly = false) => {
+    const explain = async (id, recheck = false) => {
       if (active || view.busy) cancel();
       selected = id;
       sequence += 1;
       const ticket = sequence;
       render({
-        open: true, busy: false, status: '', text: '', context: null, setup: null, observation: !io.level(), provider: null,
+        open: true, busy: false, status: '', text: '', context: null, setup: null, observation: !io.level(), provider: null, outcome: null,
       });
       render({ busy: true, status: 'Checking provider setup…' });
       try {
@@ -88,7 +97,7 @@
         const executable = config.executable || '';
         const identity = JSON.stringify([provider.id, executable]);
         render({ provider });
-        if (checkOnly) ready.delete(identity);
+        if (recheck) ready.delete(identity);
         if (!ready.has(identity)) {
           render({ status: `Checking ${provider.name} setup…` });
           const setup = await io.invoke('companion_check', settings);
@@ -103,7 +112,6 @@
           render({ busy: false, setup: 'ready', observation: true, status: `${provider.name} is ready. Enable observation, then reproduce the error so its code and values can be captured.` });
           return;
         }
-        if (checkOnly) { render({ busy: false, setup: 'ready', status: `${provider.name} is ready. Choose Explain error to request an explanation.` }); return; }
         render({ status: 'Collecting error context…' });
         const context = await io.context(id);
         if (ticket !== sequence) return;
@@ -117,7 +125,7 @@
           else if (p.event === 'status') render({ status: p.text || p.status || 'Working…' });
           else if (p.event === 'done' || p.event === 'error') {
             active = null;
-            render({ busy: false, status: p.event === 'done' ? 'Complete — review suggestions before using them.' : p.text || `${provider.name} could not explain this error.` });
+            render({ busy: false, outcome: p.event === 'done' ? 'complete' : 'failed', status: p.event === 'done' ? 'Complete — review suggestions before using them.' : p.text || `${provider.name} could not explain this error.` });
             if (unlisten) { unlisten(); unlisten = null; }
           }
         });
@@ -128,7 +136,7 @@
         if (ticket !== sequence) return;
         active = null;
         if (unlisten) { unlisten(); unlisten = null; }
-        render({ busy: false, status: String(e.message || e) });
+        render({ busy: false, outcome: 'failed', status: String(e.message || e) });
       }
     };
     const close = async () => {
@@ -211,20 +219,15 @@
         docs.textContent = v.provider ? `${v.provider.name} setup guide` : 'Provider setup guide';
         disclosure.textContent = `Requesting an explanation sends relevant code, the error and available values to ${v.provider ? v.provider.name : 'your selected provider'}. Suggestions are shown for review.${v.provider && v.provider.enforces_no_tools ? ' The provider is prevented from using tools; suggestions are never executed.' : ' Tauride cannot prevent this provider from using tools or taking actions.'}`;
         docs.hidden = !v.setup || v.setup === 'ready' || !v.provider || !v.provider.docs_url;
-        if (buttons.observe) buttons.observe.hidden = !v.observation;
-        if (buttons.check) buttons.check.disabled = v.busy;
-        if (buttons.cancel) buttons.cancel.disabled = !v.busy;
-        if (buttons.retry) buttons.retry.disabled = v.busy;
-        if (buttons.copy) buttons.copy.disabled = !v.context;
+        Object.entries(buttons).forEach(([name, button]) => { button.hidden = !v.actions.includes(name); });
         if (opening) { previousFocus = document.activeElement; panel.focus(); }
         if (!v.open && previousFocus) { previousFocus.focus(); previousFocus = null; }
       },
     });
     action('observe', 'Enable Observation', () => controller.enableObservation());
-    action('preferences', 'Open Preferences', () => D.prf_ui('code'));
     action('check', 'Check Again', () => controller.checkAgain());
     action('cancel', 'Cancel', () => controller.cancel());
-    action('retry', 'Explain error', () => controller.retry());
+    action('retry', 'Try Again', () => controller.retry());
     action('copy', 'Copy error context', () => navigator.clipboard.writeText(JSON.stringify(controller.state().context, null, 2)).catch((e) => { status.textContent = `Could not copy: ${e}`; }));
     action('close', 'Close', () => controller.close());
     panel.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); controller.close(); } });

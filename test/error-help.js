@@ -67,6 +67,8 @@ const displayed = c => c.execute(() => {
   const panel = document.querySelector('#error-help');
   return !!panel && getComputedStyle(panel).display !== 'none';
 });
+const shownButtons = c => c.execute(() => [...document.querySelectorAll('#error-help button')]
+  .filter(b => !b.hidden && getComputedStyle(b).display !== 'none').map(b => b.dataset.action));
 const complete = c => wait(c, () => /Complete/.test(document.querySelector('#error-help [role=status]')?.textContent || ''));
 const processAlive = pid => { try { process.kill(pid, 0); return true; } catch (_) { return false; } };
 
@@ -105,11 +107,13 @@ fixtureTest('first-use guidance enables observation without granting control or 
   });
   t.regex(setup.title, /Codex/);
   t.regex(setup.text, /context|sent|send|shar/i, 'setup discloses context sharing');
-  t.true(setup.preferences);
+  t.false(setup.preferences, 'the panel has no Preferences button');
   t.true(setup.guide);
+  await wait(c, () => document.querySelector('#error-help').getAttribute('aria-busy') === 'false');
+  t.deepEqual(await shownButtons(c), ['observe', 'close'], 'observation off offers only Enable Observation and Close');
   t.is(fake.contexts().length, 0);
   const owner = await c.getWindowHandle();
-  await (await c.$('#error-help button[data-action="preferences"]')).click();
+  await c.execute(() => D.prf_ui('code'));
   await wait(c, () => !!(D.prf_bw && D.prf_bw.socket));
   const preferences = await c.execute(() => D.prf_bw.win.label);
   await c.switchToWindow(preferences);
@@ -148,13 +152,12 @@ fixtureTest('missing Codex and signed-out Codex show actionable setup without in
   await wait(c, () => /sign.?in|log.?in/i.test(document.querySelector('#error-help [role=status]').textContent));
   t.regex(await c.execute(() => document.querySelector('#error-help').textContent), /codex login/i);
   t.is(fake.contexts().length, 0, 'setup checks never submit error context');
+  t.deepEqual(await shownButtons(c), ['check', 'close'], 'failed setup offers only Check Again and Close');
   fs.writeFileSync(`${fake.executable}.account`, 'ready');
   await (await c.$('#error-help button[data-action="check"]')).click();
-  await wait(c, () => /ready/i.test(document.querySelector('#error-help [role=status]').textContent));
-  t.is(fake.contexts().length, 0, 'a successful recheck still requires an explicit explanation');
-  await (await c.$('#error-help button[data-action="retry"]')).click();
   await complete(c);
-  t.is(fake.contexts().length, 1);
+  t.is(fake.contexts().length, 1, 'a successful recheck continues with the explanation');
+  t.deepEqual(await shownButtons(c), ['copy', 'close'], 'a completed explanation offers only Copy and Close');
 });
 
 fixtureTest('native explanation preserves historical target, streams inert text, and coexists with attached MCP', async (t) => {
@@ -230,12 +233,15 @@ fixtureTest('cancel then immediate Retry starts successfully and disabling obser
   fs.writeFileSync(`${fake.executable}.wait`, '');
   await menuExplain(c);
   await c.waitUntil(() => fake.contexts().length === 1, { timeout: 10000 });
+  t.deepEqual(await shownButtons(c), ['cancel', 'copy', 'close'], 'a running explanation offers Cancel');
   await (await c.$('#error-help button[data-action="cancel"]')).click();
+  t.deepEqual(await shownButtons(c), ['retry', 'copy', 'close'], 'a cancelled explanation offers Try Again');
+  t.is(await c.execute(() => document.querySelector('#error-help button[data-action="retry"]').textContent), 'Try Again');
   await (await c.$('#error-help button[data-action="retry"]')).click();
   await complete(c);
   t.is(fake.contexts().length, 2, 'Retry reaches a fresh turn after cancellation');
   fs.writeFileSync(`${fake.executable}.wait`, '');
-  await (await c.$('#error-help button[data-action="retry"]')).click();
+  await menuExplain(c);
   await c.waitUntil(() => fake.contexts().length === 3, { timeout: 10000 });
   await c.execute(() => D.prf.agent(0));
   await wait(c, () => document.querySelector('#error-help').hidden && !D.agent.errorInfo());
