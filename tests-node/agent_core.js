@@ -136,7 +136,7 @@ test('fields are validated before anything runs', async (t) => {
 
 test('the request table and the error codes match the design', () => {
   const at = (l) => Object.keys(core.REQUESTS).filter((k) => core.REQUESTS[k].level === l).sort();
-  assert.deepEqual(at('observe'), ['since', 'stack', 'status', 'tail', 'value', 'wait', 'window_text', 'windows']);
+  assert.deepEqual(at('observe'), ['last_error', 'since', 'stack', 'status', 'tail', 'value', 'wait', 'window_text', 'windows']);
   assert.deepEqual(at('control'), ['answer', 'edit', 'execute', 'interrupt', 'save', 'stops', 'trace']);
   assert.equal(core.REQUESTS.interrupt.confirm, false);
   at('control').filter((k) => k !== 'interrupt').forEach((k) => assert.equal(core.REQUESTS[k].confirm, true, k));
@@ -1024,4 +1024,35 @@ test('status reports the session, the level and the transcript', async (t) => {
     },
   });
   assert.ok(io.appended.length > 0, 'status flushes the batch first');
+});
+
+test('last_error answers the frozen bundle of the latest error, or of the error named, at observe', async (t) => {
+  const bundles = {
+    'error-1': { id: 'error-1', message: 'LENGTH ERROR', stale: true },
+    'error-2': { id: 'error-2', message: 'VALUE ERROR: Undefined name: foo', stale: false },
+  };
+  const asked = [];
+  const { io, c } = setup(t, 'observe', {
+    lastError: async (id) => { asked.push(id); return (id === undefined ? bundles['error-2'] : bundles[id]) || null; },
+  });
+  await req(c, { id: 1, req: 'last_error' });
+  assert.deepEqual(last(io), { id: 1, ok: bundles['error-2'] });
+  await req(c, { id: 2, req: 'last_error', error_id: 'error-1' });
+  assert.deepEqual(last(io), { id: 2, ok: bundles['error-1'] }, 'an earlier error keeps its stale flag');
+  await req(c, { id: 3, req: 'last_error', error_id: 'error-9' });
+  assert.equal(last(io).err.code, 'not_found');
+  assert.match(last(io).err.message, /error-9/);
+  assert.deepEqual(asked, [undefined, 'error-1', 'error-9']);
+  for (const error_id of [1, '', null, ['error-1']]) {
+    await req(c, { id: 4, req: 'last_error', error_id });
+    assert.equal(last(io).err.code, 'bad_request', JSON.stringify(error_id));
+  }
+  assert.deepEqual(asked, [undefined, 'error-1', 'error-9'], 'a malformed id is refused before asking');
+});
+
+test('last_error is not_found while no error has been captured', async (t) => {
+  const { io, c } = setup(t, 'observe', { lastError: async () => null });
+  await req(c, { id: 1, req: 'last_error' });
+  assert.equal(last(io).err.code, 'not_found');
+  assert.match(last(io).err.message, /no error/i);
 });

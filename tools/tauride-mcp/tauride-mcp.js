@@ -28,6 +28,7 @@ const USAGE = `usage: tauride-mcp [--session <label>] [--socket <path>] [--timeo
                            cutback, restart or edit in a tracer; prints the next highlight
   stack                    the SI stack as JSON
   value <name>             the value of a name in the current frame, as a tooltip shows it
+  last-error [id]          the captured context of the latest error, or of error id
   wait [--since n] [--prefix s] [--origin human|agent]
                            print the first transcript event after seq n (default the latest)
                            whose text starts with s, from that origin; exit 2 on --timeout
@@ -249,7 +250,7 @@ const waitArgs = (args) => {
   return w;
 };
 
-const COMMANDS = ['status', 'exec', 'answer', 'interrupt', 'tail', 'watch', 'windows', 'window-text', 'edit', 'save', 'stops', 'trace', 'stack', 'value', 'wait'];
+const COMMANDS = ['status', 'exec', 'answer', 'interrupt', 'tail', 'watch', 'windows', 'window-text', 'edit', 'save', 'stops', 'trace', 'stack', 'value', 'last-error', 'wait'];
 
 const cli = async (opts, cmd, args) => {
   // Arguments are checked before connecting, so a usage error never reads as "cannot connect".
@@ -261,6 +262,8 @@ const cli = async (opts, cmd, args) => {
   if (cmd === 'tail' && n !== undefined && !(n > 0)) throw usage(`tail takes a count, not ${args[0]}`);
   const token = ['window-text', 'save', 'stops', 'trace'].includes(cmd) ? tokenArg(cmd, args[0]) : undefined;
   if ((cmd === 'edit' || cmd === 'value') && args.length !== 1) throw usage(`${cmd} needs <name>`);
+  const errorId = cmd === 'last-error' && args.length ? args[0] : undefined;
+  if (cmd === 'last-error' && args.length > 1) throw usage(`last-error takes one error id, not ${args.join(' ')}`);
   if (cmd === 'save' && args.length < 2) throw usage('save needs <token> <file-or-text>');
   const lines = cmd === 'stops' ? args.slice(1).map(Number) : [];
   if (cmd === 'stops' && lines.some((l) => !Number.isInteger(l) || l < 0)) throw usage(`stops takes line numbers, not ${args.slice(1).join(' ')}`);
@@ -316,6 +319,9 @@ const cli = async (opts, cmd, args) => {
         return 0;
       case 'value':
         console.log(tipText(await client.request('value', { name: args[0] })));
+        return 0;
+      case 'last-error':
+        console.log(JSON.stringify(await client.request('last_error', errorId === undefined ? {} : { error_id: errorId }), null, 2));
         return 0;
       case 'wait':
         console.log(JSON.stringify(waited(await client.request('wait', { ...wait, timeout: opts.timeout }))));
@@ -479,6 +485,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'last_error',
+    description: 'The diagnostic context Tauride captured for the latest APL error, or for an earlier one '
+      + 'by error_id: the error, the input and output around it, the tracer source, the stack and bounded '
+      + 'value previews, with stale set once execution has moved on. It is the same snapshot Tauride\'s '
+      + 'own error explanation sends; use it to explain an error without re-running anything.',
+    inputSchema: {
+      type: 'object',
+      properties: { error_id: { type: 'string', description: 'an earlier error\'s id, such as error-3; omit for the latest' } },
+    },
+  },
+  {
     name: 'wait_for_input',
     description: 'Blocks until the person enters a line in the session, optionally one starting with a '
       + 'prefix such as \'⍝ Claude:\'. Use it to wait for instructions instead of polling tail. Returns the '
@@ -537,6 +554,8 @@ const mcp = (opts) => new Promise((resolve) => {
         return { text: JSON.stringify(await c.request('stack')) };
       case 'value':
         return { text: tipText(await c.request('value', { name: a.name })) };
+      case 'last_error':
+        return { text: JSON.stringify(await c.request('last_error', a.error_id === undefined ? {} : { error_id: a.error_id })) };
       case 'wait_for_input': {
         // Only the app's timeout ends the wait: request() itself never times out, so a long
         // wait is not cut short here. since is left out unless given, so the app starts

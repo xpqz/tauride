@@ -37,6 +37,30 @@ test('numeric HadError uses actual output and captures source at the settled bou
   assert.deepEqual((await c.context(info.id)).windows[0].text, ['foo;arg', 'arg+1']);
 });
 
+test('captured resolves once the pending error is frozen', async () => {
+  const { c } = setup();
+  failure(c);
+  let done = false;
+  const waiting = c.captured(5000).then(() => { done = true; });
+  await new Promise((r) => { setTimeout(r, 20); });
+  assert.equal(done, false, 'the error is still pending');
+  await c.settle();
+  await waiting;
+  assert.equal((await c.context()).message, 'VALUE ERROR');
+});
+
+test('captured resolves at once with nothing pending, and at its deadline otherwise', async () => {
+  const { c } = setup();
+  await c.captured(5000);
+  c.sent('Execute', { text: 'foo\n' });
+  c.recv('AppendSessionOutput', { type: 1, result: 'VALUE ERROR\n' });
+  c.recv('HadError', { error: 6, dmx: 6 });
+  const started = Date.now();
+  await c.captured(30);
+  assert.ok(Date.now() - started >= 25, 'a pending error that never settles waits out the deadline');
+  assert.equal(await c.context(), null);
+});
+
 test('breakpoints and ordinary output do not create errors', async () => {
   const { c } = setup();
   c.recv('AppendSessionOutput', { type: 1, result: 'VALUE ERROR\n' });

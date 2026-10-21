@@ -32,6 +32,7 @@
     window_text: { level: 'observe', settle: true },
     stack: { level: 'observe', settle: true },
     value: { level: 'observe', settle: true },
+    last_error: { level: 'observe', settle: true },
     wait: { level: 'observe' },
     execute: { level: 'control', confirm: true, settle: true },
     answer: { level: 'control', confirm: true, settle: true },
@@ -81,6 +82,8 @@
       case 'value':
         if (!(typeof m.name === 'string' && NAME.test(m.name))) return 'name must be a name, not an expression';
         return SYSTEM.test(m.name) ? 'the interpreter gives no value tip for a system name such as ⎕IO; execute it instead' : null;
+      case 'last_error':
+        return m.error_id === undefined || (typeof m.error_id === 'string' && m.error_id !== '') ? null : 'error_id must be an error id';
       case 'wait':
         if (m.since !== undefined && typeof m.since !== 'number') return 'since must be a seq number';
         if (m.kinds !== undefined && typeof m.kinds !== 'string' && !isStrings(m.kinds)) return 'kinds must be a kind or a list of kinds';
@@ -105,7 +108,8 @@
   // actions exec(text), interrupt(strength), windows(), window(token),
   // edit(name), save(token, lines, stops) -> whether SaveChanges went out,
   // stops(token, lines) -> the window's stops, trace(token, action),
-  // stack(), value(name) -> the GetValueTip token; confirmNeeded(),
+  // stack(), value(name) -> the GetValueTip token; lastError(id) ->
+  // Promise of the frozen context of that error, or the latest, or null; confirmNeeded(),
   // confirm(request, signal) -> Promise<boolean>; onAgentEcho(seq, text); now().
   const create = (io) => {
     const now = io.now || (() => new Date().toISOString());
@@ -436,6 +440,11 @@
           ok({ name: m.name, tip: y.tip, class: y.class });
           return true;
         }, () => fail('timeout', `no ValueTip within ${timeout} ms`));
+      },
+      async last_error(m, ok, fail) {
+        const bundle = io.lastError ? await io.lastError(m.error_id) : null;
+        if (bundle) ok(bundle);
+        else fail('not_found', m.error_id === undefined ? 'no error has been captured' : `error ${m.error_id} is not available`);
       },
       wait(m, ok, fail) {
         const q = { kinds: typeof m.kinds === 'string' ? [m.kinds] : m.kinds, origin: m.origin, prefix: m.prefix };

@@ -47,6 +47,7 @@ const state = {
   tracer: null, // {token, name, arg} while a function is suspended
   slow: null, // the execute still running: {timer, timedOut, fixture, finish}
   waits: [], // pending wait requests
+  errors: [], // captured error bundles, oldest first
 };
 const clients = new Set(); // the served connections, one per socket
 
@@ -134,6 +135,7 @@ const execute = (f, ok, err) => {
   // The result's error is the HadError payload, as the tap builds it.
   const fail = (dmx, lines) => {
     ev({ kind: 'error', origin: 'agent', ...dmx });
+    state.errors.push({ id: `error-${state.errors.length + 1}`, message: lines[0] || 'ERROR', stale: false });
     r.error = dmx;
     line({ kind: 'error', ...dmx });
     lines.forEach((t) => out(t, 5));
@@ -141,6 +143,8 @@ const execute = (f, ok, err) => {
   ev({
     kind: 'input', origin: 'agent', prompt: state.prompt, text: f.text,
   });
+  // Execution moving on makes every captured error stale, as the tap's capture does.
+  state.errors.forEach((e) => { e.stale = true; });
   setPrompt(0);
   let p;
   if (isAnswer) {
@@ -275,6 +279,11 @@ const handle = (f, send, level) => {
           return w.currentLine < w.text.length ? highlight() : finish(true);
       }
     }
+    case 'last_error': {
+      if (f.error_id !== undefined && (typeof f.error_id !== 'string' || f.error_id === '')) return err('bad_request', 'error_id must be an error id');
+      const e = f.error_id === undefined ? state.errors.at(-1) : state.errors.find((x) => x.id === f.error_id);
+      return e ? ok(e) : err('not_found', f.error_id === undefined ? 'no error has been captured' : `error ${f.error_id} is not available`);
+    }
     case 'stack': return ok({ stack: state.tracer ? [{ description: `${state.tracer.name}[${state.wins[state.tracer.token].currentLine}]` }] : [] });
     case 'value': {
       if (typeof f.name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(f.name)) return err('bad_request', 'value takes a name');
@@ -403,7 +412,7 @@ const call = (id, name, args) => ({
 });
 const content = (m) => JSON.parse(m.result.content[0].text);
 
-const TOOL_NAMES = ['execute', 'answer', 'interrupt', 'tail', 'status', 'windows', 'window_text', 'edit', 'save', 'stops', 'trace', 'stack', 'value', 'wait_for_input'];
+const TOOL_NAMES = ['execute', 'answer', 'interrupt', 'tail', 'status', 'windows', 'window_text', 'edit', 'save', 'stops', 'trace', 'stack', 'value', 'last_error', 'wait_for_input'];
 
 // --- phase 1 ----------------------------------------------------------------------------
 
@@ -734,3 +743,27 @@ test('e2e.js runs its socket checks and exits with the failure count', async () 
   assert.ok(lines.some((l) => l.startsWith('SKIP second launch')));
   assert.equal(lines[lines.length - 1], 'e2e: 0 failures');
 });
+
+test('last-error prints the bundle; an unknown error is not_found', async () => {
+  state.errors = [{ id: 'error-1', message: 'LENGTH ERROR', stale: true }, { id: 'error-2', message: 'VALUE ERROR', stale: false }];
+  assert.deepEqual(await runJSON(['last-error']), { id: 'error-2', message: 'VALUE ERROR', stale: false });
+  assert.deepEqual(await runJSON(['last-error', 'error-1']), { id: 'error-1', message: 'LENGTH ERROR', stale: true });
+  const r = await run(['last-error', 'error-9']);
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /error error-9 is not available/);
+  assert.match((await run(['last-error', 'error-1', 'error-2'])).err, /last-error takes one error id/);
+});
+
+test('mcp last_error returns the bundle as JSON, and isError when there is none', async () => {
+  state.errors = [{ id: 'error-3', message: 'DOMAIN ERROR', stale: false }];
+  const got = await rpc([call(1, 'last_error', {}), call(2, 'last_error', { error_id: 'error-3' }), call(3, 'last_error', { error_id: 'error-8' })], 3);
+  const [latest, named, missing] = [1, 2, 3].map((id) => got.find((m) => m.id === id));
+  assert.deepEqual(content(latest), { id: 'error-3', message: 'DOMAIN ERROR', stale: false });
+  assert.deepEqual(content(named), { id: 'error-3', message: 'DOMAIN ERROR', stale: false });
+  assert.equal(missing.result.isError, true);
+  assert.match(missing.result.content[0].text, /not_found/);
+  state.errors = [];
+  const [none] = await rpc([call(4, 'last_error', {})], 1);
+  assert.equal(none.result.isError, true);
+});
+

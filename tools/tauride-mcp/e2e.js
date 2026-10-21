@@ -195,10 +195,21 @@ const socketChecks = async (client, sock, status0) => {
     const r = await exec('1÷0');
     return [!!r.error && r.prompt === 1, { error: r.error, text: outText(r) }];
   });
+  let errorId;
+  await check('last_error after an APL error', async () => {
+    const r = await client.request('last_error');
+    errorId = r.id;
+    return [/DOMAIN ERROR/.test(JSON.stringify(r)) && r.stale === false && /^error-\d+$/.test(r.id), { id: r.id, message: r.message, stale: r.stale }];
+  });
+  await check('last_error of an unknown error is not_found', () => expectErr(client.request('last_error', { error_id: 'error-999999' }), 'not_found'));
   await check('execute: 300 lines are truncated', async () => {
     // 300 lines of 300 chars trips the 64 KB cap even if the interpreter joins lines in one message.
     const r = await exec("300 300⍴'x'");
     return [r.truncated === true && r.lines.length <= 200, { truncated: r.truncated, lines: r.lines.length, seq: r.seq }];
+  });
+  await check('last_error is stale once execution moves on', async () => {
+    const r = await client.request('last_error', { error_id: errorId });
+    return [r.id === errorId && r.stale === true, { id: r.id, stale: r.stale }];
   });
   await check('execute: ⎕ prompt opens', async () => {
     const r = await exec('x←⎕');
