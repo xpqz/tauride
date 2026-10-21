@@ -289,6 +289,7 @@ Already-dispatched interpreter actions are not interrupted by revocation.
 | `trace` | control | `token`, `action` | one of `step_into`, `step_over`, `continue`, `continue_trace`, `back`, `forward`, `cutback`, `restart`, `edit`; runs the matching Ride command on that window; returns the next `{highlight}` for it, or `{closed: true}`, or `{prompt}` if the session prompt changed first, within `timeout` |
 | `stack` | observe | | the `ReplyGetSIStack` payload |
 | `value` | observe | `name` | the `ValueTip` text for that name in the current frame (names only; expressions are `bad_request`) |
+| `last_error` | observe | `error_id` (optional, such as `error-3`) | the frozen diagnostic context of the latest captured error, or of that error, waiting up to a second for an error still being captured: the same bundle the error explanation providers receive, with `stale` set once execution has moved on; `not_found` when no such error has been captured |
 | `wait` | observe | `since` (seq, default the latest), `kinds`, `origin`, `prefix`, `timeout` | long-poll: the first event after `since` that matches, else `err timeout`; this is how an agent waits for the next `⍝ Claude:` line without polling |
 
 **Events added.** `kind: "agent"` with `event: connected | disconnected |
@@ -386,7 +387,7 @@ The setup probe runs separately from the warm companion, reads `account/read` wi
 
 The initial adapter uses the [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server). It disables inherited MCP servers, connectors, plugins and execution tools for these requests, uses read-only permissions, and rejects tool/approval requests. The diagnostic snapshot is passed as data. Requests and streamed replies are correlated within the owning session window; cancellation and session shutdown terminate the owned companion.
 
-Provider descriptors are exposed by `companion_providers` to both the panel and Preferences. Settings are stored as `agentProvider` and `agentProviderSettings`, a map of provider ids to their executable and model overrides. The earlier `agentExecutable` and `agentModel` preferences are replaced without migration. The panel only promises enforced read-only operation and disabled tools when the descriptor's `enforces_no_tools` flag is true. An attached-agent `last_error` request is planned; see [the provider design](agent-providers.md).
+Provider descriptors are exposed by `companion_providers` to both the panel and Preferences. Settings are stored as `agentProvider` and `agentProviderSettings`, a map of provider ids to their executable and model overrides. The earlier `agentExecutable` and `agentModel` preferences are replaced without migration. The panel only promises enforced read-only operation and disabled tools when the descriptor's `enforces_no_tools` flag is true. An attached agent can read the same context with the `last_error` request (the MCP tool `last_error`, the CLI `last-error`) and explain an error in its own conversation; see [the provider design](agent-providers.md).
 
 ### Claude Code
 

@@ -273,5 +273,7 @@ and the unchanged request-capture proof are recorded in `docs/prs/145.md`.
 
 Step 2, the `claude` provider, is implemented in #147; validation, mutation
 checks and a live run are recorded in `docs/prs/147.md`. Step 3, the `command` provider, is implemented in #148
-(`docs/prs/148.md`). The pairing interface's `last_error` request (#149)
-remains to be built.
+(`docs/prs/148.md`). Step 4, the pairing interface's `last_error` request,
+is implemented in #149 (`docs/prs/149.md`): the request, its row in
+`agent-pairing.md`, the MCP tool `last_error` and the CLI command
+`last-error`.

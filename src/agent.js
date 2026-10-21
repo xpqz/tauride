@@ -13,6 +13,8 @@ if (window.__RIDE__) {
     if (/[?&]type=/.test(window.location.search)) return;
     const { label } = window.__TAURI_INTERNALS__.metadata.currentWindow;
     const fs = nodeRequire('fs');
+    // The capture's own deadlines (stack and previews) end well inside this.
+    const LAST_ERROR_CAPTURE_MS = 1000;
     const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
     const loadScript = (name, exported) => new Promise((resolve, reject) => {
       const s = document.createElement('script');
@@ -136,6 +138,12 @@ if (window.__RIDE__) {
         }
       },
       stack: () => D.send('GetSIStack', {}),
+      // An error the interpreter has just reported is still being captured.
+      lastError: async (id) => {
+        if (!errorCapture) return null;
+        await errorCapture.captured(LAST_ERROR_CAPTURE_MS);
+        return errorCapture.context(id);
+      },
       // A token from the IDE's counter, so it cannot collide with a hover's; the
       // request is not registered with the IDE, whose ValueTip handler ignores
       // tokens it does not know, and the core matches the reply itself.

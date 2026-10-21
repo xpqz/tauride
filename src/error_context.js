@@ -203,6 +203,16 @@
         if (!e || !e.frozen) return null;
         return e.stale === e.frozen.stale ? e.frozen : freeze({ ...e.frozen, stale: e.stale });
       },
+      // Resolves when the latest error is frozen, cleared or superseded, or at the deadline.
+      captured(timeout) {
+        if (!latest || !latest.pending) return Promise.resolve();
+        return new Promise((resolve) => {
+          const check = () => { if (!latest || !latest.pending) done(); };
+          const done = () => { clearTimeout(timer); listeners.delete(check); resolve(); };
+          const timer = setTimeout(done, timeout);
+          listeners.add(check);
+        });
+      },
       onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     };
   };
