@@ -113,6 +113,14 @@ const Console = console;
     });
 
     D.openExternal = D.el ? D.el.shell.openExternal : (x) => { window.open(x, '_blank'); };
+    if (window.__RIDE__ && D.helpLocal) {
+      const os = window.require('os');
+      D.help = D.helpLocal({
+        env: process.env, platform: os.platform(), home: os.homedir(), exists: window.require('fs').existsSync,
+      });
+      const { openExternal } = D;
+      D.openExternal = (url) => openExternal(D.help.target(url));
+    }
     if (D.el) {
       window.electronOpen = window.open;
       window.open = (url) => {

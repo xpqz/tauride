@@ -713,6 +713,7 @@
               args = dyalogArgs(args);
               if (x.args) args.push(...x.args.replace(/\n$/gm, '').split('\n'));
               try {
+                if (D.help) D.help.setInterpreter(x.exe);
                 child = cp.spawn(x.exe, args, {
                   cwd,
                   stdio,
