@@ -304,6 +304,16 @@ pub fn run() {
         .setup(|app| {
             #[cfg(feature = "ui-tests")]
             ui_tests::guard_parent(app.handle().clone());
+            // GDK's Wayland backend reports a screen resolution of -1 when no
+            // settings source supplies a text scale. WebKitGTK takes that as the
+            // font DPI and divides it by 96 for the page zoom with no sign check,
+            // so every page renders at a negative zoom.
+            #[cfg(target_os = "linux")]
+            if let Some(screen) = gtk::gdk::Screen::default() {
+                if screen.resolution() < 0.0 {
+                    screen.set_resolution(96.0);
+                }
+            }
             let main = win::session_window(app, "main")?;
             if app.state::<winstate::WinState>().get()["devTools"].as_bool().unwrap_or(false) {
                 main.open_devtools();
