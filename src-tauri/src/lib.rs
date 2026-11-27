@@ -1,12 +1,14 @@
 mod agent;
 mod companion;
 mod dialog;
+mod fonts;
 mod menu;
 mod native_services;
 mod net;
 mod proc;
 mod ssh;
 mod sync;
+mod theme;
 mod transcript;
 mod win;
 mod winstate;
@@ -194,6 +196,14 @@ fn sync_dispatch<R: Runtime>(app: &AppHandle<R>, path: &str, args: &Value) -> sy
         (Some("dialog"), Some("message")) => dialog::message(app, args),
         (Some("dialog"), Some("file")) => dialog::file(app, args),
         (Some("session"), Some("env")) => Ok(win::session_env(args.get("label").and_then(Value::as_str).unwrap_or(""))),
+        (Some("theme"), Some("source")) => {
+            if let Some(s) = args.get("source").and_then(Value::as_str) {
+                theme::set_source(app, s);
+            }
+            Ok(Value::from(theme::source(app)))
+        }
+        (Some("theme"), Some("dark")) => Ok(Value::Bool(theme::dark(app))),
+        (Some("theme"), Some("system")) => Ok(Value::Bool(theme::system_dark())),
         (Some("winstate"), Some("get")) => Ok(app.state::<winstate::WinState>().get()),
         (Some("winstate"), Some("set")) => {
             let key = args.get("key").and_then(Value::as_str).ok_or_else(|| sync::err("EINVAL", "missing key"))?;
@@ -254,6 +264,7 @@ pub fn run() {
         .manage(companion::Companion::default())
         .manage(transcript::Transcript::default())
         .invoke_handler(tauri::generate_handler![
+            fonts::list_apl_fonts,
             #[cfg(feature = "ui-tests")]
             ui_test_window_state,
             #[cfg(feature = "ui-tests")]
@@ -304,6 +315,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(feature = "ui-tests")]
             ui_tests::guard_parent(app.handle().clone());
+            theme::init(app.handle());
             let main = win::session_window(app, "main")?;
             if app.state::<winstate::WinState>().get()["devTools"].as_bool().unwrap_or(false) {
                 main.open_devtools();

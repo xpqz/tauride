@@ -1,4 +1,4 @@
-@TOP: 140px;
+@TOP: 184px;
 #col_top {
 	text-align: left;
 	padding: 0 8px;
@@ -9,8 +9,21 @@
 	margin-left: 10px;
 	width: calc(100% - 200px);  
 }
+#col_fnt_sel {
+	margin-left: 10px;
+	min-width: 240px;
+	&:not([hidden]) + #col_fnt {
+		width: calc(100% - 460px);
+	}
+}
+#col_fnt.missing {
+	outline: 2px solid @THEME_PRIMARY_ALERT;
+}
 #col_new_name {
 	display: none;
+}
+#col_sys label ~ label {
+	margin-left: 12px;
 }
 #col_me {
 	left: 8px;
@@ -36,7 +49,7 @@
 }
 .web {
 	#col_me, #col_settings {
-		top: 126px;
+		top: 170px;
 	}
 }
 #col_fg {

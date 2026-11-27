@@ -3,8 +3,7 @@ button{
   font-family:Roboto;
   font-weight:bold;
   padding:5px 0.5em;
-  transition:box-shadow 0.2s;
-  text-transform:uppercase;
+  transition:background-color 0.15s;
   cursor:pointer;
   &:active{box-shadow:none}
 }
@@ -44,7 +43,7 @@ input,textarea,select,a{
 }
 select{
   overflow: hidden;
-  padding: 2px 34px 2px 4px;
+  padding: 2px 30px 2px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-height:30px;
@@ -54,9 +53,6 @@ select{
   option{
     font-weight:500;
   }
-}
-select:focus{
-  outline:dotted black 1px;
 }
 textarea{
   border:none;

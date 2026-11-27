@@ -21,7 +21,12 @@ D.prf = {};
   ['cursorBlinking',     'blink'], // cursor blinking
   ['autocompletionDelay',500],
   ['autoCompleteCharacterLimit',1],
-  ['colourScheme',       'Default'], //name of the active colour scheme
+  ['colourScheme',       'Default'], //name of the colour scheme used when not following the system
+  ['colourSchemeDark',   'Dyalog Dark'], //scheme used while following a dark system theme
+  // follow the system light/dark setting: 1 or 0; -1 (unset) is resolved
+  // when the profile is first loaded (below)
+  ['colourSchemeFollowSystem', -1],
+  ['colourSchemeLight',  'Dyalog Light'], //scheme used while following a light system theme
   ['colourSchemes',      []],//objects describing user-defined colour schemes
   ['confirmations',      {}],//saved responses to TaskDialog questions
   ['connectOnQuit',      0], // open connection page when active session ends
@@ -319,6 +324,12 @@ D.db = !nodeRequire ? localStorage : (function DB() {
   Object.defineProperty(db, 'length', { get() { return k.length; } });
   return db;
 }());
+// A new profile follows the system theme. A profile that existed before
+// follow-system keeps the scheme it shows, including Default, which is
+// stored as no colourScheme at all.
+if (D.db.getItem('colourSchemeFollowSystem') == null) {
+  D.prf.colourSchemeFollowSystem(D.db.length ? 0 : 1);
+}
 if (D.el && D.win && D.prf.ime()) {
   const setImeExe = `${__dirname}\\windows-ime\\set-ime.exe`;
   const fs = nodeRequire('fs');

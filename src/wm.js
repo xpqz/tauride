@@ -212,6 +212,9 @@
           // its own size.
           resizable: true,
           parent: o.parent ? o.parent.label : undefined,
+          // Shown until the page paints; theme.rs gives session windows the
+          // same. macOS would paint it behind the title bar too.
+          ...(D.mac ? {} : { backgroundColor: D.theme === 'dark' ? '#1f2434' : '#f2f1f0' }),
           ...opt(o, ['width', 'height', 'x', 'y', 'minWidth', 'minHeight']),
         });
         creating.set(label, new Promise((resolve) => {

@@ -10,8 +10,11 @@
   let M = {}; // H:reverse lookup dict for G
   let q; // dict of DOM elements whose ids start with "col_", keyed by the rest of the id
   let scms; // all schemes (built-in and user-defined) as objects
-  let scm = {}; //  the active scheme object
+  let scm = {}; //  the scheme shown in the sample and edited
+  let lscm; // the scheme for a light system theme
+  let dscm; // the scheme for a dark system theme
   let me; //   Monaco editor instance for displaying sample code
+  let fonts = []; // installed APL fonts: {family, fullName, postscript}
   let sel; //  the selected group's token type (.t)
   // RGB() expands the hex representation of a colour, rgb() shrinks it
   const RGB = (x) => {
@@ -27,6 +30,12 @@
   const RGBO = (x, a) => {
     const o = a === undefined ? '' : `00${Math.round(a * 255).toString(16)}`.slice(-2);
     return RGB(x) + o;
+  };
+  // mix('#rrggbb', '#rrggbb', t): the colour t of the way from a to b.
+  const mix = (a, b, t) => {
+    const c = (x, i) => parseInt(x.slice(i, i + 2), 16);
+    return `#${[1, 3, 5].map((i) => Math.round(c(a, i) + (c(b, i) - c(a, i)) * t)
+      .toString(16).padStart(2, '0')).join('')}`;
   };
   const rgb = (x) => {
     if (!/^#.{6}$/.test(x)) return x;
@@ -77,6 +86,16 @@
     return r;
   };
   const SCMS = [ // built-in schemes
+  {
+    name: "Dyalog Light",
+    styles: "norm=fg:#232222,bg:#ffffff,bgo:1 com=fg:#5f6573,I kw=fg:#ad4913 fn=fg:#1c516e op1=fg:#584da9 op2=fg:#584da9 asgn=fg:#ad4913 diam=fg:#ad4913 str=fg:#1a7a4a num=fg:#7a6400 zld=fg:#7a6400 quad=fg:#493f8b qdl=fg:#493f8b scmd=fg:#493f8b ucmd=fg:#493f8b,B glb=fg:#843914 var=fg:#232222 ns=fg:#396780 trad=fg:#232222,B lbl=fg:#584da9,U err=fg:#ca2e51 itk=fg:#ca2e51,U idm=U lnum=fg:#5f6573,bgo:0 lnac=fg:#232222 sel=bg:#c3bde9,bgo:0.7 mtch=bg:#c3bde9,bgo:0.5 srch=bg:#ffa671,bgo:0.5 tc=bg:#e3e9ed,bgo:1 tcpe=bg:#e4e5e8,bgo:1 cur=fg:#d65a13 acsl=bg:#c3bde9,bgo:0.6 vtip=bg:#2a3244,fg:#e4e5e8,bgo:1,bc:#685bc7 vtt=bc:#ff6a13 dc=bg:#f9e6ea,bgo:1 mod=bg:#e1def4,bgo:1 semi=fg:#454c5b sqbr=fg:#454c5b par=fg:#454c5b cubr=fg:#454c5b an=fg:#454c5b ann=fg:#232222 dfn=fg:#232222 dfn1=fg:#584da9 dfn2=fg:#1c516e dfn3=fg:#ad4913 dfn4=fg:#1a7a4a dfn5=fg:#7a6400 cv=bg:#f2f1f0,bgo:1,fg:#1a7a4a cvv=bg:#f2f1f0,bgo:1,fg:#1c516e cm=bg:#f2f1f0,bgo:1,fg:#584da9 ca=bg:#f2f1f0,bgo:1,fg:#ad4913 na=bg:#f2f1f0,bgo:1,fg:#7a6400 ma=bg:#f2f1f0,bgo:1,fg:#493f8b qor=bg:#ca2e51,bgo:1,fg:#ffffff",
+    theme: "light",
+  },
+  {
+    name: "Dyalog Dark",
+    styles: "norm=fg:#e4e5e8,bg:#151624,bgo:1 com=fg:#9498a2,I kw=fg:#ff8842 fn=fg:#aabec9 op1=fg:#a49ddd op2=fg:#a49ddd asgn=fg:#ffa671 diam=fg:#ffa671 str=fg:#2eca7c num=fg:#f3db4c zld=fg:#f3db4c quad=fg:#c3bde9 qdl=fg:#c3bde9 scmd=fg:#c3bde9 ucmd=fg:#c3bde9,B glb=fg:#ffc3a1 var=fg:#e4e5e8 ns=fg:#8ea8b7 trad=fg:#e4e5e8,B lbl=fg:#a49ddd,U err=fg:#e8899e itk=fg:#e8899e,U idm=U lnum=fg:#7a7f8a,bgo:0 lnac=fg:#e4e5e8 sel=bg:#584da9,bgo:0.5 mtch=bg:#493f8b,bgo:0.6 srch=bg:#ff6a13,bgo:0.35 tc=bg:#052238,bgo:1 tcpe=bg:#1f2434,bgo:1 cur=fg:#ff6a13 acsl=bg:#584da9,bgo:0.6 vtip=bg:#e4e5e8,fg:#232222,bgo:1,bc:#685bc7 vtt=bc:#ff6a13 dc=bg:#5c2914,bgo:1 mod=bg:#292450,bgo:1 semi=fg:#afb2b9 sqbr=fg:#afb2b9 par=fg:#afb2b9 cubr=fg:#afb2b9 an=fg:#afb2b9 ann=fg:#e4e5e8 dfn=fg:#e4e5e8 dfn1=fg:#a49ddd dfn2=fg:#8ea8b7 dfn3=fg:#ffa671 dfn4=fg:#2eca7c dfn5=fg:#f3db4c cv=bg:#1f2434,bgo:1,fg:#2eca7c cvv=bg:#1f2434,bgo:1,fg:#8ea8b7 cm=bg:#1f2434,bgo:1,fg:#a49ddd ca=bg:#1f2434,bgo:1,fg:#ffa671 na=bg:#1f2434,bgo:1,fg:#f3db4c ma=bg:#1f2434,bgo:1,fg:#c3bde9 qor=bg:#ca2e51,bgo:1,fg:#ffffff",
+    theme: "dark",
+  },
   {
     name: "Default",
     styles: "asgn=fg:00f com=fg:088 dfn=fg:00f diam=fg:00f err=fg:f00 fn=fg:008 idm=fg:008 kw=fg:800 lnum=fg:008,bg:f,bgo:0 mtch=bg:ff8,bgo:0.5 norm=bg:f,bgo:1 ns=fg:8 num=fg:8 op1=fg:00f op2=fg:00f an=fg:#c000c0 par=fg:00f quad=fg:808 qdl=fg:c0c sel=bg:48e,bgo:0.5 semi=fg:00f sqbr=fg:00f srch=bg:f80,bgo:0.5 str=fg:088 tc=bg:d,bgo:1 tcpe=bg:c8c8c8,bgo:1 trad=fg:8 var=fg:8 zld=fg:008 scmd=fg:#00c0c0 ucmd=fg:00f vtt=bg:ff0 ca=bg:828282,bgo:1,fg:0f0 cm=bg:0,bgo:1,fg:080 cv=bg:f,bgo:1,fg:0 cvv=bg:0,bgo:1,fg:0ff ma=bg:828282,bgo:1,fg:0ff na=bg:828282,bgo:1,fg:f qor=bg:f00,bgo:1,fg:f dc=bg:#993333,bgo:1 itk=fg:f00",
@@ -187,6 +206,19 @@
           background: RGB(h.bg).slice(1),
         });
         colors['editor.background'] = RGBO(h.bg, h.bgo || 1);
+        // Widgets (suggest, hover, find) sit a step off the background, so
+        // they follow the scheme instead of Monaco's stock light or dark.
+        const off = mix(RGB(h.bg), schema.theme === 'dark' ? '#ffffff' : '#000000', 0.06);
+        const edge = mix(RGB(h.bg), schema.theme === 'dark' ? '#ffffff' : '#000000', 0.18);
+        colors['editorGutter.background'] = RGBO(h.bg, h.bgo || 1);
+        ['editorWidget', 'editorSuggestWidget', 'editorHoverWidget'].forEach((w) => {
+          colors[`${w}.background`] = off;
+          colors[`${w}.border`] = edge;
+        });
+        if (h.fg) {
+          colors['editorWidget.foreground'] = RGB(h.fg);
+          colors['editorSuggestWidget.foreground'] = RGB(h.fg);
+        }
         // Monaco's default slider colours are a fixed grey at low alpha, which
         // vanishes against dark backgrounds; derive them from the text colour.
         if (h.fg) {
@@ -210,26 +242,44 @@
       colors,
     });
     monaco.editor.setTheme(name);
-    if (D.el) {
-      nodeRequire('@electron/remote').getGlobal('winstate').theme = schema.theme;
-    }
   };
+  // The OS light/dark setting comes from the native side in the desktop app
+  // and from the browser otherwise.
+  const nativeTheme = D.el && D.el.nativeTheme;
+  const darkQuery = !nativeTheme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+  const followsSystem = () => D.prf.colourSchemeFollowSystem() !== 0;
+  // Reading the OS theme leaves the native theme source alone: the Style tab
+  // reads it to preview a scheme that may never be saved.
+  const systemIsDark = () => (nativeTheme
+    ? nativeTheme.systemUsesDarkColors : !!(darkQuery && darkQuery.matches));
+  const activeSchemeName = () => {
+    if (!followsSystem()) return D.prf.colourScheme();
+    return systemIsDark() ? D.prf.colourSchemeDark() : D.prf.colourSchemeLight();
+  };
+  let aplFont = D.prf.customAplFont();
   const updStl = () => { // update global style from what's in prefs.json
-    const s = D.prf.colourScheme();
+    const s = activeSchemeName();
     const a = SCMS.concat(D.prf.colourSchemes().map(decScm));
-    for (let i = 0; i < a.length; i++) {
-      if (a[i].name === s) {
-        const schema = a[i];
-        document.getElementById('theme_dark').disabled = schema.theme !== 'dark';
-        document.getElementById('theme_light').disabled = schema.theme !== 'light';
-        D.theme = schema.theme;
-        if (D.ipc && D.ipc.server) {
-          D.ipc.server.broadcast('setTheme', D.theme);
-        }
-        I.col_stl && (I.col_stl.textContent = renderCSS(schema));
-        if (window.monaco) setMonacoTheme(schema);
-        break;
-      }
+    const schema = a.find((x) => x.name === s) || a[0];
+    document.getElementById('theme_dark').disabled = schema.theme !== 'dark';
+    document.getElementById('theme_light').disabled = schema.theme !== 'light';
+    D.theme = schema.theme;
+    if (nativeTheme) {
+      nativeTheme.themeSource = followsSystem() ? 'system' : schema.theme;
+      // Helper pages open in this theme before they hear from their session.
+      const ws = D.el.getGlobal('winstate');
+      if (ws.theme !== schema.theme) ws.theme = schema.theme;
+    }
+    if (D.ipc && D.ipc.server) {
+      D.ipc.server.broadcast('setTheme', D.theme);
+    }
+    [D.abtw, D.logw].forEach((w) => w && w.eval(`setPageTheme(${JSON.stringify(D.theme)})`));
+    I.col_stl && (I.col_stl.textContent = renderCSS(schema));
+    if (window.monaco) setMonacoTheme(schema);
+    // Monaco keeps the character widths it measured for the old font.
+    if (window.monaco && aplFont !== D.prf.customAplFont()) {
+      aplFont = D.prf.customAplFont();
+      document.fonts.load('1em apl').then(() => monaco.editor.remeasureFonts());
     }
   };
   // $(updStl);
@@ -328,7 +378,12 @@
   /* eslint-enable */
   D.mop.then(() => updStl());
   D.prf.colourScheme(updStl);
+  D.prf.colourSchemeDark(updStl);
+  D.prf.colourSchemeFollowSystem(updStl);
+  D.prf.colourSchemeLight(updStl);
   D.prf.colourSchemes(updStl);
+  if (nativeTheme) nativeTheme.on('updated', updStl);
+  else if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener('change', updStl);
   D.prf.customAplFont(updStl);
   const uniqScmName = (x) => { // x:suggested root
     const h = {};
@@ -340,6 +395,39 @@
       while (h[r = `${dx} (${i})`]) i += 1;
     }
     return r;
+  };
+  // The font list stores a font by the names CSS local() matches. A value
+  // typed or saved earlier selects the font it names by any of its names.
+  const fontValue = (f) => `${f.fullName},${f.postscript}`;
+  const fontNamed = (v) => {
+    const names = v.split(',').map((x) => x.trim().toLowerCase()).filter((x) => x);
+    return fonts.find((f) => [f.family, f.fullName, f.postscript].some((n) => names.includes(n.toLowerCase())));
+  };
+  const showFont = () => {
+    const v = q.fnt.value.trim();
+    const f = v && fontNamed(v);
+    if (f) q.fnt.value = fontValue(f);
+    q.fnt_sel.value = !v ? '' : f ? `${fonts.indexOf(f)}` : 'other';
+    q.fnt.hidden = !q.fnt_sel.hidden && q.fnt_sel.value !== 'other';
+    const missing = !q.fnt_sel.hidden && !!v && !f;
+    q.fnt.classList.toggle('missing', missing);
+    q.fnt.title = missing ? 'No installed monospaced APL font has this name; the bundled APL385 Unicode is used.' : '';
+  };
+  let fontTicket = 0;
+  const listFonts = () => {
+    if (!window.__RIDE__) return;
+    const ticket = ++fontTicket;
+    const glyphs = D.lb.order.replace(/[\x00-\x7f]/g, '');
+    window.__TAURI_INTERNALS__.invoke('list_apl_fonts', { glyphs }).then((a) => {
+      if (ticket !== fontTicket) return;
+      fonts = a;
+      const esc = D.util.esc;
+      q.fnt_sel.innerHTML = '<option value="">APL385 Unicode (bundled)'
+        + a.map((f, i) => `<option value=${i}>${esc(f.family)}`).join('')
+        + '<option value=other>Other…';
+      q.fnt_sel.hidden = false;
+      showFont();
+    }, (e) => console.error('list_apl_fonts', e));
   };
   const SC_MATCH = 'search match'; // sample text to illustrate it
   const updSampleStl = () => {
@@ -372,6 +460,21 @@
     q.bc_p.hidden = !g.bc;
     sel = t;
   };
+  // The light and dark scheme lists offer the schemes of their theme. Option
+  // values are indices into scms.
+  const updSysScms = () => {
+    const fill = (c, theme, cur) => {
+      const a = scms.filter((x) => x.theme === theme);
+      const x = a.includes(cur) ? cur : a[0];
+      c.innerHTML = a.map((y) => `<option value=${scms.indexOf(y)}>${D.util.esc(y.name)}`).join('');
+      if (x) c.value = scms.indexOf(x);
+      return x;
+    };
+    lscm = fill(q.lscm, 'light', lscm);
+    dscm = fill(q.dscm, 'dark', dscm);
+    q.lscm.disabled = !q.follow.checked;
+    q.dscm.disabled = !q.follow.checked;
+  };
   const updScms = () => {
     q.scm.innerHTML = scms.map((x) => { const n = D.util.esc(x.name); return `<option value="${n}">${n}`; }).join('');
     q.scm.value = scm.name;
@@ -380,6 +483,14 @@
     updSampleStl();
     selGrp('norm', 1);
     q.chrome.value = scm.theme;
+    updSysScms();
+  };
+  const showScm = (x) => {
+    if (!x || x === scm) return;
+    scm = x;
+    q.scm.value = scm.name;
+    q.scm.onchange();
+    selGrp('norm', 1);
   };
   D.prf_tabs.col = {
     name: 'Colours',
@@ -387,9 +498,18 @@
       q = J.col;
       q.fnt_rst.onclick = () => {
         q.fnt.value = D.prf.customAplFont.getDefault();
-        q.fnt.focus();
+        showFont();
+        (q.fnt_sel.hidden ? q.fnt : q.fnt_sel).focus();
         return false;
       };
+      q.fnt_sel.onchange = () => {
+        const x = q.fnt_sel.value;
+        if (x !== 'other') q.fnt.value = x ? fontValue(fonts[+x]) : '';
+        q.fnt.hidden = x !== 'other';
+        q.fnt.classList.remove('missing');
+        if (x === 'other') q.fnt.focus();
+      };
+      q.fnt.onchange = showFont;
       const u = [];
       Object.keys(scm).forEach((g) => {
         const { fg } = scm[g];
@@ -523,7 +643,13 @@
           me.trigger('editor', 'type', { text: ' '.repeat(t.mouseColumn - p.column) });
         }
       });
-      q.chrome.onchange = () => { scm.theme = q.chrome.value; };
+      q.chrome.onchange = () => { scm.theme = q.chrome.value; updSysScms(); };
+      q.follow.onchange = () => {
+        updSysScms();
+        if (q.follow.checked) showScm(systemIsDark() ? dscm : lscm);
+      };
+      q.lscm.onchange = () => { lscm = scms[+q.lscm.value]; showScm(lscm); };
+      q.dscm.onchange = () => { dscm = scms[+q.dscm.value]; showScm(dscm); };
       q.grp.onchange = () => { selGrp(G[+q.grp.value].t); };
       ['fg', 'bg', 'bc'].forEach((p) => {
         const c = q[p];
@@ -558,18 +684,26 @@
     },
     load() {
       q.fnt.value = D.prf.customAplFont();
+      showFont();
+      listFonts();
       const a = SCMS.concat(D.prf.colourSchemes().map(decScm));
       scms = a;
-      const s = D.prf.colourScheme();
-      [scm] = a;
-      for (let i = 0; i < a.length; i++) if (a[i].name === s) { scm = a[i]; break; }
+      const named = (n) => a.find((x) => x.name === n);
+      q.follow.checked = followsSystem();
+      lscm = named(D.prf.colourSchemeLight());
+      dscm = named(D.prf.colourSchemeDark());
+      scm = named(activeSchemeName()) || a[0];
       I.col.className = ''; updScms();
     },
     activate() { q.scm.focus(); },
     save() {
       D.prf.customAplFont(q.fnt.value);
       D.prf.colourSchemes(scms.filter((x) => !x.frz).map(encScm));
-      D.prf.colourScheme(scm.name);
+      lscm && D.prf.colourSchemeLight(lscm.name);
+      dscm && D.prf.colourSchemeDark(dscm.name);
+      // While following the system, the scheme shown is only being viewed.
+      q.follow.checked || D.prf.colourScheme(scm.name);
+      D.prf.colourSchemeFollowSystem(q.follow.checked ? 1 : 0);
     },
     resize() { },
   };

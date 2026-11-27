@@ -58,8 +58,7 @@
       }, `file://${__dirname}/about.html`);
       D.abtw = w;
       w.eval(`window.diagnosticText.setText(${JSON.stringify(details)})`);
-      w.eval(`document.getElementById('theme_dark').disabled = ${D.theme !== 'dark'}`);
-      w.eval(`document.getElementById('theme_light').disabled = ${D.theme !== 'light'};`);
+      w.eval(`setPageTheme(${JSON.stringify(D.theme)})`);
 
       w.onClosed(() => { if (D.abtw === w) delete D.abtw; });
     } else {

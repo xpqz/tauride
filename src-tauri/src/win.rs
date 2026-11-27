@@ -49,13 +49,15 @@ pub fn session_env(label: &str) -> Value {
 /// open_session.
 pub fn session_window<R: Runtime, M: Manager<R>>(manager: &M, label: &str) -> tauri::Result<tauri::WebviewWindow<R>> {
     let (pos, width, height) = crate::winstate::restore(manager.app_handle(), "launchWin");
+    let app = manager.app_handle();
     let mut b = WebviewWindowBuilder::new(manager, label, WebviewUrl::App("index.html".into()))
         .title("Tauride")
-        .inner_size(width, height);
+        .inner_size(width, height)
+        .theme(crate::theme::native(app));
     // macOS paints this behind the title bar too.
     #[cfg(not(target_os = "macos"))]
     {
-        b = b.background_color(tauri::window::Color(0x76, 0x88, 0xd9, 0xff));
+        b = b.background_color(crate::theme::background(app));
     }
     if let Some((x, y)) = pos {
         // Later sessions cascade from the saved position.
@@ -106,15 +108,23 @@ pub async fn session_new<R: Runtime>(app: AppHandle<R>, env: Map<String, Value>)
 /// Every window, however it was created: close requests go to the page
 /// first, session windows' geometry is saved, a session's helper windows
 /// close with its session window (as Electron children close with their
-/// parent), and the app exits with the last session window (macOS: only when quitting).
+/// parent), the app exits with the last session window (macOS: only when
+/// quitting), and each window takes the native theme (theme.rs).
 pub fn watch<R: Runtime>(w: &Window<R>) {
     let app = w.app_handle().clone();
     let label = w.label().to_owned();
     let id = id_of(&label);
+    crate::theme::apply(w);
     w.on_window_event(move |e| {
         if let WindowEvent::CloseRequested { api, .. } = e {
             api.prevent_close();
             let _ = app.emit("ride-close-request", json!({ "id": id }));
+        }
+        // Linux reads the OS theme from the desktop portal instead: GTK
+        // reports the theme Tauride set.
+        #[cfg(not(target_os = "linux"))]
+        if let WindowEvent::ThemeChanged(t) = e {
+            crate::theme::system_changed(&app, *t);
         }
         if !is_session_window(id) {
             return;

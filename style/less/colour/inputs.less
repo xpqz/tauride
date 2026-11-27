@@ -4,20 +4,33 @@ label{
     font-size:14px;
     font-weight: 600;
 }
+// An SVG data URI cannot use currentColor, so the chevron is drawn in the
+// theme's colour.
+.chevron(@c) {
+  @hex: replace(~"@{c}", "#", "%23");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='@{hex}' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
 button{
   background:@BUTTON_BG_COL;
   color:@BUTTON_COL;
-  &:hover{color:@BUTTON_HOVER_COL}
+  &:hover{background:@BUTTON_HOVER_BG; color:@BUTTON_HOVER_COL}
   &:disabled{
     cursor: default;
-    color: fade(@BUTTON_COL, 50);
-    background: @INPUT_OFF;
-    border-color: @INPUT_OFF;
+    color: @BUTTON_OFF_FG;
+    background: @BUTTON_OFF_BG;
+    border-color: @BUTTON_OFF_BG;
   }
   border-radius: 4px;
-  background-image: -moz-linear-gradient( 90deg, @THEME_PRIMARY 0%, @THEME_HIGHLIGHT 100%);
-  background-image: -webkit-linear-gradient( 90deg, @THEME_PRIMARY 0%, @THEME_HIGHLIGHT 100%);
-  background-image: -ms-linear-gradient( 90deg, @THEME_PRIMARY 0%, @THEME_HIGHLIGHT 100%);
+}
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible {
+  outline: 2px solid @THEME_FOCUS;
+  outline-offset: 1px;
+}
+// The button that carries out the dialog's action.
+#prf_dlg_ok, #cn_go, .dlg_btns button.default {
+  background: @THEME_ACTION;
+  color: @THEME_ACTION_FG;
+  &:hover { background: lighten(@THEME_ACTION, 8%); color: @THEME_ACTION_FG; }
 }
 input+label{
   cursor: pointer;
@@ -30,32 +43,40 @@ input:disabled+label{
 [type=checkbox]{
     cursor: pointer;
     background-color: @CHECKBOX_BG;
-    border: 1px solid @THEME_PRIMARY;
+    border: 1px solid @CHECKBOX_BORDER;
+    &:hover{
+      border-color: @CHECKBOX_COL;
+    }
     &:checked{
       background-color: @CHECKBOX_COL;
-    }
-    &:hover{
-      background:lighten(@CHECKBOX_COL,10%)
-    }
-    &:active{
-      background:@CHECKBOX_COL;
-      color:lighten(@THEME_WIN_BG,10%)
-    }
-    &:checked{
-      color:@CHECKBOX_COL
+      border-color: @CHECKBOX_COL;
     }
     &:checked::after{
-      color:@CHECKBOX_BG;
+      color: white;
     }
     &:disabled, &:disabled:checked{
       cursor: default;
-      color: @INPUT_OFF;
-      background: @INPUT_OFF;
-      border-color: @INPUT_OFF;
+      background: @BUTTON_OFF_BG;
+      border-color: @BUTTON_OFF_BG;
     }
 }
+input:not([type]), input[type=text], input[type=search], input[type=number], input[type=password], textarea{
+  background-color: @CN_INPUT_BG;
+  border: 1px solid @CN_INPUT_BORDER_COL;
+  color: @CN_INPUT_FG;
+  border-radius: 2px;
+  &::placeholder { color: @CN_INPUT_DIS_FG; }
+  &:disabled { background-color: @CN_INPUT_DIS_BG; color: @CN_INPUT_DIS_FG; }
+}
 select{
-  background-color:	@CN_INPUT_BG;
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: @CN_INPUT_BG;
+  .chevron(@LABEL_COL);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
   border: 1px solid @CN_INPUT_BORDER_COL;
   color:@CN_SELECT_FG;
+  &:disabled { color: @CN_INPUT_DIS_FG; background-color: @CN_INPUT_DIS_BG; }
+  option, optgroup { background-color: @CN_INPUT_BG; color: @CN_SELECT_FG; }
 }

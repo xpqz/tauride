@@ -156,8 +156,7 @@
 }
 
 #abt_logo{
-  background:16px center no-repeat @RIDE_LOGO_IMG;
-  // background-size: auto 60px;
+  position:relative;
   height:80px;
   line-height:20px;
   cursor:move;
@@ -166,6 +165,17 @@
   cursor:default;
 }
 
+// The wordmark is a mask, so it takes the theme's colour.
+#abt_logo::before{
+  content:'';
+  position:absolute;
+  left:16px;
+  top:0;
+  bottom:0;
+  width:263px;
+  -webkit-mask:@RIDE_LOGO_IMG no-repeat left center;
+  mask:@RIDE_LOGO_IMG no-repeat left center;
+}
 #abt_contact{
   float:right;
   text-align:right;

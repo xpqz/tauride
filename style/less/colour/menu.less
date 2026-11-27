@@ -1,46 +1,40 @@
 /*menu (see ../src/menu.js for the DOM structure)*/
-@HOVER_COL: fade(black, 20);
 .menu {
 	background-color: @MENU_BG;
-	border-bottom: solid grey 1px;
+	border-bottom: solid @MENU_BORDER 1px;
 	a, a:hover {
-    color: black;
+    color: @MENU_FG;
     font-size: 0.8em;
 	}
+	a:focus-visible {
+		outline: none;
+	}
 	.m-open {
-		background: @HOVER_COL;
+		background: @MENU_HOVER;
 		.m-top {
 			border-color:transparent;
 		}
 	}
 	.m-box {
-		background-color: white;
-		border-color: @HOVER_COL;
+		background-color: @MENU_BOX_BG;
+		border-color: @MENU_BORDER;
 		a {
 			border:none;
-			border-color: @MENU_BG;
 			.m-shc {
-				color: @INPUT_COL;
+				color: @MENU_SHC;
 			}
 			&:focus {
-				background: @HOVER_COL;
-				// color: white;
-				// .m-shc {
-				// 	color: white;
-				// }
+				background: @MENU_HOVER;
+				outline: none;
 			}
-			&.m-checked{
-				background: transparent 5px center no-repeat url(img/menu_chk.png);
-			}
-			&:focus.m-checked {
-				background: @HOVER_COL 5px center no-repeat url(img/menu_chk.png);
+			&.m-checked::before {
+				content: '\2713';
+				position: absolute;
+				left: 6px;
 			}
 		}
+		hr {
+			border-color: @MENU_BORDER;
+		}
 	}
-	// .m-opener {
-	// 	background: transparent center right 5px no-repeat url(img/menu_tri.png);
-	// 	&:focus {
-	// 		background: lighten(@MENU_BG,10) center right 5px no-repeat url(img/menu_tri_wht.png);
-	// 	}
-	// }
 }

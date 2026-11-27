@@ -60,7 +60,10 @@ The UI runner stages the frontend and builds with Cargo's `ui-tests` feature int
 `src-tauri/target/ui-tests`. This enables a loopback WebDriver server and test-only
 native input commands, and disables single-instance redirection. Ordinary builds
 exclude the automation code. Each test gets a fresh preference directory and an
-app process; normal teardown quits that process and removes its profile. AVA uses
+app process. The directory's `prefs.json` holds `{"sqp":"0"}`, or the `prefs`
+option of `tfw.init` (`null` for none, as on a first run; `tfw.init` also takes a
+function of the test that returns the options). Normal teardown quits that
+process and removes its profile. AVA uses
 child processes with a 60-second inactivity timeout. A test-only stdin pipe also
 quits the app and its owned interpreters if a worker terminates abruptly. Inherited
 `RIDE_*` startup settings are cleared. Existing Ride preferences and sessions are
@@ -128,8 +131,10 @@ scripts. It provides the subset of Node and Electron Ride uses:
 | `node-ipc` | Tauri events addressed to window labels (`emitTo`); the main window serves, the others are its clients; no handshake polling |
 | Desktop windows and monitors | `src/wm.js` uses Tauri's window API (below) |
 | `@electron/remote`: `getGlobal`, `app`, `shell`, `clipboard` | `winstate.rs` (persistent window geometry), `open_url` |
+| `@electron/remote`: `nativeTheme` | `theme.rs` (below) |
 | `dialog.*Sync` | `dialog.rs`: GTK dialogs on Linux; task dialogs and the common item dialogs (rfd) on Windows |
 | `Menu.popup()` | `menu.rs`: native popup menus |
+| APL font list (Preferences > Style) | `fonts.rs`: installed fonts with a glyph, all of one width, for every language-bar character |
 
 Sessions: unlike Electron Ride, which starts another process for each
 session, Tauride runs every session in one process, each in its own window,
@@ -192,6 +197,49 @@ attaches `win.rs`'s handling to every window: close requests go to the page
 first (Ride's `onbeforeunload`), the main window's geometry is saved, and the
 app exits with the main window. `win_op` does what the JS API cannot do to
 another window: run a script in it, print it, toggle its devtools, navigate it.
+
+Themes: a colour scheme names its chrome theme, light or dark, and the
+session either uses one chosen scheme or follows the OS with a chosen light
+and dark scheme (`colourSchemeFollowSystem`, `colourSchemeLight`,
+`colourSchemeDark`). `src/prf.js` settles `colourSchemeFollowSystem` when a
+profile is first loaded: a new profile follows the OS, and one that already
+has preferences keeps the scheme it shows, Default included (`prefs.json`
+stores a default value as no key). `src/prf_col.js` sets Electron's
+`nativeTheme.themeSource` accordingly: `light` or `dark` for a chosen scheme,
+`system` when following the OS. It reads the OS theme from
+`systemUsesDarkColors`, which Electron lacks and which leaves the source
+alone: the desktop portal's value on Linux, the `AppleInterfaceStyle` user
+default on macOS (tao sets a window's theme on `NSApp`, so `NSApp`'s
+appearance is Ride's choice) and `AppsUseLightTheme` on Windows. `theme.rs`
+keeps the source in `winstate.json` (`themeSource`) and sets
+it on every window as it opens, so the title bar, GTK dialogs and the controls
+a webview draws natively match the scheme. On macOS and Windows a window with
+no theme set follows the OS and reports changes as `ThemeChanged`. GTK3 does
+not follow the desktop's dark preference, so on Linux `theme.rs` reads the
+XDG desktop portal's `org.freedesktop.appearance color-scheme` and always sets
+the theme explicitly; GTK's dark preference is process-wide. An OS change
+reaches pages as the `ride-system-theme` event (`nativeTheme` `updated`).
+`winstate.json` also records the theme last applied (`theme`): About, the
+protocol log, dialogs and Status Output start in it (`src/page_theme.js`)
+before their session sends changes. The Linux menu bar is Ride's HTML menu
+and takes its colours from the theme sheets.
+
+The theme sheets (`style/less/themes`) map Ride's UI roles onto the Dyalog
+brand palette in `brand.less`: `base.less` is the light theme and `dark.less`
+overrides it. The built-in Dyalog Light and Dyalog Dark schemes use the same
+palette and are the defaults when following the system. Electron Ride 4.8
+reads the same `prefs.json`; it ignores the follow-system keys and, not
+knowing the Dyalog schemes, keeps its default styling when one is chosen.
+
+The APL font preference (`customAplFont`) is a comma-separated list of names
+for CSS `local()`, ahead of the bundled APL385 Unicode. The Style tab offers
+the fonts `fonts.rs` finds and stores one by its full and PostScript names:
+WebView2 matches only those, not family names, and WebKitGTK answers an
+unknown name with fontconfig's nearest match. A name that matches no listed
+font is flagged. A family is listed only if its upright face nearest regular
+weight qualifies, so the stored font never renders bold or italic. The last
+scan is kept until the language-bar glyphs change; fonts installed while the
+app runs appear after a restart.
 
 The main window collects unsaved-stop counts from floating editors before
 requesting a global clear. An editor that closes completes its pending count

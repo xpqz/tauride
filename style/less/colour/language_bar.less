@@ -11,15 +11,15 @@
 			color:@LB_BUTTON_HOVER;
 		  }
 		  &:active, &.pressed {
-			background-color:rgba(0,0,0,0.2);
+			background-color:@LB_BUTTON_PRESSED_BG;
 			color:white;
 		  }
 	}
 	.lb_placeholder {
-		background: rgba(0,0,0,0.2);
+		background: fade(@LB_BUTTON_PRESSED_BG, 30);
 	}
 	.ui-sortable-helper {
-		color: black;
+		color: @LB_BUTTON_COL;
 	}
 }
 #lb_tip {

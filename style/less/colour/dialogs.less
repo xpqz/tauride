@@ -1,7 +1,7 @@
 /*various dialogs*/
 #dlg_modal_overlay {
-  background-color: black;
-  opacity: 0.2;
+  background-color: @DLG_OVERLAY;
+  opacity: 0.3;
 }
 
 .dlg {
@@ -54,5 +54,6 @@
     font-weight: normal;
     text-align: left;
     border: 1px solid transparent;
+    &:hover { background-color: @DLG_CLOSE_HOVER_BG; color: @GD_FG_COL; }
   }
 }

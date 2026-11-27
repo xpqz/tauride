@@ -16,16 +16,12 @@
   }
 }
 #prf_content {
-  select{
-    background-color:	@CN_INPUT_BG;
-    color:@CN_SELECT_FG;
-  }
   h2 {
     color: @PRF_NAV_COL;
   }
 }
 #lyt_kbd{
-  color:black;
+  color:@LAYOUT_KEY_COL;
 }
 
 .lyt_k{
@@ -41,16 +37,16 @@
 }
 
 .lyt_g0 {
-  color: black;
+  color: @LAYOUT_G0;
 }
 .lyt_g1{
-  color: rgb(146,0,0);
+  color: @LAYOUT_G1;
 }
 .lyt_g2 {
-  color: rgb(0,73,73);
+  color: @LAYOUT_G2;
 }
 .lyt_g3{
-  color: rgb(73,0,146);
+  color: @LAYOUT_G3;
 }
 
 input.lyt_g1, input.lyt_g3 {
@@ -106,7 +102,7 @@ input.lyt_g1, input.lyt_g3 {
     
     .shc_text {
       .shc_key_btn {
-        background-color: grey;
+        background-color: @SHC_KEY_BTN_BG;
         color: white;
       }
       &.shc_dup .shc_key_btn {
@@ -166,6 +162,9 @@ a {
 
 // PREFS_MENU
 #pmenu{
+  p {
+    color: @THEME_WIN_FG;
+  }
   #pmenu_ta{
     border: 1px solid @CN_INPUT_BORDER_COL;
     background-color: @CN_INPUT_BG;

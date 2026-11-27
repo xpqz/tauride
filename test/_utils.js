@@ -40,9 +40,10 @@ exports.sessionLastLines = function(n) {
 }
 
 class TFW {
+  // options, or a function of the test that returns them.
   init(options = {}) {
     test.beforeEach(async (t) => {
-      t.context.app = new TauriApplication(options);
+      t.context.app = new TauriApplication(typeof options === 'function' ? options(t) : options);
       await t.context.app.start();
       t.context.userData = t.context.app.userData;
     });

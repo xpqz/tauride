@@ -265,7 +265,10 @@ class TauriApplication {
     this.userData = fs.mkdtempSync(path.join(os.tmpdir(), 'tauride-test-'));
     const prefs = path.join(this.userData, 'Ride-4.8');
     fs.mkdirSync(prefs);
-    fs.writeFileSync(path.join(prefs, 'prefs.json'), JSON.stringify({ sqp: '0' }));
+    // options.prefs is the profile's prefs.json; null starts without one, as
+    // a first run does.
+    const stored = this.options.prefs === undefined ? { sqp: '0' } : this.options.prefs;
+    if (stored) fs.writeFileSync(path.join(prefs, 'prefs.json'), JSON.stringify(stored));
     active.add(this);
     try {
       this.markStartupPhase('spawn app');
